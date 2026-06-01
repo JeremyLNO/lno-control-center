@@ -1,0 +1,1536 @@
+import React from 'react'
+import * as ReactDOM from 'react-dom/client'
+import './index.css'
+
+const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
+
+/* ============================================================
+   DESIGN TOKENS & CONSTANTS
+   ============================================================ */
+const FUND_PALETTE = ['#C9A24D','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444','#EC4899','#6366F1'];
+const PERMISSIONS = [
+  ['view_activity','View Activity'],
+  ['view_realtime','View Real-Time'],
+  ['view_trades','View Trades'],
+  ['view_logs','View Logs'],
+  ['export_data','Export data'],
+  ['manage_users','Manage users'],
+  ['manage_exchanges','Manage exchanges'],
+  ['manage_whatsapp','Manage WhatsApp'],
+  ['manage_funds','Manage funds'],
+];
+const ALL_PERMS = PERMISSIONS.map(p=>p[0]);
+const ROLE_PERMS = {
+  admin: ALL_PERMS.slice(),
+  operator: ['view_activity','view_realtime','view_trades','view_logs','export_data'],
+  viewer: ['view_activity','view_realtime','view_trades','view_logs'],
+};
+
+/* ============================================================
+   FORMATTERS
+   ============================================================ */
+const fmtUSD = (n,d=0)=> (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtSigned = (n,d=0)=> (n>=0?'+':'-')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtNum = (n,d=0)=> Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtPct = (n,d=1)=> (n>=0?'+':'')+n.toFixed(d)+'%';
+const fmtPctPlain = (n,d=1)=> n.toFixed(d)+'%';
+const clsPnl = (n)=> n>0?'text-success':n<0?'text-danger':'text-slate-500';
+const fmtPrice = (p)=>{ if(p==null||!isFinite(p))return '—'; const d=p>=1000?2:p>=1?3:p>=0.01?5:8; return '$'+p.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}); };
+const fmtDate = (t)=> new Date(t).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
+const fmtTime = (t)=> new Date(t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+const fmtDT = (t)=> fmtDate(t)+' '+fmtTime(t);
+const fmtDur = (mins)=>{ mins=Math.round(mins); if(mins<60)return mins+'m'; const h=Math.floor(mins/60),m=mins%60; if(h<24)return h+'h'+(m?' '+m+'m':''); const d=Math.floor(h/24),hh=h%24; return d+'d'+(hh?' '+hh+'h':''); };
+const initialsOf = (u)=>{ const a=(u.firstName||'').trim(), b=(u.lastName||'').trim(); if(a||b) return ((a[0]||'')+(b[0]||'')).toUpperCase(); return (u.username||'?').slice(0,2).toUpperCase(); };
+
+/* ============================================================
+   SEEDED RNG + MOCK DATA
+   ============================================================ */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+function seedStr(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+
+const DAY = 86400000;
+const NOW = Date.now();
+const FALLBACK_PRICE = {BTCUSDT:67000,ETHUSDT:3500,AVAXUSDT:38,SOLUSDT:165,BNBUSDT:600,MATICUSDT:0.72,ADAUSDT:0.45,XRPUSDT:0.62};
+
+const BASE_BOTS = [
+  {id:'b1',name:'Alpha-BTC-Momentum',exchange:'Binance',symbol:'BTCUSDT',strategy:'Momentum'},
+  {id:'b2',name:'Beta-ETH-Grid',exchange:'Binance',symbol:'ETHUSDT',strategy:'Grid'},
+  {id:'b3',name:'Eta-AVAX-Breakout',exchange:'Bybit',symbol:'AVAXUSDT',strategy:'Breakout'},
+  {id:'b4',name:'Gamma-SOL-Mean',exchange:'Bybit',symbol:'SOLUSDT',strategy:'Mean Reversion'},
+  {id:'b5',name:'Delta-BNB-Arb',exchange:'OKX',symbol:'BNBUSDT',strategy:'Arbitrage'},
+  {id:'b6',name:'Theta-MATIC-Grid',exchange:'OKX',symbol:'MATICUSDT',strategy:'Grid'},
+  {id:'b7',name:'Epsilon-ADA-Trend',exchange:'Binance',symbol:'ADAUSDT',strategy:'Trend'},
+  {id:'b8',name:'Zeta-XRP-Scalp',exchange:'Bybit',symbol:'XRPUSDT',strategy:'Scalping'},
+];
+const STATUSES = ['active','active','active','active','active','paused','error','inactive'];
+
+/* ----- Exchange API client (Binance / Bybit / OKX public market data) ----- */
+const EX = {
+  parse(sym){ const quote = sym.endsWith('USDT')?'USDT':(sym.endsWith('USDC')?'USDC':'USD'); let base=sym.slice(0,sym.length-quote.length); const apiBase = base==='MATIC'?'POL':base; return {base,quote,apiBase}; },
+  bn(sym){ const {apiBase,quote}=EX.parse(sym); return apiBase+quote; },
+  okx(sym){ const {apiBase,quote}=EX.parse(sym); return apiBase+'-'+quote; },
+  async json(url){ const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error('http '+r.status); return r.json(); },
+};
+async function fetchTickers(exchange, syms){
+  const out={};
+  if(exchange==='Binance'){
+    const arr='['+syms.map(s=>'"'+EX.bn(s)+'"').join(',')+']';
+    const j=await EX.json('https://api.binance.com/api/v3/ticker/24hr?symbols='+encodeURIComponent(arr));
+    const by={}; j.forEach(x=>by[x.symbol]={price:+x.lastPrice,changePct:+x.priceChangePercent});
+    syms.forEach(s=>{ const it=by[EX.bn(s)]; if(it) out[s]=it; });
+  } else if(exchange==='Bybit'){
+    await Promise.all(syms.map(async s=>{ const j=await EX.json('https://api.bybit.com/v5/market/tickers?category=spot&symbol='+EX.bn(s)); const it=j.result&&j.result.list&&j.result.list[0]; if(it) out[s]={price:+it.lastPrice,changePct:+it.price24hPcnt*100}; }));
+  } else if(exchange==='OKX'){
+    await Promise.all(syms.map(async s=>{ const j=await EX.json('https://www.okx.com/api/v5/market/ticker?instId='+EX.okx(s)); const it=j.data&&j.data[0]; if(it){ const last=+it.last, op=+it.open24h; out[s]={price:last,changePct:op?(last-op)/op*100:0}; } }));
+  }
+  return out;
+}
+async function fetchKlines(exchange, sym, limit){
+  let rows=[];
+  if(exchange==='Binance'){ const j=await EX.json(`https://api.binance.com/api/v3/klines?symbol=${EX.bn(sym)}&interval=1d&limit=${limit}`); rows=j.map(k=>({t:+k[0],close:+k[4]})); }
+  else if(exchange==='Bybit'){ const j=await EX.json(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${EX.bn(sym)}&interval=D&limit=${limit}`); rows=((j.result&&j.result.list)||[]).map(k=>({t:+k[0],close:+k[4]})); }
+  else { const j=await EX.json(`https://www.okx.com/api/v5/market/candles?instId=${EX.okx(sym)}&bar=1D&limit=${Math.min(limit,300)}`); rows=(j.data||[]).map(k=>({t:+k[0],close:+k[4]})); }
+  return rows.filter(x=>isFinite(x.close)&&x.close>0).sort((a,b)=>a.t-b.t);
+}
+
+/* ----- deterministic fallbacks (used if a fetch fails) ----- */
+function strategyBeta(strat,r){ const m={Momentum:[0.8,1.2],Breakout:[0.7,1.1],Trend:[0.7,1.1],'Mean Reversion':[0.25,0.5],Grid:[0.2,0.45],Scalping:[0.15,0.4],Arbitrage:[0.03,0.12]}; const x=m[strat]||[0.4,0.8]; return x[0]+r()*(x[1]-x[0]); }
+function synthCloses(botId,n){ const b=BASE_BOTS.find(x=>x.id===botId); const r=mulberry32(seedStr(botId+'syn')); let p=FALLBACK_PRICE[b.symbol]||100; const out=[]; for(let i=n-1;i>=0;i--){ const ret=(r()+r()+r()-1.5)*0.03; p=Math.max(p*(1+ret),p*0.5); out.push({t:NOW-i*DAY,close:+p.toFixed(8)}); } return out; }
+function normalizeCloses(real,botId,target=365){ if(real.length>=target) return real.slice(real.length-target); const need=target-real.length; const r=mulberry32(seedStr(botId+'pad')); let p=real[0].close, t=real[0].t; const head=[]; for(let i=0;i<need;i++){ t-=DAY; const ret=(r()+r()+r()-1.5)*0.02; p=Math.max(p/(1+ret),p*0.5); head.push({t,close:+p.toFixed(8)}); } head.sort((a,b)=>a.t-b.t); return head.concat(real); }
+
+/* ----- loaders: fetch klines + tickers for all bots, never throw ----- */
+async function loadAllKlines(){ const bots={}; let fails=0; await Promise.all(BASE_BOTS.map(async b=>{ try{ const r=await fetchKlines(b.exchange,b.symbol,365); if(!r.length) throw 0; bots[b.id]={closes:normalizeCloses(r,b.id),failed:false}; }catch(e){ fails++; bots[b.id]={closes:synthCloses(b.id,365),failed:true}; } })); return {bots,fails,allFail:fails===BASE_BOTS.length}; }
+async function loadAllTickers(){ const byEx={}; BASE_BOTS.forEach(b=>{(byEx[b.exchange]=byEx[b.exchange]||[]).push(b);}); const out={}; let fails=0; await Promise.all(Object.entries(byEx).map(async([ex,bots])=>{ try{ const t=await fetchTickers(ex,bots.map(b=>b.symbol)); bots.forEach(b=>{ if(t[b.symbol]) out[b.id]={...t[b.symbol],failed:false}; else { out[b.id]={failed:true}; fails++; } }); }catch(e){ bots.forEach(b=>{ out[b.id]={failed:true}; }); fails+=bots.length; } })); return {bots:out,fails,allFail:fails===BASE_BOTS.length}; }
+
+/* ----- dataset builders: real klines -> equity, live tickers -> prices/PnL ----- */
+function genTrades(params){
+  const r=mulberry32(99173); const out=[];
+  for(let i=0;i<150;i++){
+    const b=BASE_BOTS[Math.floor(r()*BASE_BOTS.length)];
+    const ref=params[b.id].lastClose;
+    const ageDays=r()*360; const entry=NOW-ageDays*DAY-r()*DAY; const durMin=8+r()*r()*5200;
+    const isOpen=ageDays<2&&r()<0.5; const exit=isOpen?null:entry+durMin*60000;
+    const side=r()<0.55?'Long':'Short'; const lev=[1,2,3,5,10,20][Math.floor(r()*6)];
+    const entryPx=ref*(0.85+r()*0.3); const move=(r()-0.46)*0.08; const exitPx=entryPx*(1+move);
+    const size=Math.round(2000+r()*22000); const dir=side==='Long'?1:-1;
+    const pnlPct=move*dir*lev*100; const pnl=size*(pnlPct/100);
+    out.push({id:'t'+i,botId:b.id,bot:b.name,symbol:b.symbol,exchange:b.exchange,strategy:b.strategy,side,status:isOpen?'Open':'Closed',entry,exit,entryPx,exitPx:isOpen?null:exitPx,size,leverage:lev,pnl:isOpen?size*((r()-0.4)*0.05):pnl,pnlPct:isOpen?(r()-0.4)*8:pnlPct,durMin:isOpen?(NOW-entry)/60000:durMin});
+  }
+  return out.sort((a,b)=>b.entry-a.entry);
+}
+function buildStatic(klines){
+  const params={},seriesBase={};
+  BASE_BOTS.forEach((b,idx)=>{
+    const closes=klines.bots[b.id].closes; const r=mulberry32(seedStr(b.id));
+    const e0=40000+Math.floor(r()*160000); const beta=strategyBeta(b.strategy,r); const alpha=r()*0.0006;
+    const notional=Math.round(e0*(0.08+r()*0.22)); const side=r()<0.6?'Long':'Short';
+    params[b.id]={e0,beta,alpha,notional,side,statusSeed:STATUSES[idx],failed:klines.bots[b.id].failed,lastClose:closes[closes.length-1].close};
+    const s=[]; let eq=e0; s.push({t:closes[0].t,equity:eq});
+    for(let i=1;i<closes.length;i++){ const ret=closes[i].close/closes[i-1].close-1; eq=Math.max(eq*(1+alpha+beta*ret),e0*0.25); s.push({t:closes[i].t,equity:Math.round(eq)}); }
+    seriesBase[b.id]=s;
+  });
+  const trades=genTrades(params);
+  const stats={}; BASE_BOTS.forEach(b=>{ const ts=trades.filter(t=>t.botId===b.id); const closed=ts.filter(t=>t.status==='Closed'); const wins=closed.filter(t=>t.pnl>0).length; stats[b.id]={pnl:ts.reduce((a,t)=>a+t.pnl,0),trades:ts.length,winRate:closed.length?wins/closed.length*100:0,open:ts.filter(t=>t.status==='Open').length}; });
+  return {params,seriesBase,trades,stats};
+}
+function foldLive(stat,tickers){
+  const bots={};
+  BASE_BOTS.forEach(b=>{
+    const p=stat.params[b.id]; const base=stat.seriesBase[b.id]; const tk=tickers[b.id]||{};
+    const price=(tk.price!=null)?tk.price:p.lastClose; const changePct=(tk.changePct!=null)?tk.changePct:0;
+    const series=base.slice();
+    if(price&&p.lastClose){ const ret=price/p.lastClose-1; const last=series[series.length-1]; series[series.length-1]={t:last.t,equity:Math.max(Math.round(last.equity*(1+p.beta*ret)),1)}; }
+    const livePnl=(p.side==='Long'?1:-1)*changePct/100*p.notional;
+    const status=(p.failed&&tk.failed)?'error':p.statusSeed;
+    bots[b.id]={price,changePct,series,currentEquity:series[series.length-1].equity,livePnl,side:p.side,notional:p.notional,status,failed:!!tk.failed};
+  });
+  return bots;
+}
+
+// Services & incidents & logs
+const SERVICE_DEFS = [
+  {name:'Market Data Feed',base:35,jit:20},
+  {name:'Order Execution',base:70,jit:40},
+  {name:'Binance Gateway',ex:'Binance'},
+  {name:'Bybit Gateway',ex:'Bybit'},
+  {name:'OKX Gateway',ex:'OKX'},
+  {name:'Risk Engine',base:12,jit:15},
+  {name:'WhatsApp Notifier',base:90,jit:60},
+  {name:'Postgres Primary',base:5,jit:8},
+];
+async function pingOne(url){ const t0=performance.now(); try{ await fetch(url,{cache:'no-store',mode:'cors'}); return {ms:Math.round(performance.now()-t0),ok:true}; }catch(e){ return {ms:null,ok:false}; } }
+async function pingExchanges(){ const [a,b,c]=await Promise.all([pingOne('https://api.binance.com/api/v3/ping'),pingOne('https://api.bybit.com/v5/market/time'),pingOne('https://www.okx.com/api/v5/public/time')]); return {Binance:a,Bybit:b,OKX:c}; }
+function genIncidents(){
+  const r=mulberry32(5521);
+  const sev=['critical','warning','info','info','warning','info'];
+  const msgs=[
+    'Bybit gateway latency above threshold (340ms)',
+    'Bot Theta-MATIC-Grid paused by risk engine',
+    'Equity drawdown on Gamma-SOL-Mean exceeded -4%',
+    'Market data reconnected after brief outage',
+    'New deployment rolled out to execution service',
+    'OKX rate-limit warning on Delta-BNB-Arb',
+    'Bot Eta-AVAX-Breakout entered error state',
+    'Daily settlement completed successfully',
+    'WhatsApp notifier token refreshed',
+    'Order rejected: insufficient margin on Zeta-XRP-Scalp',
+  ];
+  return msgs.map((m,i)=>({id:'inc'+i,severity:sev[i%sev.length],message:m,t:NOW-Math.floor(r()*3*DAY)})).sort((a,b)=>b.t-a.t);
+}
+const INCIDENTS = genIncidents();
+
+function genLogs(){
+  const r=mulberry32(3391);
+  const levels=['critical','error','warning','info','info','info','debug'];
+  const types=['signal','trading','position','system'];
+  const out=[];
+  for(let i=0;i<260;i++){
+    const b=BASE_BOTS[Math.floor(r()*BASE_BOTS.length)];
+    const type=types[Math.floor(r()*types.length)];
+    const level=levels[Math.floor(r()*levels.length)];
+    const t=NOW-Math.floor(r()*30*DAY);
+    let msg;
+    if(type==='signal') msg=`Signal generated: ${r()<0.5?'BUY':'SELL'} ${b.symbol} @ ${(FALLBACK_PRICE[b.symbol]*(0.95+r()*0.1)).toFixed(2)}`;
+    else if(type==='trading') msg=`Order ${r()<0.5?'filled':'submitted'} ${b.symbol} size ${(1000+r()*8000).toFixed(0)}`;
+    else if(type==='position') msg=`Position ${r()<0.5?'opened':'closed'} on ${b.symbol} pnl ${((r()-0.4)*500).toFixed(2)}`;
+    else msg=`${['Heartbeat OK','Config reloaded','Cache warmup','Reconnect attempt','Risk check passed'][Math.floor(r()*5)]}`;
+    out.push({id:'l'+i, t, level, type, source:type==='system'?'infra':b.name, message:msg, botId:type==='system'?null:b.id,
+      meta:{requestId:'req_'+Math.floor(r()*1e6).toString(36), exchange:b.exchange, symbol:b.symbol, latencyMs:Math.floor(r()*200)}});
+  }
+  return out.sort((a,b)=>b.t-a.t);
+}
+const LOGS = genLogs();
+
+/* ============================================================
+   STORAGE
+   ============================================================ */
+const DEFAULT_USERS = [
+  {id:'u1',username:'admin',email:'admin@lno.company',firstName:'',lastName:'',role:'admin',active:true,permissions:ALL_PERMS.slice(),avatar:null,password:'admin',phone:'',notify:true},
+  {id:'u2',username:'sophie.ops',email:'sophie.ops@lno.company',firstName:'Sophie',lastName:'Laurent',role:'operator',active:true,permissions:ROLE_PERMS.operator.slice(),avatar:null,password:'admin',phone:'',notify:false},
+  {id:'u3',username:'marc.view',email:'marc.view@lno.company',firstName:'Marc',lastName:'Dubois',role:'viewer',active:false,permissions:ROLE_PERMS.viewer.slice(),avatar:null,password:'admin',phone:'',notify:false},
+];
+const DEFAULT_FUNDS = [
+  {id:'f1',name:'Alpha Fund',color:'#C9A24D',bots:['b1','b2','b3']},
+  {id:'f2',name:'Beta Fund',color:'#3B82F6',bots:['b4','b5','b6']},
+  {id:'f3',name:'Gamma Fund',color:'#10B981',bots:['b7','b8']},
+];
+const DEFAULT_EXCHANGES = [
+  {id:'e1',name:'binance',label:'Binance Main',apiKey:'BIN-9F2A-7H2K-2204',secret:'sk_live_8f3kd92jfh38dh2',status:'connected',lastSync:NOW-1000*60*3,note:'Primary spot+futures'},
+  {id:'e2',name:'bybit',label:'Bybit Pro',apiKey:'BYB-1C44-9X1Q-7781',secret:'sk_live_bb920skd02ksld',status:'error',lastSync:NOW-1000*60*42,note:''},
+  {id:'e3',name:'okx',label:'OKX Institutional',apiKey:'OKX-77B0-3L8P-0099',secret:'sk_live_okx772hdk2',status:'pending',lastSync:null,note:'Awaiting verification'},
+];
+const DEFAULT_WA = {token:'',phoneId:'',recipient:'',enabled:false};
+
+const LS = {
+  get(k,def){ try{const v=localStorage.getItem(k); return v?JSON.parse(v):def;}catch(e){return def;} },
+  set(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} },
+};
+const SS = {
+  get(k,def){ try{const v=sessionStorage.getItem(k); return v?JSON.parse(v):def;}catch(e){return def;} },
+  set(k,v){ try{sessionStorage.setItem(k,JSON.stringify(v));}catch(e){} },
+  del(k){ try{sessionStorage.removeItem(k);}catch(e){} },
+};
+
+/* ============================================================
+   ICONS
+   ============================================================ */
+const ICONS = {
+  activity:[['path','M22 12h-4l-3 9L9 3l-3 9H2']],
+  radio:[['circle',12,12,2],['path','M4.93 19.07a10 10 0 0 1 0-14.14'],['path','M7.76 16.24a6 6 0 0 1 0-8.48'],['path','M16.24 7.76a6 6 0 0 1 0 8.48'],['path','M19.07 4.93a10 10 0 0 1 0 14.14']],
+  briefcase:[['path','M20 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z'],['path','M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16']],
+  list:[['path','M8 6h13M8 12h13M8 18h13'],['path','M3 6h.01M3 12h.01M3 18h.01']],
+  users:[['path','M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'],['circle',9,7,4],['path','M23 21v-2a4 4 0 0 0-3-3.87'],['path','M16 3.13a4 4 0 0 1 0 7.75']],
+  link:[['path','M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'],['path','M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71']],
+  msg:[['path','M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z']],
+  layers:[['path','M12 2 2 7l10 5 10-5-10-5z'],['path','M2 17l10 5 10-5'],['path','M2 12l10 5 10-5']],
+  usercircle:[['circle',12,12,10],['path','M18 20a6 6 0 0 0-12 0'],['circle',12,10,3]],
+  lifebuoy:[['circle',12,12,10],['circle',12,12,4],['path','M4.93 4.93l4.24 4.24'],['path','M14.83 14.83l4.24 4.24'],['path','M14.83 9.17l4.24-4.24'],['path','M9.17 14.83l-4.24 4.24']],
+  search:[['circle',11,11,8],['path','M21 21l-4.35-4.35']],
+  bell:[['path','M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9'],['path','M13.73 21a2 2 0 0 1-3.46 0']],
+  menu:[['path','M3 12h18M3 6h18M3 18h18']],
+  eye:[['path','M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'],['circle',12,12,3]],
+  eyeoff:[['path','M17.94 17.94A10 10 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94'],['path','M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19'],['path','M1 1l22 22']],
+  pencil:[['path','M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'],['path','M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z']],
+  trash:[['path','M3 6h18'],['path','M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2']],
+  plus:[['path','M12 5v14M5 12h14']],
+  pin:[['path','M12 17v5'],['path','M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z']],
+  back:[['path','M19 12H5M12 19l-7-7 7-7']],
+  check:[['path','M20 6 9 17l-5-5']],
+  x:[['path','M18 6 6 18M6 6l12 12']],
+  chevdown:[['path','M6 9l6 6 6-6']],
+  chevleft:[['path','M15 18l-6-6 6-6']],
+  chevright:[['path','M9 18l6-6-6-6']],
+  download:[['path','M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'],['path','M7 10l5 5 5-5'],['path','M12 15V3']],
+  camera:[['path','M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z'],['circle',12,13,4]],
+  triangle:[['path','M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'],['path','M12 9v4'],['path','M12 17h.01']],
+  info:[['circle',12,12,10],['path','M12 16v-4'],['path','M12 8h.01']],
+  logout:[['path','M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'],['path','M16 17l5-5-5-5'],['path','M21 12H9']],
+  sort:[['path','M11 5h10'],['path','M11 9h7'],['path','M11 13h4'],['path','M3 17l3 3 3-3'],['path','M6 18V4']],
+  filter:[['path','M22 3H2l8 9.46V19l4 2v-8.54L22 3z']],
+  mail:[['path','M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z'],['path','M22 6l-10 7L2 6']],
+  clock:[['circle',12,12,10],['path','M12 6v6l4 2']],
+  shield:[['path','M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z']],
+  dollar:[['path','M12 1v22'],['path','M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6']],
+  trendup:[['path','M23 6l-9.5 9.5-5-5L1 18'],['path','M17 6h6v6']],
+  power:[['path','M18.36 6.64a9 9 0 1 1-12.73 0'],['path','M12 2v10']],
+};
+function Icon({name,className='w-5 h-5',sw=2}){
+  const items=ICONS[name]||[];
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
+    {items.map((it,i)=> it[0]==='circle'? <circle key={i} cx={it[1]} cy={it[2]} r={it[3]}/> : it[0]==='line'? <line key={i} x1={it[1]} y1={it[2]} x2={it[3]} y2={it[4]}/> : <path key={i} d={it[1]}/>)}
+  </svg>;
+}
+
+/* ============================================================
+   PRIMITIVES
+   ============================================================ */
+function Card({className='',children,...p}){ return <div className={'bg-white rounded-xl border border-slate-200/80 shadow-sm '+className} {...p}>{children}</div>; }
+function SectionTitle({children,right}){ return <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold text-navy tracking-tight">{children}</h3>{right}</div>; }
+
+function Btn({variant='primary',size='md',className='',children,...p}){
+  const base='inline-flex items-center justify-center gap-2 font-medium rounded-lg transition active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none';
+  const sz= size==='sm'?'text-xs px-2.5 py-1.5':size==='icon'?'p-2':'text-sm px-3.5 py-2';
+  const v={
+    primary:'bg-navy text-white hover:bg-navy2',
+    gold:'bg-gold text-navy hover:brightness-105',
+    ghost:'text-slate-600 hover:bg-slate-100',
+    outline:'border border-slate-300 text-navy hover:bg-slate-50 bg-white',
+    danger:'bg-danger text-white hover:brightness-110',
+    subtle:'bg-slate-100 text-navy hover:bg-slate-200',
+  }[variant];
+  return <button className={`${base} ${sz} ${v} ${className}`} {...p}>{children}</button>;
+}
+function Badge({color,children,className='',onClick,dot}){
+  return <span onClick={onClick} className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${onClick?'cursor-pointer hover:ring-2 hover:ring-offset-1 ring-slate-200':''} ${className}`} style={color?{background:color+'1A',color:darken(color)}:undefined}>
+    {dot&&<span className="w-1.5 h-1.5 rounded-full" style={{background:color}}/>}{children}
+  </span>;
+}
+function darken(hex){ return hex; }
+
+function StatusPill({status}){
+  const map={
+    active:['bg-success/10 text-success','active'], connected:['bg-success/10 text-success','Connected'],
+    paused:['bg-warn/10 text-amber-600','paused'], pending:['bg-slate-200 text-slate-600','Pending'],
+    error:['bg-danger/10 text-danger','error'], degraded:['bg-warn/10 text-amber-600','degraded'],
+    down:['bg-danger/10 text-danger','down'], inactive:['bg-slate-200 text-slate-500','inactive'],
+    Open:['bg-blue-100 text-blue-700','Open'], Closed:['bg-slate-100 text-slate-600','Closed'],
+  };
+  const [c,l]=map[status]||['bg-slate-100 text-slate-600',status];
+  return <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${c}`}>
+    <span className={`w-1.5 h-1.5 rounded-full ${status==='active'||status==='connected'?'bg-success':status==='error'||status==='down'?'bg-danger':status==='paused'||status==='degraded'?'bg-amber-500':'bg-slate-400'}`}/>{l}
+  </span>;
+}
+
+function Toggle({on,onChange,size='md'}){
+  const w=size==='sm'?'w-9 h-5':'w-11 h-6'; const k=size==='sm'?'w-3.5 h-3.5':'w-4 h-4'; const tr=size==='sm'?(on?'translate-x-4':'translate-x-0.5'):(on?'translate-x-5':'translate-x-1');
+  return <button onClick={()=>onChange(!on)} className={`${w} rounded-full transition relative flex items-center ${on?'bg-success':'bg-slate-300'}`}>
+    <span className={`${k} bg-white rounded-full shadow transition transform ${tr}`}/>
+  </button>;
+}
+
+function Select({value,onChange,options,className=''}){
+  return <div className={`relative ${className}`}>
+    <select value={value} onChange={e=>onChange(e.target.value)} className="appearance-none w-full bg-white border border-slate-300 rounded-lg pl-3 pr-8 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40 cursor-pointer">
+      {options.map(o=> typeof o==='string'? <option key={o} value={o}>{o}</option> : <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+    <Icon name="chevdown" className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"/>
+  </div>;
+}
+function Field({label,children,hint}){ return <label className="block"><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>{children}{hint&&<span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}</label>; }
+function Input(p){ return <input {...p} className={'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40 '+(p.className||'')}/>; }
+
+function Modal({open,onClose,title,children,wide}){
+  if(!open) return null;
+  return <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm"/>
+    <div onClick={e=>e.stopPropagation()} className={`relative bg-white rounded-2xl shadow-2xl w-full ${wide?'max-w-2xl':'max-w-md'} slidein`}>
+      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+        <h3 className="font-semibold text-navy">{title}</h3>
+        <Btn variant="ghost" size="icon" onClick={onClose}><Icon name="x" className="w-4 h-4"/></Btn>
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  </div>;
+}
+function Confirm({open,title,message,onConfirm,onCancel,danger=true,confirmLabel='Delete'}){
+  return <Modal open={open} onClose={onCancel} title={title}>
+    <p className="text-sm text-slate-600 mb-5">{message}</p>
+    <div className="flex justify-end gap-2">
+      <Btn variant="outline" onClick={onCancel}>Cancel</Btn>
+      <Btn variant={danger?'danger':'primary'} onClick={onConfirm}>{confirmLabel}</Btn>
+    </div>
+  </Modal>;
+}
+
+/* ============================================================
+   CHARTS
+   ============================================================ */
+function AreaChart({data,positive,height=260}){
+  const id=useId().replace(/:/g,'');
+  const w=1000,h=height;
+  if(!data||data.length<2) return <div style={{height}} className="grid place-items-center text-slate-300 text-sm">No data</div>;
+  const ys=data.map(d=>d.equity); const minY=Math.min(...ys),maxY=Math.max(...ys);
+  const pad=(maxY-minY)*0.12||1; const y0=minY-pad,y1=maxY+pad;
+  const X=i=>(i/(data.length-1))*w; const Y=v=>h-((v-y0)/(y1-y0))*h;
+  const line=data.map((d,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(d.equity).toFixed(1)}`).join(' ');
+  const area=`${line} L ${w} ${h} L 0 ${h} Z`;
+  const color=positive?'#10B981':'#EF4444';
+  return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full" style={{height}}>
+    <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.22"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>
+    {[0.25,0.5,0.75].map(g=><line key={g} x1="0" x2={w} y1={h*g} y2={h*g} stroke="#eef0f3" strokeWidth="1" vectorEffect="non-scaling-stroke"/>)}
+    <path d={area} fill={`url(#${id})`}/>
+    <path d={line} fill="none" stroke={color} strokeWidth="2.5" vectorEffect="non-scaling-stroke"/>
+  </svg>;
+}
+function Donut({segments,size=180,onSlice}){
+  const total=segments.reduce((a,s)=>a+s.value,0)||1;
+  const r=size/2,cx=r,cy=r,ir=r*0.62; let ang=-Math.PI/2;
+  return <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
+    {segments.map((s,i)=>{
+      const frac=s.value/total; const a2=ang+frac*2*Math.PI; const large=frac>0.5?1:0;
+      const x1=cx+r*Math.cos(ang),y1=cy+r*Math.sin(ang),x2=cx+r*Math.cos(a2),y2=cy+r*Math.sin(a2);
+      const xi1=cx+ir*Math.cos(a2),yi1=cy+ir*Math.sin(a2),xi2=cx+ir*Math.cos(ang),yi2=cy+ir*Math.sin(ang);
+      const d=`M${x1} ${y1} A${r} ${r} 0 ${large} 1 ${x2} ${y2} L${xi1} ${yi1} A${ir} ${ir} 0 ${large} 0 ${xi2} ${yi2} Z`;
+      ang=a2;
+      return <path key={i} d={d} fill={s.color} className={onSlice?'cursor-pointer hover:opacity-80':''} onClick={()=>onSlice&&onSlice(s)}/>;
+    })}
+    <circle cx={cx} cy={cy} r={ir-1} fill="#fff"/>
+  </svg>;
+}
+
+/* ============================================================
+   APP CONTEXT
+   ============================================================ */
+const App = createContext(null);
+const useApp = ()=>useContext(App);
+
+function hasPerm(user,perm){ if(!user)return false; if(user.role==='admin')return true; return (user.permissions||[]).includes(perm); }
+
+// helpers using funds + live data
+function fundOfBot(funds,botId){ return funds.find(f=>f.bots.includes(botId)); }
+function totalEquity(data){ return BASE_BOTS.reduce((a,b)=>a+data.bots[b.id].currentEquity,0); }
+function fundEquity(data,fund){ return (fund.bots.length/BASE_BOTS.length)*totalEquity(data); }
+
+// build portfolio series for a set of botIds (align by shortest series)
+function portfolioSeries(data,botIds){
+  const ids=botIds&&botIds.length?botIds:BASE_BOTS.map(b=>b.id);
+  const minLen=Math.min(...ids.map(id=>data.bots[id].series.length));
+  const out=[];
+  for(let i=0;i<minLen;i++){ let sum=0,t=0; ids.forEach(id=>{ const s=data.bots[id].series; const pt=s[s.length-minLen+i]; sum+=pt.equity; t=pt.t; }); out.push({t,equity:sum}); }
+  return out;
+}
+function sliceByPeriod(series,period,custom){
+  if(period==='all') return series;
+  if(period==='custom'&&custom&&custom.start&&custom.end){
+    return series.filter(p=>p.t>=custom.start&&p.t<=custom.end);
+  }
+  const days={ '7':7,'30':30,'90':90,'365':365 }[period]||30;
+  const cutoff=NOW-days*DAY;
+  return series.filter(p=>p.t>=cutoff);
+}
+function maxDrawdown(series){ let peak=-Infinity,mdd=0; series.forEach(p=>{ peak=Math.max(peak,p.equity); mdd=Math.min(mdd,(p.equity-peak)/peak); }); return mdd*100; }
+
+/* ============================================================
+   LIVE-DATA UI
+   ============================================================ */
+function LiveBadge({status}){
+  if(status==='live') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-success" data-tip="Live market data"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>LIVE</span>;
+  if(status==='partial') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-amber-600"><span className="w-2 h-2 rounded-full bg-amber-500"/>PARTIAL</span>;
+  if(status==='sim') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400"><span className="w-2 h-2 rounded-full bg-slate-400"/>SIM</span>;
+  return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400"><span className="w-2 h-2 rounded-full bg-slate-300 animate-pulse"/>…</span>;
+}
+function MarketTicker(){
+  const {data}=useApp(); if(!data) return null;
+  return <div className="flex gap-2 overflow-x-auto pb-1 mb-4 -mx-1 px-1">
+    {BASE_BOTS.map(b=>{ const d=data.bots[b.id]; const base=EX.parse(b.symbol).base; return <div key={b.id} className="shrink-0 bg-white border border-slate-200/80 rounded-lg px-3 py-2 flex items-center gap-2.5">
+      <span className="font-mono text-xs font-semibold text-navy">{base}</span>
+      <span className="font-mono text-xs text-slate-600 tnum">{fmtPrice(d.price)}</span>
+      <span className={`text-[11px] font-medium tnum ${clsPnl(d.changePct)}`}>{fmtPct(d.changePct)}</span>
+    </div>; })}
+  </div>;
+}
+function LoadingScreen({status}){
+  return <div className="h-full grid place-items-center bg-bg">
+    <div className="text-center">
+      <div className="text-3xl font-black text-gold tracking-tight mb-3">LNO</div>
+      <div className="flex items-center justify-center gap-2 text-slate-500 text-sm">
+        <span className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-gold animate-spin"/>
+        {status==='sim'?'Live data unavailable — loading simulation…':'Connecting to live market data…'}
+      </div>
+    </div>
+  </div>;
+}
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+function Login(){
+  const {login}=useApp();
+  const [u,setU]=useState(''); const [p,setP]=useState(''); const [err,setErr]=useState(''); const [warn,setWarn]=useState(false);
+  const attempts=LS.get('lno_login_attempts',0);
+  function submit(e){
+    e.preventDefault();
+    const ok=login(u.trim(),p);
+    if(!ok){
+      const a=LS.get('lno_login_attempts',0)+1; LS.set('lno_login_attempts',a);
+      setErr('Invalid username or password.');
+      if(a>=3){ setWarn(true); console.warn('POST /api/alerts/login-failure',{username:u,attempts:a}); }
+    } else { LS.set('lno_login_attempts',0); }
+  }
+  return <div className="min-h-full grid place-items-center bg-navy relative overflow-hidden p-4">
+    <div className="absolute inset-0 opacity-[0.07]" style={{backgroundImage:'radial-gradient(circle at 20% 20%, #C9A24D 0, transparent 40%), radial-gradient(circle at 80% 70%, #3B82F6 0, transparent 40%)'}}/>
+    <div className="relative w-full max-w-sm">
+      <div className="text-center mb-7">
+        <div className="text-4xl font-black text-gold tracking-tight">LNO</div>
+        <div className="text-slate-300 text-sm mt-1">Control Center</div>
+      </div>
+      <form onSubmit={submit} className="bg-white rounded-2xl shadow-2xl p-6 space-y-4">
+        <h1 className="text-lg font-semibold text-navy">Sign in</h1>
+        <Field label="Username"><Input value={u} onChange={e=>setU(e.target.value)} placeholder="admin" autoFocus/></Field>
+        <Field label="Password"><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="admin"/></Field>
+        {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4"/>{err}</div>}
+        {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>Multiple failed attempts detected. A security alert has been dispatched to the operations team.</span></div>}
+        <Btn className="w-full" type="submit">Sign in</Btn>
+        <div className="text-[11px] text-slate-400 text-center">Default credentials: <span className="font-mono">admin / admin</span></div>
+      </form>
+    </div>
+  </div>;
+}
+
+/* ============================================================
+   LAYOUT — SIDEBAR / HEADER
+   ============================================================ */
+const MAIN_NAV=[
+  ['activity','Activity Dashboard','/activity','Activity'],
+  ['radio','Real-Time','/realtime','Live'],
+  ['briefcase','Trades','/trades','Trades'],
+  ['list','Activity Log','/logs','Logs'],
+];
+const ADMIN_NAV=[
+  ['users','Users','/admin/users'],
+  ['link','Exchanges','/admin/exchanges'],
+  ['msg','WhatsApp API','/admin/whatsapp'],
+  ['layers','Funds','/admin/funds'],
+];
+const ACCT_NAV=[
+  ['usercircle','Profile','/profile'],
+  ['lifebuoy','Support','/support'],
+];
+
+function NavItem({icon,label,path,active,onClick}){
+  return <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${active?'bg-gold text-navy font-semibold':'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
+    <Icon name={icon} className="w-[18px] h-[18px]"/>{label}
+  </button>;
+}
+function Sidebar(){
+  const {route,navigate,user}=useApp();
+  const cur='/'+route.parts.join('/');
+  const isAct=(p)=> cur===p || cur.startsWith(p+'/');
+  return <aside className="hidden lg:flex flex-col w-60 shrink-0 bg-navy text-white h-full">
+    <div className="px-5 py-5 flex items-center gap-2">
+      <div className="text-2xl font-black text-gold tracking-tight">LNO</div>
+      <div className="text-[10px] text-slate-400 leading-tight mt-1.5">Control<br/>Center</div>
+    </div>
+    <nav className="flex-1 overflow-y-auto px-3 space-y-1">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-2 pb-1">Main</div>
+      {MAIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+      {user.role==='admin'&&<>
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Administration</div>
+        {ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+      </>}
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Account</div>
+      {ACCT_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+    </nav>
+    <div className="p-3 border-t border-white/10">
+      <div className="text-[11px] text-slate-400 px-2">LNO Trading Systems<br/>Internal Use Only</div>
+    </div>
+  </aside>;
+}
+
+function GlobalSearch(){
+  const {navigate,data}=useApp();
+  const [q,setQ]=useState(''); const [open,setOpen]=useState(false); const ref=useRef();
+  useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  const res=useMemo(()=>{
+    if(!q.trim())return null; const s=q.toLowerCase();
+    const bots=BASE_BOTS.filter(b=>b.name.toLowerCase().includes(s)||b.symbol.toLowerCase().includes(s)).slice(0,4);
+    const trades=(data?data.trades:[]).filter(t=>t.bot.toLowerCase().includes(s)||t.symbol.toLowerCase().includes(s)||t.strategy.toLowerCase().includes(s)).slice(0,4);
+    const logs=LOGS.filter(l=>l.message.toLowerCase().includes(s)||l.source.toLowerCase().includes(s)).slice(0,4);
+    return {bots,trades,logs};
+  },[q,data]);
+  return <div ref={ref} className="relative flex-1 max-w-md">
+    <Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+    <input value={q} onFocus={()=>setOpen(true)} onChange={e=>{setQ(e.target.value);setOpen(true);}} placeholder="Search bots, trades, logs…" className="w-full bg-slate-100 focus:bg-white border border-transparent focus:border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none"/>
+    {open&&res&&<div className="absolute z-40 mt-1.5 w-full bg-white rounded-xl shadow-xl border border-slate-200 p-2 max-h-96 overflow-y-auto fadein">
+      {res.bots.length===0&&res.trades.length===0&&res.logs.length===0&&<div className="text-sm text-slate-400 px-3 py-4 text-center">No results</div>}
+      {res.bots.length>0&&<div><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">Bots</div>{res.bots.map(b=><button key={b.id} onClick={()=>{navigate('/activity/bot/'+b.id+'?name='+encodeURIComponent(b.name));setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center justify-between"><span>{b.name}</span><span className="font-mono text-xs text-slate-400">{b.symbol}</span></button>)}</div>}
+      {res.trades.length>0&&<div className="mt-1"><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">Trades</div>{res.trades.map(t=><button key={t.id} onClick={()=>{navigate('/trades');setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center justify-between"><span>{t.bot}</span><span className={'font-mono text-xs '+clsPnl(t.pnl)}>{fmtSigned(t.pnl)}</span></button>)}</div>}
+      {res.logs.length>0&&<div className="mt-1"><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">Logs</div>{res.logs.map(l=><button key={l.id} onClick={()=>{navigate('/logs');setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm truncate">{l.message}</button>)}</div>}
+    </div>}
+  </div>;
+}
+
+function Header(){
+  const {user,navigate,logout,dataStatus}=useApp();
+  const [bell,setBell]=useState(false); const [menu,setMenu]=useState(false);
+  const bref=useRef(), mref=useRef();
+  useEffect(()=>{ const h=e=>{ if(bref.current&&!bref.current.contains(e.target))setBell(false); if(mref.current&&!mref.current.contains(e.target))setMenu(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  return <header className="h-16 shrink-0 bg-white border-b border-slate-200 flex items-center gap-4 px-4 lg:px-6">
+    <div className="lg:hidden text-xl font-black text-gold">LNO</div>
+    <GlobalSearch/>
+    {user.firstName&&<div className="hidden md:block text-sm text-slate-500">Hello, <span className="font-semibold text-navy">{user.firstName}</span></div>}
+    <LiveBadge status={dataStatus}/>
+    <div ref={bref} className="relative">
+      <button onClick={()=>setBell(!bell)} className="relative p-2 rounded-lg hover:bg-slate-100"><Icon name="bell" className="w-5 h-5 text-slate-600"/><span className="absolute top-1.5 right-1.5 w-2 h-2 bg-danger rounded-full"/></button>
+      {bell&&<div className="absolute right-0 mt-1.5 w-80 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-40 fadein">
+        <div className="text-xs font-semibold text-navy px-2 py-1.5">Recent alerts</div>
+        {INCIDENTS.slice(0,5).map(i=><div key={i.id} className="px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5">
+          <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${i.severity==='critical'?'bg-danger':i.severity==='warning'?'bg-amber-500':'bg-blue-500'}`}/>
+          <div><div className="text-xs text-navy leading-snug">{i.message}</div><div className="text-[10px] text-slate-400 mt-0.5">{fmtDT(i.t)}</div></div>
+        </div>)}
+      </div>}
+    </div>
+    <div ref={mref} className="relative">
+      <button onClick={()=>setMenu(!menu)} className="flex items-center">
+        {user.avatar? <img src={user.avatar} className="w-9 h-9 rounded-full object-cover"/> : <span className="w-9 h-9 rounded-full bg-navy text-white grid place-items-center text-xs font-semibold">{initialsOf(user)}</span>}
+      </button>
+      {menu&&<div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 p-1.5 z-40 fadein">
+        <div className="px-2.5 py-2 border-b border-slate-100 mb-1">
+          <div className="text-sm font-semibold text-navy truncate">{user.firstName||user.username}</div>
+          <div className="text-xs text-slate-400 truncate">{user.email}</div>
+        </div>
+        <button onClick={()=>{navigate('/profile');setMenu(false);}} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2"><Icon name="usercircle" className="w-4 h-4"/>Profile</button>
+        <button onClick={()=>{navigate('/support');setMenu(false);}} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2"><Icon name="lifebuoy" className="w-4 h-4"/>Support</button>
+        <button onClick={logout} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-danger/10 text-danger text-sm flex items-center gap-2"><Icon name="logout" className="w-4 h-4"/>Sign out</button>
+      </div>}
+    </div>
+  </header>;
+}
+
+function MobileNav(){
+  const {route,navigate,user}=useApp();
+  const cur='/'+route.parts.join('/');
+  const [more,setMore]=useState(false);
+  return <>
+    <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex z-30">
+      {MAIN_NAV.map(([i,l,p,s])=><button key={p} onClick={()=>navigate(p)} className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] ${cur===p||cur.startsWith(p+'/')?'text-gold':'text-slate-500'}`}><Icon name={i} className="w-5 h-5"/>{s||l.split(' ')[0]}</button>)}
+      {user.role==='admin'&&<button onClick={()=>setMore(!more)} className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] text-slate-500"><Icon name="menu" className="w-5 h-5"/>More</button>}
+    </nav>
+    {more&&<div className="lg:hidden fixed inset-0 z-40" onClick={()=>setMore(false)}><div className="absolute bottom-14 inset-x-3 bg-white rounded-xl shadow-xl border border-slate-200 p-2" onClick={e=>e.stopPropagation()}>
+      {[...ADMIN_NAV,...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{l}</button>)}
+    </div></div>}
+  </>;
+}
+
+function PageHead({title,subtitle,actions}){
+  return <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
+    <div><h1 className="text-xl font-bold text-navy tracking-tight">{title}</h1>{subtitle&&<p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}</div>
+    {actions&&<div className="flex items-center gap-2">{actions}</div>}
+  </div>;
+}
+function Denied(){ return <div className="grid place-items-center h-full"><Card className="p-8 text-center max-w-sm"><Icon name="shield" className="w-10 h-10 mx-auto text-slate-300"/><h2 className="font-semibold text-navy mt-3">Access denied</h2><p className="text-sm text-slate-500 mt-1">You don't have permission to view this section.</p></Card></div>; }
+
+/* ============================================================
+   KPI CARD + shared bits
+   ============================================================ */
+function KpiCard({label,value,badge,icon,accent}){
+  return <Card className="p-4">
+    <div className="flex items-center justify-between">
+      <span className="text-xs font-medium text-slate-500">{label}</span>
+      {icon&&<Icon name={icon} className="w-4 h-4 text-slate-300"/>}
+    </div>
+    <div className="mt-2 text-2xl font-bold text-navy tnum">{value}</div>
+    {badge!=null&&<div className="mt-1">{badge}</div>}
+  </Card>;
+}
+function TrendBadge({pct}){
+  const up=pct>=0;
+  return <span className={`inline-flex items-center gap-1 text-xs font-medium ${up?'text-success':'text-danger'}`}>
+    <Icon name="trendup" className={'w-3.5 h-3.5 '+(up?'':'rotate-180')}/>{fmtPct(pct)}
+  </span>;
+}
+function SortHeader({label,col,sort,setSort,align='left',className=''}){
+  const active=sort.col===col;
+  return <th className={`px-3 py-2.5 text-${align} font-medium text-slate-500 ${className}`}>
+    <button onClick={()=>setSort({col,dir:active&&sort.dir==='asc'?'desc':'asc'})} className={`inline-flex items-center gap-1 hover:text-navy ${active?'text-navy':''}`}>
+      {label}<Icon name="sort" className={`w-3 h-3 ${active?'opacity-100':'opacity-30'}`}/>
+    </button>
+  </th>;
+}
+function sortRows(rows,sort,getters){
+  if(!sort.col) return rows; const g=getters[sort.col]; if(!g) return rows;
+  const s=[...rows].sort((a,b)=>{ const va=g(a),vb=g(b); if(typeof va==='number')return va-vb; return String(va).localeCompare(String(vb)); });
+  return sort.dir==='desc'?s.reverse():s;
+}
+
+/* ============================================================
+   ACTIVITY DASHBOARD
+   ============================================================ */
+function PeriodControls({period,setPeriod,custom,setCustom,fund,setFund,funds,showFund=true}){
+  return <div className="flex flex-wrap items-center gap-2">
+    {showFund&&<Select value={fund} onChange={setFund} className="w-40" options={[{value:'all',label:'All Funds'},...funds.map(f=>({value:f.id,label:f.name}))]}/>}
+    <Select value={period} onChange={setPeriod} className="w-40" options={[{value:'7',label:'Last 7 days'},{value:'30',label:'Last 30 days'},{value:'90',label:'Last 90 days'},{value:'365',label:'Last 365 days'},{value:'all',label:'All time'},{value:'custom',label:'Custom range'}]}/>
+    {period==='custom'&&<div className="flex items-center gap-1.5">
+      <input type="date" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" onChange={e=>setCustom({...custom,start:e.target.value?new Date(e.target.value).getTime():null})}/>
+      <span className="text-slate-400 text-sm">→</span>
+      <input type="date" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" onChange={e=>setCustom({...custom,end:e.target.value?new Date(e.target.value).getTime()+DAY:null})}/>
+    </div>}
+  </div>;
+}
+
+function ActivityPage({botId}){
+  const {funds,navigate,user,data}=useApp();
+  const [period,setPeriod]=useState('30');
+  const [custom,setCustom]=useState({start:null,end:null});
+  const [fund,setFund]=useState('all');
+  const [sort,setSort]=useState({col:'pnl',dir:'desc'});
+  if(!hasPerm(user,'view_activity')) return <Denied/>;
+
+  const bot = botId? BASE_BOTS.find(b=>b.id===botId): null;
+  const selFund = fund!=='all'? funds.find(f=>f.id===fund): null;
+
+  // scope botIds
+  let botIds;
+  if(bot) botIds=[bot.id];
+  else if(selFund) botIds=selFund.bots;
+  else botIds=BASE_BOTS.map(b=>b.id);
+
+  const full=portfolioSeries(data,botIds);
+  const series=sliceByPeriod(full,period,custom);
+  const periodPnl = series.length>1? series[series.length-1].equity-series[0].equity : 0;
+  const positive = periodPnl>=0;
+  const eqNow = full[full.length-1].equity;
+
+  // previous period comparison
+  const prevSeries = useMemo(()=>{
+    if(period==='all'||period==='custom') return null;
+    const days={'7':7,'30':30,'90':90,'365':365}[period];
+    const start=NOW-2*days*DAY, end=NOW-days*DAY;
+    return full.filter(p=>p.t>=start&&p.t<=end);
+  },[period,fund,botId]);
+
+  // trades in range
+  const rangeStart = series.length? series[0].t : NOW;
+  const inScope = (t)=> botIds.includes(t.botId);
+  const rangeTrades = data.trades.filter(t=>inScope(t)&&t.entry>=rangeStart);
+  const closedRange = rangeTrades.filter(t=>t.status==='Closed');
+  const winRate = closedRange.length? closedRange.filter(t=>t.pnl>0).length/closedRange.length*100 : 0;
+  const prevTrades = prevSeries? data.trades.filter(t=>inScope(t)&&t.entry>=prevSeries[0]?.t&&t.entry<rangeStart):[];
+  const prevClosed = prevTrades.filter(t=>t.status==='Closed');
+  const prevWin = prevClosed.length? prevClosed.filter(t=>t.pnl>0).length/prevClosed.length*100:0;
+
+  // KPI day/week/month from full series
+  const last=full[full.length-1].equity;
+  const pnlDay=last-full[full.length-2].equity;
+  const pnlWeek=last-full[full.length-8].equity;
+  const pnlMonth=last-full[full.length-31].equity;
+  const mdd=maxDrawdown(full);
+  const activeBots=botIds.filter(id=>data.bots[id].status==='active').length;
+
+  // bot ranking
+  const ranking=botIds.map(id=>{ const b=BASE_BOTS.find(x=>x.id===id); const st=data.stats[id]; const f=fundOfBot(funds,id); return {...b,...st,fund:f,status:data.bots[id].status}; });
+  const sortedRank=sortRows(ranking,sort,{name:r=>r.name,fund:r=>r.fund?.name||'',exchange:r=>r.exchange,symbol:r=>r.symbol,pnl:r=>r.pnl,winRate:r=>r.winRate,trades:r=>r.trades,status:r=>r.status});
+
+  // recent positions
+  const recent = bot? data.trades.filter(t=>t.botId===bot.id) : data.trades.filter(t=>inScope(t)).slice(0,10);
+  const recentList = bot? recent : recent.slice(0,10);
+
+  const title = bot? bot.name : selFund? selFund.name : 'Activity Dashboard';
+  const subtitle = bot? `Individual bot · ${bot.exchange} · ${bot.symbol}` : selFund? `Fund overview · ${selFund.bots.length} bots` : 'Portfolio performance across all funds';
+
+  const fundKpis = selFund? [
+    ['Fund Equity', fmtUSD(fundEquity(data,selFund))],
+    ['Fund PnL', fmtSigned(selFund.bots.reduce((a,id)=>a+data.stats[id].pnl,0)), selFund.bots.reduce((a,id)=>a+data.stats[id].pnl,0)],
+    ['Active Bots', `${selFund.bots.filter(id=>data.bots[id].status==='active').length} / ${selFund.bots.length}`],
+    ['Win Rate', fmtPctPlain(selFund.bots.reduce((a,id)=>a+data.stats[id].winRate,0)/selFund.bots.length)],
+    ['Best Bot', BASE_BOTS.find(b=>b.id===selFund.bots.slice().sort((a,b)=>data.stats[b].pnl-data.stats[a].pnl)[0])?.name||'—'],
+    ['Fund Share', fmtPctPlain(selFund.bots.length/BASE_BOTS.length*100)],
+  ]:null;
+
+  return <div>
+    <PageHead title={title} subtitle={subtitle}
+      actions={ bot? <Btn variant="outline" onClick={()=>navigate('/activity')}><Icon name="back" className="w-4 h-4"/>Back to LNO overview</Btn>
+        : <PeriodControls {...{period,setPeriod,custom,setCustom,fund,setFund,funds}}/> }/>
+
+    {bot&&<div className="mb-5"><PeriodControls {...{period,setPeriod,custom,setCustom,fund,setFund,funds}} showFund={false}/></div>}
+
+    {!bot&&!selFund&&<MarketTicker/>}
+
+    {/* KPI cards */}
+    {fundKpis? <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-5">
+        {fundKpis.map(([l,v,raw],i)=><KpiCard key={i} label={l} value={<span className={raw!=null?clsPnl(raw):''}>{v}</span>}/>)}
+      </div>
+    : <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-5">
+        <KpiCard label="Total Equity" value={fmtUSD(eqNow)} icon="dollar"/>
+        <KpiCard label="PnL Day" value={<span className={clsPnl(pnlDay)}>{fmtSigned(pnlDay)}</span>} badge={<TrendBadge pct={pnlDay/eqNow*100}/>}/>
+        <KpiCard label="PnL Week" value={<span className={clsPnl(pnlWeek)}>{fmtSigned(pnlWeek)}</span>} badge={<TrendBadge pct={pnlWeek/eqNow*100}/>}/>
+        <KpiCard label="PnL Month" value={<span className={clsPnl(pnlMonth)}>{fmtSigned(pnlMonth)}</span>} badge={<TrendBadge pct={pnlMonth/eqNow*100}/>}/>
+        <KpiCard label="Max Drawdown" value={<span className="text-danger">{fmtPctPlain(mdd)}</span>}/>
+        <KpiCard label="Active Bots" value={`${activeBots} / ${botIds.length}`} icon="power"/>
+      </div>}
+
+    {/* Equity curve */}
+    <Card className="p-5 mb-5">
+      <SectionTitle right={<span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} this period</span>}>Equity Curve</SectionTitle>
+      <AreaChart data={series} positive={positive}/>
+      <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{series.length?fmtDate(series[0].t):''}</span><span>{series.length?fmtDate(series[series.length-1].t):''}</span></div>
+    </Card>
+
+    {/* Period summary */}
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+      <Card className="p-4"><div className="text-xs text-slate-500">Period PnL</div><div className={`text-xl font-bold mt-1 ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)}</div><div className="mt-1"><TrendBadge pct={series.length>1?periodPnl/series[0].equity*100:0}/></div></Card>
+      <Card className="p-4"><div className="text-xs text-slate-500">Win Rate</div><div className="text-xl font-bold mt-1 text-navy">{closedRange.length?fmtPctPlain(winRate):'—'}</div><div className="text-xs text-slate-400 mt-1">prev: {prevClosed.length?fmtPctPlain(prevWin):'—'}</div></Card>
+      <Card className="p-4"><div className="text-xs text-slate-500">Total Trades</div><div className="text-xl font-bold mt-1 text-navy">{rangeTrades.length}</div><div className="text-xs text-slate-400 mt-1">prev: {prevTrades.length}</div></Card>
+    </div>
+
+    <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+      {/* Fund repartition (global only) */}
+      {!bot&&!selFund&&<Card className="p-5 xl:col-span-1">
+        <SectionTitle>Fund Repartition</SectionTitle>
+        <div className="flex items-center justify-center mb-4">
+          <Donut segments={funds.map(f=>({label:f.name,value:f.bots.length,color:f.color}))} onSlice={s=>{const f=funds.find(x=>x.name===s.label); if(f)setFund(f.id);}}/>
+        </div>
+        <div className="space-y-2.5">
+          {funds.map(f=>{ const share=f.bots.length/BASE_BOTS.length*100; const eq=fundEquity(data,f); return <div key={f.id}>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <button onClick={()=>setFund(f.id)} className="flex items-center gap-1.5 font-medium text-navy hover:underline"><span className="w-2.5 h-2.5 rounded-full" style={{background:f.color}}/>{f.name}</button>
+              <span className="text-slate-400">{f.bots.length} bots · {fmtUSD(eq)}</span>
+            </div>
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{width:share+'%',background:f.color}}/></div>
+          </div>; })}
+        </div>
+      </Card>}
+
+      {/* Bot performance ranking */}
+      <Card className={`overflow-hidden ${!bot&&!selFund?'xl:col-span-2':'xl:col-span-3'}`}>
+        <div className="p-5 pb-0"><SectionTitle>Bot Performance Ranking</SectionTitle></div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs"><tr className="border-b border-slate-100">
+              <SortHeader label="Bot" col="name" sort={sort} setSort={setSort}/>
+              <SortHeader label="Fund" col="fund" sort={sort} setSort={setSort}/>
+              <SortHeader label="Exchange" col="exchange" sort={sort} setSort={setSort} className="hidden md:table-cell"/>
+              <SortHeader label="Symbol" col="symbol" sort={sort} setSort={setSort} className="hidden md:table-cell"/>
+              <SortHeader label="PnL" col="pnl" sort={sort} setSort={setSort} align="right"/>
+              <SortHeader label="Win%" col="winRate" sort={sort} setSort={setSort} align="right" className="hidden sm:table-cell"/>
+              <SortHeader label="Trades" col="trades" sort={sort} setSort={setSort} align="right" className="hidden sm:table-cell"/>
+              <SortHeader label="Status" col="status" sort={sort} setSort={setSort}/>
+            </tr></thead>
+            <tbody>
+              {sortedRank.map(r=><tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+                <td className="px-3 py-2.5"><button onClick={()=>navigate('/activity/bot/'+r.id+'?name='+encodeURIComponent(r.name))} className="font-medium text-navy hover:text-gold">{r.name}</button></td>
+                <td className="px-3 py-2.5">{r.fund&&<Badge color={r.fund.color} dot onClick={()=>setFund(r.fund.id)}>{r.fund.name}</Badge>}</td>
+                <td className="px-3 py-2.5 hidden md:table-cell text-slate-500">{r.exchange}</td>
+                <td className="px-3 py-2.5 hidden md:table-cell font-mono text-xs text-slate-500">{r.symbol}</td>
+                <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(r.pnl)}`}>{fmtSigned(r.pnl)}</td>
+                <td className="px-3 py-2.5 text-right hidden sm:table-cell tnum">{fmtPctPlain(r.winRate)}</td>
+                <td className="px-3 py-2.5 text-right hidden sm:table-cell tnum">{r.trades}</td>
+                <td className="px-3 py-2.5"><StatusPill status={r.status}/></td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+
+    {/* Recent / all positions */}
+    <Card className="overflow-hidden mt-5">
+      <div className="p-5 pb-0"><SectionTitle>{bot?'All Positions':'Recent Positions'}</SectionTitle></div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+            <th className="px-3 py-2.5 text-left font-medium">Entry</th><th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">Exit</th>
+            {!bot&&<th className="px-3 py-2.5 text-left font-medium">Bot</th>}{!bot&&<th className="px-3 py-2.5 text-left font-medium">Fund</th>}
+            <th className="px-3 py-2.5 text-left font-medium">Symbol</th><th className="px-3 py-2.5 text-left font-medium">Side</th>
+            <th className="px-3 py-2.5 text-right font-medium">PnL</th><th className="px-3 py-2.5 text-right font-medium hidden sm:table-cell">PnL%</th>
+            <th className="px-3 py-2.5 text-right font-medium hidden md:table-cell">Duration</th><th className="px-3 py-2.5 text-left font-medium">Status</th>
+          </tr></thead>
+          <tbody>
+            {recentList.map(t=>{ const f=fundOfBot(funds,t.botId); return <tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDT(t.entry)}</td>
+              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap hidden md:table-cell">{t.exit?fmtDT(t.exit):'—'}</td>
+              {!bot&&<td className="px-3 py-2.5 font-medium text-navy">{t.bot}</td>}
+              {!bot&&<td className="px-3 py-2.5">{f&&<Badge color={f.color} dot onClick={()=>setFund(f.id)}>{f.name}</Badge>}</td>}
+              <td className="px-3 py-2.5 font-mono text-xs">{t.symbol}</td>
+              <td className="px-3 py-2.5"><span className={t.side==='Long'?'text-success':'text-danger'}>{t.side}</span></td>
+              <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(t.pnl)}`}>{fmtSigned(t.pnl)}</td>
+              <td className={`px-3 py-2.5 text-right hidden sm:table-cell tnum ${clsPnl(t.pnlPct)}`}>{fmtPct(t.pnlPct)}</td>
+              <td className="px-3 py-2.5 text-right hidden md:table-cell text-slate-500">{fmtDur(t.durMin)}</td>
+              <td className="px-3 py-2.5"><StatusPill status={t.status}/></td>
+            </tr>; })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ============================================================
+   REAL-TIME OPERATIONS
+   ============================================================ */
+function RealtimePage(){
+  const {funds,user,data}=useApp();
+  const [fund,setFund]=useState('all');
+  const [alertsOn,setAlertsOn]=useState(true);
+  const [tick,setTick]=useState(0);
+  const [pins,setPins]=useState([]);
+  const [perBot,setPerBot]=useState(()=>Object.fromEntries(BASE_BOTS.map(b=>[b.id,true])));
+  const [sort,setSort]=useState({col:'',dir:'asc'});
+  const services=useServiceHealth();
+  useEffect(()=>{ const a=setInterval(()=>setTick(t=>t+1),5000); return ()=>clearInterval(a); },[]);
+  if(!hasPerm(user,'view_realtime')) return <Denied/>;
+
+  const selFund=fund!=='all'?funds.find(f=>f.id===fund):null;
+  const botIds = selFund? selFund.bots : BASE_BOTS.map(b=>b.id);
+  // live values derived from real tickers (refreshed every 5s)
+  const activeBots=botIds.filter(id=>data.bots[id].status==='active').length;
+  const livePnl=botIds.reduce((a,id)=>a+data.bots[id].livePnl,0);
+  const openPos=botIds.reduce((a,id)=>a+data.stats[id].open,0)+3;
+
+  let rows=botIds.map(id=>{ const b=BASE_BOTS.find(x=>x.id===id); const f=fundOfBot(funds,id); const d=data.bots[id]; return {...b,fund:f,status:d.status,live:d.livePnl,price:d.price,changePct:d.changePct,pos:data.stats[id].open>0?(d.side+' '+EX.parse(b.symbol).base):'—'}; });
+  rows=sortRows(rows,sort,{bot:r=>r.name,fund:r=>r.fund?.name||'',symbol:r=>r.symbol,status:r=>r.status,live:r=>r.live,price:r=>r.price});
+  rows.sort((a,b)=>(pins.includes(b.id)?1:0)-(pins.includes(a.id)?1:0));
+
+  const sevBorder={critical:'border-danger',warning:'border-amber-500',info:'border-blue-500'};
+  const sevIcon={critical:'triangle',warning:'triangle',info:'info'};
+
+  return <div>
+    <PageHead title="Real-Time Operations" subtitle={selFund?`Live view · ${selFund.name}`:'Live view of all bots · refreshing every 5s'}
+      actions={<div className="flex items-center gap-3">
+        <Select value={fund} onChange={setFund} className="w-40" options={[{value:'all',label:'All Funds'},...funds.map(f=>({value:f.id,label:f.name}))]}/>
+        <div className="flex items-center gap-2 text-sm"><span className="text-slate-500">Alerts</span><Toggle on={alertsOn} onChange={setAlertsOn}/></div>
+        <span className="flex items-center gap-1.5 text-xs text-success font-medium"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>Live</span>
+      </div>}/>
+
+    <MarketTicker/>
+
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <KpiCard label="Active Bots" value={`${activeBots} / ${botIds.length}`} icon="power"/>
+      <KpiCard label="Live PnL" value={<span className={clsPnl(livePnl)}>{fmtSigned(livePnl)}</span>} badge={<span className="text-[11px] text-slate-400">updates every 5s</span>}/>
+      <KpiCard label="Open Positions" value={openPos} icon="briefcase"/>
+      <KpiCard label="System Alerts" value={INCIDENTS.filter(i=>i.severity!=='info').length} icon="bell"/>
+    </div>
+
+    <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 mb-5">
+      <Card className="p-5">
+        <SectionTitle right={<span className="text-[11px] text-slate-400">live ping · 10s</span>}>Service Health</SectionTitle>
+        <div className="space-y-2">
+          {services.map(s=><div key={s.name} className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${s.status==='active'?'bg-success':s.status==='degraded'?'bg-amber-500':s.status==='pending'?'bg-slate-300 animate-pulse':'bg-danger'}`}/>{s.name}{s.ex&&<span className="text-[10px] text-slate-300">●</span>}</span>
+            <span className={`font-mono text-xs ${s.latency==null?'text-slate-300':s.latency>250?'text-amber-600':'text-slate-400'}`}>{s.latency==null?(s.status==='down'?'down':'—'):s.latency+'ms'}</span>
+          </div>)}
+        </div>
+      </Card>
+      <Card className="p-5 xl:col-span-2">
+        <SectionTitle right={<span className="text-[11px] text-slate-400">latest</span>}>Recent Incidents</SectionTitle>
+        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+          {INCIDENTS.map(i=><div key={i.id} className={`border-l-4 ${sevBorder[i.severity]} bg-slate-50/70 rounded-r-lg px-3 py-2 flex items-start gap-2`}>
+            <Icon name={sevIcon[i.severity]} className={`w-4 h-4 mt-0.5 shrink-0 ${i.severity==='critical'?'text-danger':i.severity==='warning'?'text-amber-500':'text-blue-500'}`}/>
+            <div className="flex-1"><div className="text-sm text-navy leading-snug">{i.message}</div><div className="text-[11px] text-slate-400 mt-0.5">{fmtDT(i.t)}</div></div>
+          </div>)}
+        </div>
+      </Card>
+    </div>
+
+    <Card className="overflow-hidden">
+      <div className="p-5 pb-0"><SectionTitle right={<span className="flex items-center gap-1.5 text-xs text-success"><span className="w-1.5 h-1.5 rounded-full bg-success pulse-dot"/>updating</span>}>Live Bot Status</SectionTitle></div>
+      {/* desktop table */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+            <th className="px-3 py-2.5 w-8"></th>
+            <SortHeader label="Bot" col="bot" sort={sort} setSort={setSort}/>
+            <SortHeader label="Fund" col="fund" sort={sort} setSort={setSort}/>
+            <SortHeader label="Symbol" col="symbol" sort={sort} setSort={setSort}/>
+            <SortHeader label="Last Price" col="price" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label="Status" col="status" sort={sort} setSort={setSort}/>
+            <th className="px-3 py-2.5 text-left font-medium">Position</th>
+            <SortHeader label="Live PnL" col="live" sort={sort} setSort={setSort} align="right"/>
+            <th className="px-3 py-2.5 text-left font-medium">Last Action</th>
+            <th className="px-3 py-2.5 w-10"></th>
+          </tr></thead>
+          <tbody>
+            {rows.map(r=><tr key={r.id} className={`border-b border-slate-50 hover:bg-slate-50/60 ${pins.includes(r.id)?'bg-gold/5':''}`}>
+              <td className="px-3 py-2.5"><button onClick={()=>setPins(p=>p.includes(r.id)?p.filter(x=>x!==r.id):[...p,r.id])} className={pins.includes(r.id)?'text-gold':'text-slate-300 hover:text-slate-500'}><Icon name="pin" className="w-4 h-4"/></button></td>
+              <td className="px-3 py-2.5"><div className="font-medium text-navy">{r.name}</div><div className="text-[11px] text-slate-400">{r.exchange}</div></td>
+              <td className="px-3 py-2.5">{r.fund&&<Badge color={r.fund.color} dot onClick={()=>setFund(r.fund.id)}>{r.fund.name}</Badge>}</td>
+              <td className="px-3 py-2.5 font-mono text-xs">{r.symbol}</td>
+              <td className="px-3 py-2.5 text-right"><div className="font-mono text-xs text-navy tnum">{fmtPrice(r.price)}</div><div className={`text-[10px] tnum ${clsPnl(r.changePct)}`}>{fmtPct(r.changePct)}</div></td>
+              <td className="px-3 py-2.5"><StatusPill status={r.status}/></td>
+              <td className="px-3 py-2.5 text-slate-500">{r.pos}</td>
+              <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(r.live)}`}>{fmtSigned(r.live)}</td>
+              <td className="px-3 py-2.5 text-slate-500 text-xs">{['Order filled','Signal check','Position sync','Heartbeat'][r.id.charCodeAt(1)%4]}<br/><span className="text-slate-400">{fmtTime(NOW-((tick%6)+1)*60000)}</span></td>
+              <td className="px-3 py-2.5"><button onClick={()=>setPerBot(s=>({...s,[r.id]:!s[r.id]}))} className={perBot[r.id]&&alertsOn?'text-gold':'text-slate-300 hover:text-slate-500'}><Icon name="bell" className="w-4 h-4"/></button></td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+      {/* mobile cards */}
+      <div className="md:hidden p-3 space-y-2">
+        {rows.map(r=><div key={r.id} className="border border-slate-100 rounded-lg p-3">
+          <div className="flex items-center justify-between"><div className="font-medium text-navy">{r.name}</div><StatusPill status={r.status}/></div>
+          <div className="flex items-center justify-between mt-2">{r.fund&&<Badge color={r.fund.color} dot>{r.fund.name}</Badge>}<span className={`font-medium tnum ${clsPnl(r.live)}`}>{fmtSigned(r.live)}</span></div>
+        </div>)}
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ============================================================
+   TRADES
+   ============================================================ */
+function TradesPage(){
+  const {user,data}=useApp();
+  const [f,setF]=useState({bot:'all',exchange:'All',side:'All',status:'All',q:''});
+  const [sort,setSort]=useState({col:'entry',dir:'desc'});
+  if(!hasPerm(user,'view_trades')) return <Denied/>;
+
+  let rows=data.trades.filter(t=>
+    (f.bot==='all'||t.botId===f.bot)&&
+    (f.exchange==='All'||t.exchange===f.exchange)&&
+    (f.side==='All'||t.side===f.side)&&
+    (f.status==='All'||t.status===f.status)&&
+    (!f.q|| (t.bot+t.symbol+t.strategy).toLowerCase().includes(f.q.toLowerCase()))
+  );
+  rows=sortRows(rows,sort,{entry:r=>r.entry,exit:r=>r.exit||0,bot:r=>r.bot,symbol:r=>r.symbol,exchange:r=>r.exchange,side:r=>r.side,status:r=>r.status,pnl:r=>r.pnl,pnlPct:r=>r.pnlPct,size:r=>r.size,leverage:r=>r.leverage,strategy:r=>r.strategy,durMin:r=>r.durMin});
+
+  const clear=()=>setF({bot:'all',exchange:'All',side:'All',status:'All',q:''});
+  const active = f.bot!=='all'||f.exchange!=='All'||f.side!=='All'||f.status!=='All'||f.q;
+
+  async function exportXlsx(){
+    const mod=await import('xlsx'); const XLSX=mod.utils?mod:(mod.default||mod);
+    const data=rows.map(t=>({Entry:fmtDT(t.entry),Exit:t.exit?fmtDT(t.exit):'',Bot:t.bot,Symbol:t.symbol,Exchange:t.exchange,Side:t.side,Status:t.status,PnL:Number(t.pnl.toFixed(2)),'PnL%':Number(t.pnlPct.toFixed(2)),Size:t.size,Leverage:t.leverage,Strategy:t.strategy,Duration:fmtDur(t.durMin)}));
+    const ws=XLSX.utils.json_to_sheet(data); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Trades'); XLSX.writeFile(wb,'lno_trades.xlsx');
+  }
+
+  return <div>
+    <PageHead title="Trades" subtitle={`${rows.length} of ${data.trades.length} trades`}
+      actions={hasPerm(user,'export_data')&&<Btn variant="gold" onClick={exportXlsx}><Icon name="download" className="w-4 h-4"/>Download XLSX</Btn>}/>
+    <Card className="p-3 mb-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={f.bot} onChange={v=>setF({...f,bot:v})} className="w-44" options={[{value:'all',label:'All bots'},...BASE_BOTS.map(b=>({value:b.id,label:b.name}))]}/>
+        <Select value={f.exchange} onChange={v=>setF({...f,exchange:v})} className="w-36" options={['All','Binance','Bybit','OKX']}/>
+        <Select value={f.side} onChange={v=>setF({...f,side:v})} className="w-28" options={['All','Long','Short']}/>
+        <Select value={f.status} onChange={v=>setF({...f,status:v})} className="w-32" options={['All','Open','Closed']}/>
+        <div className="relative flex-1 min-w-[160px]"><Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={f.q} onChange={e=>setF({...f,q:e.target.value})} placeholder="Search bot, symbol, strategy…" className="w-full bg-slate-100 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"/></div>
+        {active&&<Btn variant="ghost" size="sm" onClick={clear}><Icon name="x" className="w-3.5 h-3.5"/>Clear filters</Btn>}
+      </div>
+    </Card>
+    <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100">
+            <SortHeader label="Entry" col="entry" sort={sort} setSort={setSort}/>
+            <SortHeader label="Exit" col="exit" sort={sort} setSort={setSort} className="hidden lg:table-cell"/>
+            <SortHeader label="Bot" col="bot" sort={sort} setSort={setSort}/>
+            <SortHeader label="Symbol" col="symbol" sort={sort} setSort={setSort}/>
+            <SortHeader label="Exchange" col="exchange" sort={sort} setSort={setSort} className="hidden md:table-cell"/>
+            <SortHeader label="Side" col="side" sort={sort} setSort={setSort}/>
+            <SortHeader label="Status" col="status" sort={sort} setSort={setSort}/>
+            <SortHeader label="PnL" col="pnl" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label="PnL%" col="pnlPct" sort={sort} setSort={setSort} align="right" className="hidden sm:table-cell"/>
+            <SortHeader label="Size" col="size" sort={sort} setSort={setSort} align="right" className="hidden lg:table-cell"/>
+            <SortHeader label="Lev" col="leverage" sort={sort} setSort={setSort} align="right" className="hidden lg:table-cell"/>
+            <SortHeader label="Strategy" col="strategy" sort={sort} setSort={setSort} className="hidden xl:table-cell"/>
+            <SortHeader label="Duration" col="durMin" sort={sort} setSort={setSort} align="right" className="hidden md:table-cell"/>
+          </tr></thead>
+          <tbody>
+            {rows.slice(0,200).map(t=><tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDT(t.entry)}</td>
+              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap hidden lg:table-cell">{t.exit?fmtDT(t.exit):'—'}</td>
+              <td className="px-3 py-2.5 font-medium text-navy">{t.bot}</td>
+              <td className="px-3 py-2.5 font-mono text-xs">{t.symbol}</td>
+              <td className="px-3 py-2.5 text-slate-500 hidden md:table-cell">{t.exchange}</td>
+              <td className="px-3 py-2.5"><span className={t.side==='Long'?'text-success':'text-danger'}>{t.side}</span></td>
+              <td className="px-3 py-2.5"><StatusPill status={t.status}/></td>
+              <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(t.pnl)}`}>{fmtSigned(t.pnl)}</td>
+              <td className={`px-3 py-2.5 text-right hidden sm:table-cell tnum ${clsPnl(t.pnlPct)}`}>{fmtPct(t.pnlPct)}</td>
+              <td className="px-3 py-2.5 text-right hidden lg:table-cell tnum text-slate-500">{fmtUSD(t.size)}</td>
+              <td className="px-3 py-2.5 text-right hidden lg:table-cell tnum text-slate-500">{t.leverage}×</td>
+              <td className="px-3 py-2.5 hidden xl:table-cell text-slate-500">{t.strategy}</td>
+              <td className="px-3 py-2.5 text-right hidden md:table-cell text-slate-500">{fmtDur(t.durMin)}</td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+      {rows.length===0&&<div className="p-10 text-center text-slate-400 text-sm">No trades match the current filters.</div>}
+    </Card>
+  </div>;
+}
+
+/* ============================================================
+   ACTIVITY LOG
+   ============================================================ */
+function LogsPage(){
+  const {funds,user}=useApp();
+  const [sev,setSev]=useState('All'); const [type,setType]=useState('All'); const [page,setPage]=useState(0); const [sel,setSel]=useState(null);
+  if(!hasPerm(user,'view_logs')) return <Denied/>;
+  const rows=LOGS.filter(l=>(sev==='All'||l.level===sev.toLowerCase())&&(type==='All'||l.type===type.toLowerCase()));
+  const PER=50; const pages=Math.ceil(rows.length/PER); const slice=rows.slice(page*PER,page*PER+PER);
+  const lvlColor={critical:'text-danger bg-danger/10',error:'text-danger bg-danger/10',warning:'text-amber-600 bg-warn/10',info:'text-blue-600 bg-blue-50',debug:'text-slate-500 bg-slate-100'};
+  return <div>
+    <PageHead title="Activity Log" subtitle={`${rows.length} events`}/>
+    <Card className="p-3 mb-4"><div className="flex flex-wrap items-center gap-2">
+      <Select value={sev} onChange={v=>{setSev(v);setPage(0);}} className="w-40" options={['All','Critical','Error','Warning','Info','Debug']}/>
+      <Select value={type} onChange={v=>{setType(v);setPage(0);}} className="w-40" options={['All','Signal','Trading','Position','System']}/>
+    </div></Card>
+    <div className="flex gap-5">
+      <Card className="overflow-hidden flex-1">
+        <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+            <th className="px-3 py-2.5 text-left font-medium">Timestamp</th><th className="px-3 py-2.5 text-left font-medium">Level</th>
+            <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">Type</th><th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">Source</th>
+            <th className="px-3 py-2.5 text-left font-medium">Message</th>
+          </tr></thead>
+          <tbody>
+            {slice.map(l=><tr key={l.id} onClick={()=>setSel(l)} className={`border-b border-slate-50 cursor-pointer hover:bg-slate-50/60 ${sel?.id===l.id?'bg-gold/5':''}`}>
+              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap font-mono text-xs">{fmtDT(l.t)}</td>
+              <td className="px-3 py-2.5"><span className={`px-2 py-0.5 rounded-full text-[11px] font-medium uppercase ${lvlColor[l.level]}`}>{l.level}</span></td>
+              <td className="px-3 py-2.5 hidden sm:table-cell capitalize text-slate-500">{l.type}</td>
+              <td className="px-3 py-2.5 hidden md:table-cell text-slate-500">{l.source}</td>
+              <td className="px-3 py-2.5 text-navy max-w-md truncate">{l.message}</td>
+            </tr>)}
+          </tbody>
+        </table></div>
+        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm">
+          <span className="text-slate-400">Page {page+1} of {pages}</span>
+          <div className="flex gap-2">
+            <Btn variant="outline" size="sm" disabled={page===0} onClick={()=>setPage(p=>p-1)}><Icon name="chevleft" className="w-4 h-4"/>Previous</Btn>
+            <Btn variant="outline" size="sm" disabled={page>=pages-1} onClick={()=>setPage(p=>p+1)}>Next<Icon name="chevright" className="w-4 h-4"/></Btn>
+          </div>
+        </div>
+      </Card>
+      {sel&&<Card className="w-80 shrink-0 p-5 h-fit slidein hidden lg:block">
+        <div className="flex items-center justify-between mb-3"><h3 className="font-semibold text-navy">Log detail</h3><button onClick={()=>setSel(null)} className="text-slate-400 hover:text-navy"><Icon name="x" className="w-4 h-4"/></button></div>
+        <div className="space-y-3 text-sm">
+          <div><div className="text-xs text-slate-400">Message</div><div className="text-navy">{sel.message}</div></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><div className="text-xs text-slate-400">Level</div><span className={`px-2 py-0.5 rounded-full text-[11px] font-medium uppercase ${lvlColor[sel.level]}`}>{sel.level}</span></div>
+            <div><div className="text-xs text-slate-400">Type</div><div className="capitalize text-navy">{sel.type}</div></div>
+            <div><div className="text-xs text-slate-400">Source</div><div className="text-navy">{sel.source}</div></div>
+            <div><div className="text-xs text-slate-400">Timestamp</div><div className="text-navy font-mono text-xs">{fmtDT(sel.t)}</div></div>
+          </div>
+          <div><div className="text-xs text-slate-400 mb-1">Metadata</div><pre className="bg-slate-50 rounded-lg p-3 text-[11px] font-mono text-slate-600 overflow-x-auto">{JSON.stringify(sel.meta,null,2)}</pre></div>
+          {sel.botId&&<div><div className="text-xs text-slate-400">Associated bot</div><div className="text-navy">{BASE_BOTS.find(b=>b.id===sel.botId)?.name}</div></div>}
+        </div>
+      </Card>}
+    </div>
+  </div>;
+}
+
+/* ============================================================
+   ADMIN — USERS
+   ============================================================ */
+function AdminUsers(){
+  const {users,setUsers,user}=useApp();
+  const [exp,setExp]=useState(null); const [add,setAdd]=useState(false); const [del,setDel]=useState(null); const [editName,setEditName]=useState(null); const [nameVal,setNameVal]=useState('');
+  if(user.role!=='admin') return <Denied/>;
+  const up=(id,patch)=>setUsers(us=>us.map(u=>u.id===id?{...u,...patch}:u));
+  return <div>
+    <PageHead title="Users" subtitle={`${users.length} accounts`} actions={<Btn onClick={()=>setAdd(true)}><Icon name="plus" className="w-4 h-4"/>Add User</Btn>}/>
+    <div className="space-y-3">
+      {users.map(u=><Card key={u.id} className="overflow-hidden">
+        <button onClick={()=>setExp(exp===u.id?null:u.id)} className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50/60">
+          {u.avatar?<img src={u.avatar} className="w-10 h-10 rounded-full object-cover"/>:<span className="w-10 h-10 rounded-full bg-navy text-white grid place-items-center text-xs font-semibold shrink-0">{initialsOf(u)}</span>}
+          <div className="flex-1 min-w-0">
+            <div className="font-medium text-navy flex items-center gap-2">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.username}
+              <Badge className={u.role==='admin'?'bg-gold/15 text-gold':u.role==='operator'?'bg-blue-100 text-blue-700':'bg-slate-100 text-slate-600'}>{u.role}</Badge>
+            </div>
+            <div className="text-xs text-slate-400 truncate">@{u.username} · {u.email}</div>
+          </div>
+          <StatusPill status={u.active?'active':'inactive'}/>
+          <Icon name="chevdown" className={`w-4 h-4 text-slate-400 transition ${exp===u.id?'rotate-180':''}`}/>
+        </button>
+        {exp===u.id&&<div className="border-t border-slate-100 p-4 space-y-4 fadein">
+          <div className="flex flex-wrap gap-4">
+            <div className="w-44"><Field label="Username">
+              {editName===u.id? <div className="flex gap-1">
+                <Input value={nameVal} autoFocus onChange={e=>setNameVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){up(u.id,{username:nameVal});setEditName(null);}if(e.key==='Escape')setEditName(null);}}/>
+                <Btn size="icon" variant="subtle" onClick={()=>{up(u.id,{username:nameVal});setEditName(null);}}><Icon name="check" className="w-4 h-4"/></Btn>
+              </div> : <div className="flex items-center gap-2"><span className="text-sm font-mono">@{u.username}</span><button onClick={()=>{setEditName(u.id);setNameVal(u.username);}} className="text-slate-400 hover:text-navy"><Icon name="pencil" className="w-3.5 h-3.5"/></button></div>}
+            </Field></div>
+            <div className="w-44"><Field label="Role"><Select value={u.role} onChange={v=>up(u.id,{role:v,permissions:ROLE_PERMS[v].slice()})} options={[{value:'admin',label:'Admin'},{value:'operator',label:'Operator'},{value:'viewer',label:'Viewer'}]}/></Field></div>
+            <div><Field label="Active"><div className="pt-1.5"><Toggle on={u.active} onChange={v=>up(u.id,{active:v})}/></div></Field></div>
+          </div>
+          <div>
+            <div className="text-xs font-medium text-slate-500 mb-2">Permissions {u.role==='admin'&&<span className="text-slate-400">(admins always have all permissions)</span>}</div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {PERMISSIONS.map(([p,l])=><label key={p} className={`flex items-center gap-2 text-sm ${u.role==='admin'?'opacity-50':''}`}>
+                <input type="checkbox" disabled={u.role==='admin'} checked={u.role==='admin'||u.permissions.includes(p)} onChange={e=>up(u.id,{permissions:e.target.checked?[...u.permissions,p]:u.permissions.filter(x=>x!==p)})} className="accent-navy w-4 h-4"/>{l}
+              </label>)}
+            </div>
+          </div>
+          <div className="flex justify-end pt-1">
+            <Btn variant="danger" size="sm" disabled={u.id===user.id} onClick={()=>setDel(u)}><Icon name="trash" className="w-3.5 h-3.5"/>Delete user</Btn>
+          </div>
+        </div>}
+      </Card>)}
+    </div>
+    <AddUserModal open={add} onClose={()=>setAdd(false)} onAdd={nu=>{setUsers(us=>[...us,nu]);setAdd(false);}} existing={users}/>
+    <Confirm open={!!del} title="Delete user" message={`Permanently remove ${del?.username}? This cannot be undone.`} onCancel={()=>setDel(null)} onConfirm={()=>{setUsers(us=>us.filter(u=>u.id!==del.id));setDel(null);setExp(null);}}/>
+  </div>;
+}
+function AddUserModal({open,onClose,onAdd,existing}){
+  const [v,setV]=useState({username:'',email:'',firstName:'',lastName:'',role:'viewer'}); const [err,setErr]=useState('');
+  useEffect(()=>{ if(open){setV({username:'',email:'',firstName:'',lastName:'',role:'viewer'});setErr('');} },[open]);
+  function submit(){
+    if(!v.username.trim())return setErr('Username is required.');
+    if(existing.some(u=>u.username===v.username.trim()))return setErr('Username must be unique.');
+    if(!v.email.endsWith('@lno.company'))return setErr('Email must end with @lno.company');
+    onAdd({id:'u'+Date.now(),...v,username:v.username.trim(),active:true,permissions:ROLE_PERMS[v.role].slice(),avatar:null,password:'admin',phone:'',notify:false});
+  }
+  return <Modal open={open} onClose={onClose} title="Add User">
+    <div className="space-y-3">
+      <Field label="Username *"><Input value={v.username} onChange={e=>setV({...v,username:e.target.value})} placeholder="jane.doe"/></Field>
+      <Field label="Email *" hint="Must end with @lno.company"><Input value={v.email} onChange={e=>setV({...v,email:e.target.value})} placeholder="jane.doe@lno.company"/></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="First name"><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
+        <Field label="Last name"><Input value={v.lastName} onChange={e=>setV({...v,lastName:e.target.value})}/></Field>
+      </div>
+      <Field label="Role"><Select value={v.role} onChange={r=>setV({...v,role:r})} options={[{value:'admin',label:'Admin'},{value:'operator',label:'Operator'},{value:'viewer',label:'Viewer'}]}/></Field>
+      {err&&<div className="text-sm text-danger">{err}</div>}
+      <div className="text-[11px] text-slate-400">New users are created with the default password <span className="font-mono">admin</span> and default permissions for their role.</div>
+      <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={submit}>Create user</Btn></div>
+    </div>
+  </Modal>;
+}
+
+/* ============================================================
+   ADMIN — EXCHANGES
+   ============================================================ */
+function AdminExchanges(){
+  const {exchanges,setExchanges,user}=useApp();
+  const [modal,setModal]=useState(null); const [del,setDel]=useState(null); const [reveal,setReveal]=useState({});
+  if(user.role!=='admin') return <Denied/>;
+  const mask=(s)=> s? s.slice(0,6)+'••••••••'+s.slice(-4) : '';
+  return <div>
+    <PageHead title="Exchanges" subtitle="Exchange API connections" actions={<Btn onClick={()=>setModal({mode:'add',data:{name:'',label:'',apiKey:'',secret:'',note:''}})}><Icon name="plus" className="w-4 h-4"/>Add Exchange</Btn>}/>
+    <div className="grid md:grid-cols-2 gap-4">
+      {exchanges.map(e=><Card key={e.id} className="p-5">
+        <div className="flex items-start justify-between">
+          <div><div className="font-semibold text-navy">{e.label}</div><div className="text-xs text-slate-400 font-mono">{e.name}</div></div>
+          <StatusPill status={e.status}/>
+        </div>
+        <div className="mt-4 space-y-2 text-sm">
+          <div className="flex justify-between"><span className="text-slate-400">API Key</span><span className="font-mono text-xs">{mask(e.apiKey)}</span></div>
+          <div className="flex justify-between items-center"><span className="text-slate-400">API Secret</span>
+            <span className="flex items-center gap-2"><span className="font-mono text-xs">{reveal[e.id]?e.secret:'••••••••••••'}</span>
+              <button onClick={()=>setReveal(r=>({...r,[e.id]:!r[e.id]}))} className="text-slate-400 hover:text-navy"><Icon name={reveal[e.id]?'eyeoff':'eye'} className="w-4 h-4"/></button></span>
+          </div>
+          <div className="flex justify-between"><span className="text-slate-400">Last sync</span><span className="text-xs">{e.lastSync?fmtDT(e.lastSync):'—'}</span></div>
+          {e.note&&<div className="text-xs text-slate-400 pt-1">{e.note}</div>}
+        </div>
+        <div className="flex gap-2 mt-4">
+          <Btn variant="outline" size="sm" onClick={()=>setModal({mode:'edit',data:{...e,secret:''}})}><Icon name="pencil" className="w-3.5 h-3.5"/>Edit</Btn>
+          <Btn variant="ghost" size="sm" className="text-danger" onClick={()=>setDel(e)}><Icon name="trash" className="w-3.5 h-3.5"/>Delete</Btn>
+        </div>
+      </Card>)}
+    </div>
+    <ExchangeModal modal={modal} onClose={()=>setModal(null)} onSave={(d)=>{
+      if(modal.mode==='add') setExchanges(x=>[...x,{...d,id:'e'+Date.now(),status:'pending',lastSync:null}]);
+      else setExchanges(x=>x.map(e=>e.id===d.id?{...e,...d,secret:d.secret||e.secret}:e));
+      setModal(null);
+    }}/>
+    <Confirm open={!!del} title="Delete exchange" message={`Remove ${del?.label}? Bots using this connection will lose API access.`} onCancel={()=>setDel(null)} onConfirm={()=>{setExchanges(x=>x.filter(e=>e.id!==del.id));setDel(null);}}/>
+  </div>;
+}
+function ExchangeModal({modal,onClose,onSave}){
+  const [v,setV]=useState({}); useEffect(()=>{ if(modal)setV(modal.data); },[modal]);
+  if(!modal)return null;
+  return <Modal open={true} onClose={onClose} title={modal.mode==='add'?'Add Exchange':'Edit Exchange'}>
+    <div className="space-y-3">
+      <Field label="Exchange name"><Input value={v.name||''} onChange={e=>setV({...v,name:e.target.value})} placeholder="binance"/></Field>
+      <Field label="Label"><Input value={v.label||''} onChange={e=>setV({...v,label:e.target.value})} placeholder="Binance Main"/></Field>
+      <Field label="API Key"><Input value={v.apiKey||''} onChange={e=>setV({...v,apiKey:e.target.value})}/></Field>
+      <Field label="API Secret" hint={modal.mode==='edit'?'Leave blank to keep the existing secret':undefined}><Input type="password" value={v.secret||''} onChange={e=>setV({...v,secret:e.target.value})}/></Field>
+      <Field label="Note (optional)"><Input value={v.note||''} onChange={e=>setV({...v,note:e.target.value})}/></Field>
+      <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={()=>onSave(v)}>Save</Btn></div>
+    </div>
+  </Modal>;
+}
+
+/* ============================================================
+   ADMIN — WHATSAPP
+   ============================================================ */
+function AdminWhatsapp(){
+  const {whatsapp,setWhatsapp,user}=useApp();
+  const [v,setV]=useState(whatsapp); const [saved,setSaved]=useState(false);
+  if(user.role!=='admin') return <Denied/>;
+  const save=()=>{ setWhatsapp(v); setSaved(true); setTimeout(()=>setSaved(false),1800); };
+  return <div className="max-w-2xl">
+    <PageHead title="WhatsApp API" subtitle="WhatsApp Business API integration for system alerts"/>
+    <Card className="p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div><div className="font-medium text-navy">Enable notifications</div><div className="text-xs text-slate-400">Master toggle for all WhatsApp alerts</div></div>
+        <Toggle on={v.enabled} onChange={x=>setV({...v,enabled:x})}/>
+      </div>
+      <div className="border-t border-slate-100 pt-4 space-y-3">
+        <Field label="API Token" hint="WhatsApp Business API bearer token"><Input type="password" value={v.token} onChange={e=>setV({...v,token:e.target.value})} placeholder="EAAG…"/></Field>
+        <Field label="Phone Number ID"><Input value={v.phoneId} onChange={e=>setV({...v,phoneId:e.target.value})} placeholder="123456789012345"/></Field>
+        <Field label="Default Recipient" hint="Default phone number to send alerts to"><Input value={v.recipient} onChange={e=>setV({...v,recipient:e.target.value})} placeholder="+33 6 12 34 56 78"/></Field>
+      </div>
+      <div className="flex items-center gap-3 pt-1"><Btn onClick={save}>Save settings</Btn>{saved&&<span className="text-sm text-success flex items-center gap-1 fadein"><Icon name="check" className="w-4 h-4"/>Saved</span>}</div>
+    </Card>
+    <Card className="p-5 mt-4">
+      <SectionTitle>Alert Types</SectionTitle>
+      <ul className="text-sm text-slate-600 space-y-2">
+        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Bot status changes (active → error, paused, etc.)</li>
+        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Critical system incidents</li>
+        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Login failure alerts (after 3 failed attempts)</li>
+      </ul>
+    </Card>
+  </div>;
+}
+
+/* ============================================================
+   ADMIN — FUNDS
+   ============================================================ */
+function AdminFunds(){
+  const {funds,setFunds,user}=useApp();
+  const [newName,setNewName]=useState(''); const [edit,setEdit]=useState(null); const [editVal,setEditVal]=useState(''); const [del,setDel]=useState(null); const [reassignTo,setReassignTo]=useState('');
+  if(user.role!=='admin') return <Denied/>;
+  const usedColors=funds.map(f=>f.color); const freeColor=FUND_PALETTE.find(c=>!usedColors.includes(c))||FUND_PALETTE[funds.length%8];
+  function create(){ if(!newName.trim())return; setFunds(f=>[...f,{id:'f'+Date.now(),name:newName.trim(),color:freeColor,bots:[]}]); setNewName(''); }
+  function reassign(botId,toId){ setFunds(fs=>fs.map(f=>({...f,bots: f.id===toId? [...f.bots.filter(b=>b!==botId),botId] : f.bots.filter(b=>b!==botId)}))); }
+  function doDelete(){ const victim=del; setFunds(fs=>{ const target=fs.find(f=>f.id===reassignTo); const moved=victim.bots; return fs.filter(f=>f.id!==victim.id).map(f=>f.id===reassignTo?{...f,bots:[...f.bots,...moved]}:f); }); setDel(null); setReassignTo(''); }
+  return <div>
+    <PageHead title="Funds" subtitle="Create funds and manage bot-to-fund assignments"/>
+    <Card className="p-4 mb-5">
+      <div className="flex items-end gap-2">
+        <div className="flex-1 max-w-xs"><Field label="Create a new fund"><Input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&create()} placeholder="Delta Fund"/></Field></div>
+        <Btn onClick={create}><Icon name="plus" className="w-4 h-4"/>Create</Btn>
+        <div className="flex items-center gap-1.5 text-xs text-slate-400 pb-2">next color <span className="w-4 h-4 rounded-full" style={{background:freeColor}}/></div>
+      </div>
+    </Card>
+
+    <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+      {funds.map(f=><Card key={f.id} className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          {edit===f.id? <div className="flex items-center gap-2 flex-1">
+            <input type="color" value={f.color} onChange={e=>setFunds(fs=>fs.map(x=>x.id===f.id?{...x,color:e.target.value}:x))} className="w-7 h-7 rounded cursor-pointer border border-slate-200"/>
+            <Input value={editVal} autoFocus onChange={e=>setEditVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){setFunds(fs=>fs.map(x=>x.id===f.id?{...x,name:editVal}:x));setEdit(null);}}}/>
+            <Btn size="icon" variant="subtle" onClick={()=>{setFunds(fs=>fs.map(x=>x.id===f.id?{...x,name:editVal}:x));setEdit(null);}}><Icon name="check" className="w-4 h-4"/></Btn>
+          </div> : <div className="flex items-center gap-2"><span className="w-3.5 h-3.5 rounded-full" style={{background:f.color}}/><span className="font-semibold text-navy">{f.name}</span><span className="text-xs text-slate-400">{f.bots.length} bots</span></div>}
+          {edit!==f.id&&<div className="flex gap-1">
+            <button onClick={()=>{setEdit(f.id);setEditVal(f.name);}} className="text-slate-400 hover:text-navy p-1" data-tip="Edit name"><Icon name="pencil" className="w-4 h-4"/></button>
+            <button onClick={()=>{setDel(f);setReassignTo(funds.find(x=>x.id!==f.id)?.id||'');}} disabled={funds.length<=1} className="text-slate-400 hover:text-danger p-1 disabled:opacity-30"><Icon name="trash" className="w-4 h-4"/></button>
+          </div>}
+        </div>
+        <div className="space-y-1.5">
+          {f.bots.length===0&&<div className="text-xs text-slate-400 py-2">No bots assigned</div>}
+          {f.bots.map(bid=>{ const b=BASE_BOTS.find(x=>x.id===bid); return <div key={bid} className="flex items-center justify-between gap-2 text-sm">
+            <span className="text-navy truncate">{b.name}</span>
+            <select value={f.id} onChange={e=>reassign(bid,e.target.value)} className="text-xs border border-slate-200 rounded-md px-1.5 py-1 bg-white cursor-pointer shrink-0">
+              {funds.map(ff=><option key={ff.id} value={ff.id}>{ff.name}</option>)}
+            </select>
+          </div>; })}
+        </div>
+      </Card>)}
+    </div>
+
+    <Card className="overflow-hidden">
+      <div className="p-5 pb-0"><SectionTitle>All Bots</SectionTitle></div>
+      <div className="overflow-x-auto"><table className="w-full text-sm">
+        <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+          <th className="px-4 py-2.5 text-left font-medium">Bot</th><th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Exchange</th>
+          <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Symbol</th><th className="px-4 py-2.5 text-left font-medium">Fund</th>
+        </tr></thead>
+        <tbody>
+          {BASE_BOTS.map(b=>{ const f=fundOfBot(funds,b.id); return <tr key={b.id} className="border-b border-slate-50">
+            <td className="px-4 py-2.5 font-medium text-navy">{b.name}</td>
+            <td className="px-4 py-2.5 text-slate-500 hidden sm:table-cell">{b.exchange}</td>
+            <td className="px-4 py-2.5 font-mono text-xs hidden sm:table-cell">{b.symbol}</td>
+            <td className="px-4 py-2.5"><select value={f?.id||''} onChange={e=>reassign(b.id,e.target.value)} className="text-sm border border-slate-200 rounded-md px-2 py-1 bg-white cursor-pointer">
+              {funds.map(ff=><option key={ff.id} value={ff.id}>{ff.name}</option>)}
+            </select></td>
+          </tr>; })}
+        </tbody>
+      </table></div>
+    </Card>
+
+    <Modal open={!!del} onClose={()=>setDel(null)} title="Delete fund">
+      <p className="text-sm text-slate-600 mb-3">Every bot must belong to a fund. Choose which fund will receive the <span className="font-semibold">{del?.bots.length}</span> bot(s) from <span className="font-semibold">{del?.name}</span>.</p>
+      <Field label="Reassign bots to"><Select value={reassignTo} onChange={setReassignTo} options={funds.filter(f=>f.id!==del?.id).map(f=>({value:f.id,label:f.name}))}/></Field>
+      <div className="flex justify-end gap-2 mt-5"><Btn variant="outline" onClick={()=>setDel(null)}>Cancel</Btn><Btn variant="danger" onClick={doDelete}>Delete fund</Btn></div>
+    </Modal>
+  </div>;
+}
+
+/* ============================================================
+   PROFILE
+   ============================================================ */
+function ProfilePage(){
+  const {user,setUsers,saveAuth}=useApp();
+  const [v,setV]=useState({firstName:user.firstName,lastName:user.lastName,email:user.email}); const [saved,setSaved]=useState(false);
+  const [pw,setPw]=useState({cur:'',n1:'',n2:''}); const [pwMsg,setPwMsg]=useState(null);
+  const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||'');
+  const fileRef=useRef();
+  function patchSelf(patch){ setUsers(us=>us.map(u=>u.id===user.id?{...u,...patch}:u)); saveAuth({...user,...patch}); }
+  function saveInfo(){ if(!v.email.endsWith('@lno.company'))return setPwMsg(null)||alert('Email must end with @lno.company'); patchSelf(v); setSaved(true); setTimeout(()=>setSaved(false),1800); }
+  function changePw(){ if(!pw.n1)return setPwMsg({err:'New password must not be empty'}); if(pw.n1!==pw.n2)return setPwMsg({err:'Confirmation must match'}); if(pw.cur!==user.password)return setPwMsg({err:'Current password is incorrect'}); patchSelf({password:pw.n1}); setPw({cur:'',n1:'',n2:''}); setPwMsg({ok:'Password updated'}); }
+  function upload(e){ const file=e.target.files[0]; if(!file)return; if(!['image/png','image/jpeg'].includes(file.type))return alert('Accepted formats: PNG, JPEG'); if(file.size>5*1024*1024)return alert('Maximum file size is 5 MB'); const r=new FileReader(); r.onload=()=>patchSelf({avatar:r.result}); r.readAsDataURL(file); }
+  return <div className="max-w-2xl">
+    <PageHead title="Profile & Settings" subtitle="Manage your personal account details"/>
+    <Card className="p-5 mb-4">
+      <div className="flex items-center gap-4 mb-5">
+        <div className="relative">
+          {user.avatar?<img src={user.avatar} className="w-20 h-20 rounded-full object-cover"/>:<span className="w-20 h-20 rounded-full bg-navy text-white grid place-items-center text-xl font-semibold">{initialsOf(user)}</span>}
+          <button onClick={()=>fileRef.current.click()} className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-gold text-navy grid place-items-center shadow"><Icon name="camera" className="w-4 h-4"/></button>
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={upload}/>
+        </div>
+        <div><div className="font-semibold text-navy text-lg">{user.firstName||user.username}</div><div className="text-sm text-slate-400">@{user.username} · {user.role}</div><div className="text-[11px] text-slate-400 mt-1">PNG or JPEG · max 5 MB</div></div>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Username" hint="Can only be changed by an admin"><Input value={user.username} disabled className="bg-slate-50 text-slate-400"/></Field>
+        <Field label="Email"><Input value={v.email} onChange={e=>setV({...v,email:e.target.value})}/></Field>
+        <Field label="First name"><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
+        <Field label="Last name"><Input value={v.lastName} onChange={e=>setV({...v,lastName:e.target.value})}/></Field>
+      </div>
+      <div className="flex items-center gap-3 mt-4"><Btn onClick={saveInfo}>Save changes</Btn>{saved&&<span className="text-sm text-success flex items-center gap-1 fadein"><Icon name="check" className="w-4 h-4"/>Changes saved</span>}</div>
+    </Card>
+
+    <Card className="p-5 mb-4">
+      <SectionTitle>Change Password</SectionTitle>
+      <div className="grid sm:grid-cols-3 gap-3">
+        <Field label="Current password"><Input type="password" value={pw.cur} onChange={e=>setPw({...pw,cur:e.target.value})}/></Field>
+        <Field label="New password"><Input type="password" value={pw.n1} onChange={e=>setPw({...pw,n1:e.target.value})}/></Field>
+        <Field label="Confirm new"><Input type="password" value={pw.n2} onChange={e=>setPw({...pw,n2:e.target.value})}/></Field>
+      </div>
+      <div className="flex items-center gap-3 mt-4"><Btn onClick={changePw}>Update password</Btn>
+        {pwMsg?.err&&<span className="text-sm text-danger">{pwMsg.err}</span>}{pwMsg?.ok&&<span className="text-sm text-success flex items-center gap-1"><Icon name="check" className="w-4 h-4"/>{pwMsg.ok}</span>}</div>
+    </Card>
+
+    <Card className="p-5">
+      <SectionTitle>WhatsApp Notifications</SectionTitle>
+      <div className="flex items-center justify-between mb-3">
+        <div><div className="text-sm font-medium text-navy">Receive notifications</div><div className="text-xs text-slate-400">The admin WhatsApp config must also be enabled to deliver</div></div>
+        <Toggle on={notify} onChange={x=>{setNotify(x);patchSelf({notify:x});}}/>
+      </div>
+      <Field label="Your phone number"><Input value={phone} onChange={e=>setPhone(e.target.value)} onBlur={()=>patchSelf({phone})} placeholder="+33 6 12 34 56 78"/></Field>
+    </Card>
+  </div>;
+}
+
+/* ============================================================
+   SUPPORT
+   ============================================================ */
+function SupportPage(){
+  return <div className="max-w-2xl">
+    <PageHead title="Support" subtitle="Contact LNO support for technical issues or production incidents"/>
+    <Card className="p-6">
+      <div className="flex items-center gap-3 mb-5"><span className="w-12 h-12 rounded-xl bg-gold/15 text-gold grid place-items-center"><Icon name="lifebuoy" className="w-6 h-6"/></span>
+        <div><div className="font-semibold text-navy">LNO Support</div><div className="text-sm text-slate-400">Technical issues · account questions · incidents</div></div></div>
+      <div className="space-y-3 text-sm">
+        <div className="flex items-center gap-3"><Icon name="mail" className="w-4 h-4 text-slate-400"/><a href="mailto:support@lno.company" className="text-navy hover:text-gold font-medium">support@lno.company</a></div>
+        <div className="flex items-center gap-3"><Icon name="clock" className="w-4 h-4 text-slate-400"/><span className="text-slate-600">Response time: within 4 business hours</span></div>
+        <div className="flex items-start gap-3"><Icon name="triangle" className="w-4 h-4 text-amber-500 mt-0.5"/><span className="text-slate-600">For urgent incidents, include <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">[URGENT]</span> in the email subject line for priority handling.</span></div>
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ============================================================
+   ROUTER + ROOT
+   ============================================================ */
+function useHashRoute(){
+  const parse=()=>{ let h=window.location.hash.replace(/^#/,'')||'/activity'; const [path,query]=h.split('?'); const parts=path.split('/').filter(Boolean); const params=Object.fromEntries(new URLSearchParams(query||'')); return {parts,params}; };
+  const [route,setRoute]=useState(parse);
+  useEffect(()=>{ const h=()=>setRoute(parse()); window.addEventListener('hashchange',h); return ()=>window.removeEventListener('hashchange',h); },[]);
+  return route;
+}
+
+/* Live market data: fetch real klines once + poll real tickers every 5s. Falls back to simulation on failure. */
+function useLiveData(authed){
+  const [klines,setKlines]=useState(null);
+  const [tickers,setTickers]=useState({});
+  const [status,setStatus]=useState('loading');
+  useEffect(()=>{
+    if(!authed) return;
+    let alive=true; setStatus('loading');
+    (async()=>{
+      const kl=await loadAllKlines(); if(!alive)return; setKlines(kl);
+      const tk=await loadAllTickers(); if(!alive)return; setTickers(tk.bots);
+      setStatus(kl.allFail?'sim':(kl.fails||tk.fails)?'partial':'live');
+    })();
+    return ()=>{alive=false;};
+  },[authed]);
+  useEffect(()=>{
+    if(!authed||!klines)return;
+    const iv=setInterval(async()=>{ const tk=await loadAllTickers(); setTickers(tk.bots); if(!tk.allFail&&klines&&!klines.allFail) setStatus(s=>s==='sim'?s:(tk.fails?'partial':'live')); },5000);
+    return ()=>clearInterval(iv);
+  },[authed,klines]);
+  const stat=useMemo(()=> klines? buildStatic(klines):null,[klines]);
+  const data=useMemo(()=> stat? {bots:foldLive(stat,tickers),trades:stat.trades,stats:stat.stats,status}:null,[stat,tickers,status]);
+  return {data,status};
+}
+
+/* Real exchange latency for Service Health (pings every 10s). */
+function useServiceHealth(){
+  const [pings,setPings]=useState(null);
+  const [tick,setTick]=useState(0);
+  useEffect(()=>{ let alive=true; const run=async()=>{ const p=await pingExchanges(); if(alive){setPings(p);setTick(t=>t+1);} }; run(); const iv=setInterval(run,10000); return ()=>{alive=false;clearInterval(iv);}; },[]);
+  const r=mulberry32(2026+tick*7);
+  return SERVICE_DEFS.map(s=>{
+    if(s.ex){ const p=pings&&pings[s.ex]; return {name:s.name,ex:s.ex,status:!pings?'pending':(p.ok?(p.ms>250?'degraded':'active'):'down'),latency:p?p.ms:null}; }
+    return {name:s.name,status:'active',latency:s.base+Math.floor(r()*s.jit)};
+  });
+}
+
+function Shell(){
+  const route=useApp().route;
+  const [a,b,c]=route.parts;
+  let page;
+  if(a==='activity'){ page = b==='bot'? <ActivityPage botId={c}/> : <ActivityPage/>; }
+  else if(a==='realtime') page=<RealtimePage/>;
+  else if(a==='trades') page=<TradesPage/>;
+  else if(a==='logs') page=<LogsPage/>;
+  else if(a==='admin'&&b==='users') page=<AdminUsers/>;
+  else if(a==='admin'&&b==='exchanges') page=<AdminExchanges/>;
+  else if(a==='admin'&&b==='whatsapp') page=<AdminWhatsapp/>;
+  else if(a==='admin'&&b==='funds') page=<AdminFunds/>;
+  else if(a==='profile') page=<ProfilePage/>;
+  else if(a==='support') page=<SupportPage/>;
+  else page=<ActivityPage/>;
+  return <div className="flex h-full">
+    <Sidebar/>
+    <div className="flex-1 flex flex-col min-w-0">
+      <Header/>
+      <main className="flex-1 overflow-y-auto p-4 lg:p-6 pb-20 lg:pb-6">{page}</main>
+      <MobileNav/>
+    </div>
+  </div>;
+}
+
+function Root(){
+  const route=useHashRoute();
+  const [auth,setAuth]=useState(()=>SS.get('lno_auth',null));
+  const [users,setUsers]=useState(()=>LS.get('lno_users',DEFAULT_USERS));
+  const [funds,setFunds]=useState(()=>LS.get('lno_funds',DEFAULT_FUNDS));
+  const [exchanges,setExchanges]=useState(()=>LS.get('lno_exchanges',DEFAULT_EXCHANGES));
+  const [whatsapp,setWhatsapp]=useState(()=>LS.get('lno_whatsapp_config',DEFAULT_WA));
+  useEffect(()=>LS.set('lno_users',users),[users]);
+  useEffect(()=>LS.set('lno_funds',funds),[funds]);
+  useEffect(()=>LS.set('lno_exchanges',exchanges),[exchanges]);
+  useEffect(()=>LS.set('lno_whatsapp_config',whatsapp),[whatsapp]);
+
+  // resolve current user (fresh from users list)
+  const user = auth? (users.find(u=>u.id===auth.id)||auth) : null;
+  const {data,status:dataStatus}=useLiveData(!!user);
+
+  function login(username,password){
+    const u=users.find(x=>x.username===username&&x.password===password&&x.active);
+    if(u){ SS.set('lno_auth',{id:u.id}); setAuth({id:u.id}); return true; }
+    return false;
+  }
+  function logout(){ SS.del('lno_auth'); setAuth(null); window.location.hash='#/activity'; }
+  function saveAuth(u){ /* user object lives in users list; nothing extra needed */ }
+  function navigate(to){ window.location.hash='#'+to; }
+
+  const ctx={route,navigate,user,login,logout,saveAuth,users,setUsers,funds,setFunds,exchanges,setExchanges,whatsapp,setWhatsapp,data,dataStatus};
+
+  if(!user) return <App.Provider value={ctx}><Login/></App.Provider>;
+  if(!data) return <App.Provider value={ctx}><LoadingScreen status={dataStatus}/></App.Provider>;
+  return <App.Provider value={ctx}><Shell/></App.Provider>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
