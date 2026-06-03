@@ -85,11 +85,12 @@ async function fetchTickers(exchange, syms){
   }
   return out;
 }
-async function fetchKlines(exchange, sym, limit){
+async function fetchKlines(exchange, sym, limit, interval='day'){
+  const iv = interval==='hour' ? {Binance:'1h',Bybit:'60',OKX:'1H'} : {Binance:'1d',Bybit:'D',OKX:'1D'};
   let rows=[];
-  if(exchange==='Binance'){ const j=await EX.json(`https://api.binance.com/api/v3/klines?symbol=${EX.bn(sym)}&interval=1d&limit=${limit}`); rows=j.map(k=>({t:+k[0],close:+k[4]})); }
-  else if(exchange==='Bybit'){ const j=await EX.json(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${EX.bn(sym)}&interval=D&limit=${limit}`); rows=((j.result&&j.result.list)||[]).map(k=>({t:+k[0],close:+k[4]})); }
-  else { const j=await EX.json(`https://www.okx.com/api/v5/market/candles?instId=${EX.okx(sym)}&bar=1D&limit=${Math.min(limit,300)}`); rows=(j.data||[]).map(k=>({t:+k[0],close:+k[4]})); }
+  if(exchange==='Binance'){ const j=await EX.json(`https://api.binance.com/api/v3/klines?symbol=${EX.bn(sym)}&interval=${iv.Binance}&limit=${limit}`); rows=j.map(k=>({t:+k[0],close:+k[4]})); }
+  else if(exchange==='Bybit'){ const j=await EX.json(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${EX.bn(sym)}&interval=${iv.Bybit}&limit=${limit}`); rows=((j.result&&j.result.list)||[]).map(k=>({t:+k[0],close:+k[4]})); }
+  else { const j=await EX.json(`https://www.okx.com/api/v5/market/candles?instId=${EX.okx(sym)}&bar=${iv.OKX}&limit=${Math.min(limit,300)}`); rows=(j.data||[]).map(k=>({t:+k[0],close:+k[4]})); }
   return rows.filter(x=>isFinite(x.close)&&x.close>0).sort((a,b)=>a.t-b.t);
 }
 
@@ -503,6 +504,7 @@ function Login(){
 const MAIN_NAV=[
   ['activity','Activity Dashboard','/activity','Activity'],
   ['radio','Real-Time','/realtime','Live'],
+  ['dollar','Prices','/prices','Prices'],
   ['briefcase','Trades','/trades','Trades'],
   ['list','Activity Log','/logs','Logs'],
 ];
@@ -862,6 +864,68 @@ function ActivityPage({botId}){
         </table>
       </div>
     </Card>
+  </div>;
+}
+
+/* ============================================================
+   PRICES
+   ============================================================ */
+const ASSET_NAMES={BTC:'Bitcoin',ETH:'Ethereum',AVAX:'Avalanche',SOL:'Solana',BNB:'BNB',MATIC:'Polygon (POL)',ADA:'Cardano',XRP:'XRP',DOT:'Polkadot',LINK:'Chainlink'};
+function uniqueAssets(){
+  const seen={}, out=[];
+  BASE_BOTS.forEach(b=>{ const base=EX.parse(b.symbol).base; if(!seen[base]){ seen[base]=1; out.push({base, symbol:b.symbol, exchange:b.exchange, botId:b.id}); } });
+  return out;
+}
+function Sparkline({data,up,height=46}){
+  const id=useId().replace(/:/g,'');
+  if(!data||data.length<2) return <div style={{height}} className="grid place-items-center text-[11px] text-slate-300">loading…</div>;
+  const w=240,h=height; const min=Math.min(...data),max=Math.max(...data); const range=(max-min)||1;
+  const X=i=>(i/(data.length-1))*w; const Y=v=>h-((v-min)/range)*(h*0.85)-h*0.08;
+  const line=data.map((v,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
+  const area=`${line} L ${w} ${h} L 0 ${h} Z`; const c=up?'#10B981':'#EF4444';
+  return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full" style={{height}}>
+    <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c} stopOpacity="0.22"/><stop offset="100%" stopColor={c} stopOpacity="0"/></linearGradient></defs>
+    <path d={area} fill={`url(#${id})`}/>
+    <path d={line} fill="none" stroke={c} strokeWidth="1.75" vectorEffect="non-scaling-stroke"/>
+  </svg>;
+}
+function PricesPage(){
+  const {data,user}=useApp();
+  const assets=useMemo(uniqueAssets,[]);
+  const [spark,setSpark]=useState({});
+  useEffect(()=>{
+    let alive=true;
+    const load=async()=>{ const res={}; await Promise.all(assets.map(async a=>{ try{ const r=await fetchKlines(a.exchange,a.symbol,24,'hour'); res[a.base]=r.map(x=>x.close); }catch(e){ res[a.base]=null; } })); if(alive)setSpark(res); };
+    load(); const iv=setInterval(load,60000); return ()=>{alive=false;clearInterval(iv);};
+  },[]);
+  if(!hasPerm(user,'view_activity')) return <Denied/>;
+  return <div>
+    <PageHead title="Prices" subtitle="Live prices for the crypto assets traded by LNO bots"
+      actions={<span className="flex items-center gap-1.5 text-xs text-success font-medium"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>Live · 24h change</span>}/>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {assets.map(a=>{
+        const d=data.bots[a.botId]; const up=d.changePct>=0;
+        const sp=spark[a.base]; const hi=sp&&sp.length?Math.max(...sp):null; const lo=sp&&sp.length?Math.min(...sp):null;
+        return <Card key={a.base} className="p-4 relative overflow-hidden">
+          <span className="absolute left-0 top-0 bottom-0 w-1" style={{background:up?'#10B981':'#EF4444'}}/>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2"><span className="font-bold text-navy text-lg">{a.base}</span><span className="text-xs text-slate-400">{ASSET_NAMES[a.base]||a.base}</span></div>
+              <div className="text-2xl font-bold text-navy tnum mt-1">{fmtPrice(d.price)}</div>
+            </div>
+            <span className={`flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold tnum ${up?'bg-success/10 text-success':'bg-danger/10 text-danger'}`}>
+              <Icon name="trendup" className={'w-4 h-4 '+(up?'':'rotate-180')}/>{fmtPct(d.changePct)}
+            </span>
+          </div>
+          <div className="mt-3"><Sparkline data={sp} up={up}/></div>
+          <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2">
+            <span>24h low <span className="tnum text-slate-500">{lo!=null?fmtPrice(lo):'—'}</span></span>
+            <span className="font-mono text-slate-300">{a.exchange}</span>
+            <span>24h high <span className="tnum text-slate-500">{hi!=null?fmtPrice(hi):'—'}</span></span>
+          </div>
+        </Card>;
+      })}
+    </div>
   </div>;
 }
 
@@ -1361,12 +1425,12 @@ function AdminFunds(){
    ============================================================ */
 function ProfilePage(){
   const {user,setUsers,saveAuth}=useApp();
-  const [v,setV]=useState({firstName:user.firstName,lastName:user.lastName,email:user.email}); const [saved,setSaved]=useState(false);
+  const [v,setV]=useState({firstName:user.firstName,lastName:user.lastName}); const [saved,setSaved]=useState(false);
   const [pw,setPw]=useState({cur:'',n1:'',n2:''}); const [pwMsg,setPwMsg]=useState(null);
   const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||'');
   const fileRef=useRef();
   function patchSelf(patch){ setUsers(us=>us.map(u=>u.id===user.id?{...u,...patch}:u)); saveAuth({...user,...patch}); }
-  function saveInfo(){ if(!v.email.endsWith('@lno.company'))return setPwMsg(null)||alert('Email must end with @lno.company'); patchSelf(v); setSaved(true); setTimeout(()=>setSaved(false),1800); }
+  function saveInfo(){ patchSelf({firstName:v.firstName,lastName:v.lastName}); setSaved(true); setTimeout(()=>setSaved(false),1800); }
   function changePw(){ if(!pw.n1)return setPwMsg({err:'New password must not be empty'}); if(pw.n1!==pw.n2)return setPwMsg({err:'Confirmation must match'}); if(pw.cur!==user.password)return setPwMsg({err:'Current password is incorrect'}); patchSelf({password:pw.n1}); setPw({cur:'',n1:'',n2:''}); setPwMsg({ok:'Password updated'}); }
   function upload(e){ const file=e.target.files[0]; if(!file)return; if(!['image/png','image/jpeg'].includes(file.type))return alert('Accepted formats: PNG, JPEG'); if(file.size>5*1024*1024)return alert('Maximum file size is 5 MB'); const r=new FileReader(); r.onload=()=>patchSelf({avatar:r.result}); r.readAsDataURL(file); }
   return <div className="max-w-2xl">
@@ -1382,7 +1446,7 @@ function ProfilePage(){
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Username" hint="Can only be changed by an admin"><Input value={user.username} disabled className="bg-slate-50 text-slate-400"/></Field>
-        <Field label="Email"><Input value={v.email} onChange={e=>setV({...v,email:e.target.value})}/></Field>
+        <Field label="Email" hint="Contact an admin to change your email"><Input value={user.email} disabled className="bg-slate-50 text-slate-400"/></Field>
         <Field label="First name"><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
         <Field label="Last name"><Input value={v.lastName} onChange={e=>setV({...v,lastName:e.target.value})}/></Field>
       </div>
@@ -1482,6 +1546,7 @@ function Shell(){
   let page;
   if(a==='activity'){ page = b==='bot'? <ActivityPage botId={c}/> : <ActivityPage/>; }
   else if(a==='realtime') page=<RealtimePage/>;
+  else if(a==='prices') page=<PricesPage/>;
   else if(a==='trades') page=<TradesPage/>;
   else if(a==='logs') page=<LogsPage/>;
   else if(a==='admin'&&b==='users') page=<AdminUsers/>;
