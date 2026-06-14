@@ -4,3 +4,8 @@ node_modules
 dist
 .claude
 *.log
+.env
+.env.local
+.env*.local
+*.pglite
+.pglite

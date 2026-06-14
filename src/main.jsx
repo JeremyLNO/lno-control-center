@@ -203,34 +203,21 @@ function genLogs(){
 const LOGS = genLogs();
 
 /* ============================================================
-   STORAGE
+   API CLIENT — all accounts/config/secrets live in the backend DB.
+   The browser only holds a short-lived JWT (sessionStorage); no
+   passwords or secrets are ever stored client-side.
    ============================================================ */
-const DEFAULT_USERS = [
-  {id:'u1',username:'admin',email:'admin@lno.company',firstName:'',lastName:'',role:'admin',active:true,permissions:ALL_PERMS.slice(),avatar:null,password:'admin',phone:'',notify:true},
-  {id:'u2',username:'sophie.ops',email:'sophie.ops@lno.company',firstName:'Sophie',lastName:'Laurent',role:'operator',active:true,permissions:ROLE_PERMS.operator.slice(),avatar:null,password:'admin',phone:'',notify:false},
-  {id:'u3',username:'marc.view',email:'marc.view@lno.company',firstName:'Marc',lastName:'Dubois',role:'viewer',active:false,permissions:ROLE_PERMS.viewer.slice(),avatar:null,password:'admin',phone:'',notify:false},
-];
-const DEFAULT_FUNDS = [
-  {id:'f1',name:'Alpha Fund',color:'#C9A24D',bots:['b1','b2','b3']},
-  {id:'f2',name:'Beta Fund',color:'#3B82F6',bots:['b4','b5','b6']},
-  {id:'f3',name:'Gamma Fund',color:'#10B981',bots:['b7','b8']},
-];
-const DEFAULT_EXCHANGES = [
-  {id:'e1',name:'binance',label:'Binance Main',apiKey:'BIN-9F2A-7H2K-2204',secret:'sk_live_8f3kd92jfh38dh2',status:'connected',lastSync:NOW-1000*60*3,note:'Primary spot+futures'},
-  {id:'e2',name:'bybit',label:'Bybit Pro',apiKey:'BYB-1C44-9X1Q-7781',secret:'sk_live_bb920skd02ksld',status:'error',lastSync:NOW-1000*60*42,note:''},
-  {id:'e3',name:'okx',label:'OKX Institutional',apiKey:'OKX-77B0-3L8P-0099',secret:'sk_live_okx772hdk2',status:'pending',lastSync:null,note:'Awaiting verification'},
-];
-const DEFAULT_WA = {token:'',phoneId:'',recipient:'',enabled:false};
-
-const LS = {
-  get(k,def){ try{const v=localStorage.getItem(k); return v?JSON.parse(v):def;}catch(e){return def;} },
-  set(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} },
-};
-const SS = {
-  get(k,def){ try{const v=sessionStorage.getItem(k); return v?JSON.parse(v):def;}catch(e){return def;} },
-  set(k,v){ try{sessionStorage.setItem(k,JSON.stringify(v));}catch(e){} },
-  del(k){ try{sessionStorage.removeItem(k);}catch(e){} },
-};
+const TOKEN_KEY='lno_token';
+const getToken=()=>{ try{ return sessionStorage.getItem(TOKEN_KEY)||null; }catch(e){ return null; } };
+const setToken=(t)=>{ try{ t? sessionStorage.setItem(TOKEN_KEY,t): sessionStorage.removeItem(TOKEN_KEY); }catch(e){} };
+async function api(path,{method='GET',body}={}){
+  const headers={}; const tok=getToken(); if(tok) headers['Authorization']='Bearer '+tok;
+  if(body!==undefined) headers['Content-Type']='application/json';
+  const r=await fetch('/api/'+path,{method,headers,body:body!==undefined?JSON.stringify(body):undefined});
+  let data=null; try{ data=await r.json(); }catch(e){}
+  if(!r.ok){ const err=new Error((data&&data.error)||('HTTP '+r.status)); err.status=r.status; err.data=data; throw err; }
+  return data;
+}
 
 /* ============================================================
    ICONS
@@ -468,15 +455,15 @@ function LoadingScreen({status}){
 function Login(){
   const {login}=useApp();
   const [u,setU]=useState(''); const [p,setP]=useState(''); const [err,setErr]=useState(''); const [warn,setWarn]=useState(false);
-  const attempts=LS.get('lno_login_attempts',0);
-  function submit(e){
-    e.preventDefault();
-    const ok=login(u.trim(),p);
-    if(!ok){
-      const a=LS.get('lno_login_attempts',0)+1; LS.set('lno_login_attempts',a);
-      setErr('Invalid username or password.');
-      if(a>=3){ setWarn(true); console.warn('POST /api/alerts/login-failure',{username:u,attempts:a}); }
-    } else { LS.set('lno_login_attempts',0); }
+  const [busy,setBusy]=useState(false); const attemptsRef=useRef(0);
+  async function submit(e){
+    e.preventDefault(); if(busy) return; setBusy(true); setErr('');
+    try{ await login(u.trim(),p); attemptsRef.current=0; }
+    catch(ex){
+      attemptsRef.current+=1;
+      setErr(ex.message||'Invalid username or password.');
+      if(attemptsRef.current>=3) setWarn(true);
+    } finally{ setBusy(false); }
   }
   return <div className="min-h-full grid place-items-center bg-navy relative overflow-hidden p-4">
     <div className="absolute inset-0 opacity-[0.07]" style={{backgroundImage:'radial-gradient(circle at 20% 20%, #C9A24D 0, transparent 40%), radial-gradient(circle at 80% 70%, #3B82F6 0, transparent 40%)'}}/>
@@ -491,7 +478,7 @@ function Login(){
         <Field label="Password"><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="admin"/></Field>
         {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4"/>{err}</div>}
         {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>Multiple failed attempts detected. A security alert has been dispatched to the operations team.</span></div>}
-        <Btn className="w-full" type="submit">Sign in</Btn>
+        <Btn className="w-full" type="submit" disabled={busy}>{busy?'Signing in…':'Sign in'}</Btn>
         <div className="text-[11px] text-slate-400 text-center">Default credentials: <span className="font-mono">admin / admin</span></div>
       </form>
     </div>
@@ -511,7 +498,7 @@ const MAIN_NAV=[
 const ADMIN_NAV=[
   ['users','Users','/admin/users'],
   ['link','Exchanges','/admin/exchanges'],
-  ['msg','WhatsApp API','/admin/whatsapp'],
+  ['msg','OpenWA','/admin/openwa'],
   ['layers','Funds','/admin/funds'],
 ];
 const ACCT_NAV=[
@@ -1186,10 +1173,12 @@ function LogsPage(){
    ADMIN — USERS
    ============================================================ */
 function AdminUsers(){
-  const {users,setUsers,user}=useApp();
+  const {user}=useApp();
+  const [users,setUsers]=useState([]);
   const [exp,setExp]=useState(null); const [add,setAdd]=useState(false); const [del,setDel]=useState(null); const [editName,setEditName]=useState(null); const [nameVal,setNameVal]=useState('');
+  useEffect(()=>{ if(user.role==='admin') api('users').then(r=>setUsers(r.users||[])).catch(()=>{}); },[]);
   if(user.role!=='admin') return <Denied/>;
-  const up=(id,patch)=>setUsers(us=>us.map(u=>u.id===id?{...u,...patch}:u));
+  const up=async(id,patch)=>{ try{ const r=await api('users',{method:'PATCH',body:{id,...patch}}); setUsers(us=>us.map(u=>u.id===id?r.user:u)); }catch(e){ alert(e.message); } };
   return <div>
     <PageHead title="Users" subtitle={`${users.length} accounts`} actions={<Btn onClick={()=>setAdd(true)}><Icon name="plus" className="w-4 h-4"/>Add User</Btn>}/>
     <div className="space-y-3">
@@ -1230,18 +1219,19 @@ function AdminUsers(){
         </div>}
       </Card>)}
     </div>
-    <AddUserModal open={add} onClose={()=>setAdd(false)} onAdd={nu=>{setUsers(us=>[...us,nu]);setAdd(false);}} existing={users}/>
-    <Confirm open={!!del} title="Delete user" message={`Permanently remove ${del?.username}? This cannot be undone.`} onCancel={()=>setDel(null)} onConfirm={()=>{setUsers(us=>us.filter(u=>u.id!==del.id));setDel(null);setExp(null);}}/>
+    <AddUserModal open={add} onClose={()=>setAdd(false)} onCreated={u=>{setUsers(us=>[...us,u]);setAdd(false);}}/>
+    <Confirm open={!!del} title="Delete user" message={`Permanently remove ${del?.username}? This cannot be undone.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('users',{method:'DELETE',body:{id:del.id}});setUsers(us=>us.filter(u=>u.id!==del.id));}catch(e){alert(e.message);}setDel(null);setExp(null);}}/>
   </div>;
 }
-function AddUserModal({open,onClose,onAdd,existing}){
-  const [v,setV]=useState({username:'',email:'',firstName:'',lastName:'',role:'viewer'}); const [err,setErr]=useState('');
+function AddUserModal({open,onClose,onCreated}){
+  const [v,setV]=useState({username:'',email:'',firstName:'',lastName:'',role:'viewer'}); const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
   useEffect(()=>{ if(open){setV({username:'',email:'',firstName:'',lastName:'',role:'viewer'});setErr('');} },[open]);
-  function submit(){
+  async function submit(){
     if(!v.username.trim())return setErr('Username is required.');
-    if(existing.some(u=>u.username===v.username.trim()))return setErr('Username must be unique.');
     if(!v.email.endsWith('@lno.company'))return setErr('Email must end with @lno.company');
-    onAdd({id:'u'+Date.now(),...v,username:v.username.trim(),active:true,permissions:ROLE_PERMS[v.role].slice(),avatar:null,password:'admin',phone:'',notify:false});
+    setBusy(true);
+    try{ const r=await api('users',{method:'POST',body:{username:v.username.trim(),email:v.email,firstName:v.firstName,lastName:v.lastName,role:v.role}}); onCreated(r.user); }
+    catch(e){ setErr(e.message); } finally{ setBusy(false); }
   }
   return <Modal open={open} onClose={onClose} title="Add User">
     <div className="space-y-3">
@@ -1254,7 +1244,7 @@ function AddUserModal({open,onClose,onAdd,existing}){
       <Field label="Role"><Select value={v.role} onChange={r=>setV({...v,role:r})} options={[{value:'admin',label:'Admin'},{value:'operator',label:'Operator'},{value:'viewer',label:'Viewer'}]}/></Field>
       {err&&<div className="text-sm text-danger">{err}</div>}
       <div className="text-[11px] text-slate-400">New users are created with the default password <span className="font-mono">admin</span> and default permissions for their role.</div>
-      <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={submit}>Create user</Btn></div>
+      <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={submit} disabled={busy}>{busy?'Creating…':'Create user'}</Btn></div>
     </div>
   </Modal>;
 }
@@ -1263,8 +1253,11 @@ function AddUserModal({open,onClose,onAdd,existing}){
    ADMIN — EXCHANGES
    ============================================================ */
 function AdminExchanges(){
-  const {exchanges,setExchanges,user}=useApp();
-  const [modal,setModal]=useState(null); const [del,setDel]=useState(null); const [reveal,setReveal]=useState({});
+  const {user}=useApp();
+  const [exchanges,setExchanges]=useState([]);
+  const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
+  const reload=()=>api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{});
+  useEffect(()=>{ if(user.role==='admin') reload(); },[]);
   if(user.role!=='admin') return <Denied/>;
   const mask=(s)=> s? s.slice(0,6)+'••••••••'+s.slice(-4) : '';
   return <div>
@@ -1278,8 +1271,7 @@ function AdminExchanges(){
         <div className="mt-4 space-y-2 text-sm">
           <div className="flex justify-between"><span className="text-slate-400">API Key</span><span className="font-mono text-xs">{mask(e.apiKey)}</span></div>
           <div className="flex justify-between items-center"><span className="text-slate-400">API Secret</span>
-            <span className="flex items-center gap-2"><span className="font-mono text-xs">{reveal[e.id]?e.secret:'••••••••••••'}</span>
-              <button onClick={()=>setReveal(r=>({...r,[e.id]:!r[e.id]}))} className="text-slate-400 hover:text-navy"><Icon name={reveal[e.id]?'eyeoff':'eye'} className="w-4 h-4"/></button></span>
+            <span className="flex items-center gap-1.5 font-mono text-xs">{e.hasSecret? e.secretMasked : <span className="text-slate-300">none</span>}<Icon name="shield" className="w-3.5 h-3.5 text-success" data-tip="Encrypted at rest"/></span>
           </div>
           <div className="flex justify-between"><span className="text-slate-400">Last sync</span><span className="text-xs">{e.lastSync?fmtDT(e.lastSync):'—'}</span></div>
           {e.note&&<div className="text-xs text-slate-400 pt-1">{e.note}</div>}
@@ -1290,12 +1282,15 @@ function AdminExchanges(){
         </div>
       </Card>)}
     </div>
-    <ExchangeModal modal={modal} onClose={()=>setModal(null)} onSave={(d)=>{
-      if(modal.mode==='add') setExchanges(x=>[...x,{...d,id:'e'+Date.now(),status:'pending',lastSync:null}]);
-      else setExchanges(x=>x.map(e=>e.id===d.id?{...e,...d,secret:d.secret||e.secret}:e));
-      setModal(null);
+    <ExchangeModal modal={modal} onClose={()=>setModal(null)} onSave={async(d)=>{
+      try{
+        const body={name:d.name,label:d.label,apiKey:d.apiKey,note:d.note}; if(d.secret) body.apiSecret=d.secret;
+        if(modal.mode==='add') await api('exchanges',{method:'POST',body});
+        else await api('exchanges',{method:'PATCH',body:{id:d.id,...body}});
+        await reload(); setModal(null);
+      }catch(e){ alert(e.message); }
     }}/>
-    <Confirm open={!!del} title="Delete exchange" message={`Remove ${del?.label}? Bots using this connection will lose API access.`} onCancel={()=>setDel(null)} onConfirm={()=>{setExchanges(x=>x.filter(e=>e.id!==del.id));setDel(null);}}/>
+    <Confirm open={!!del} title="Delete exchange" message={`Remove ${del?.label}? Bots using this connection will lose API access.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('exchanges',{method:'DELETE',body:{id:del.id}});await reload();}catch(e){alert(e.message);}setDel(null);}}/>
   </div>;
 }
 function ExchangeModal({modal,onClose,onSave}){
@@ -1316,26 +1311,37 @@ function ExchangeModal({modal,onClose,onSave}){
 /* ============================================================
    ADMIN — WHATSAPP
    ============================================================ */
-function AdminWhatsapp(){
-  const {whatsapp,setWhatsapp,user}=useApp();
-  const [v,setV]=useState(whatsapp); const [saved,setSaved]=useState(false);
+function AdminOpenWA(){
+  const {user}=useApp();
+  const [cfg,setCfg]=useState(null);
+  const [apiUrl,setApiUrl]=useState(''); const [apiKey,setApiKey]=useState(''); const [defaultSender,setDefaultSender]=useState(''); const [enabled,setEnabled]=useState(false);
+  const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null);
+  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setApiUrl(c.apiUrl); setDefaultSender(c.defaultSender); setEnabled(c.enabled); }).catch(()=>{}); },[]);
   if(user.role!=='admin') return <Denied/>;
-  const save=()=>{ setWhatsapp(v); setSaved(true); setTimeout(()=>setSaved(false),1800); };
+  async function save(){ setBusy(true); try{ const body={apiUrl,defaultSender,enabled}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ alert(e.message); } finally{ setBusy(false); } }
+  async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } }
   return <div className="max-w-2xl">
-    <PageHead title="WhatsApp API" subtitle="WhatsApp Business API integration for system alerts"/>
+    <PageHead title="OpenWA" subtitle="Self-hosted WhatsApp automation (open-wa.org) for system alerts"/>
     <Card className="p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <div><div className="font-medium text-navy">Enable notifications</div><div className="text-xs text-slate-400">Master toggle for all WhatsApp alerts</div></div>
-        <Toggle on={v.enabled} onChange={x=>setV({...v,enabled:x})}/>
+        <div><div className="font-medium text-navy">Enable notifications</div><div className="text-xs text-slate-400">Master toggle for all OpenWA alerts</div></div>
+        <Toggle on={enabled} onChange={setEnabled}/>
       </div>
       <div className="border-t border-slate-100 pt-4 space-y-3">
-        <Field label="API Token" hint="WhatsApp Business API bearer token"><Input type="password" value={v.token} onChange={e=>setV({...v,token:e.target.value})} placeholder="EAAG…"/></Field>
-        <Field label="Phone Number ID"><Input value={v.phoneId} onChange={e=>setV({...v,phoneId:e.target.value})} placeholder="123456789012345"/></Field>
-        <Field label="Default Recipient" hint="Default phone number to send alerts to"><Input value={v.recipient} onChange={e=>setV({...v,recipient:e.target.value})} placeholder="+33 6 12 34 56 78"/></Field>
+        <Field label="OpenWA API URL" hint="Your always-on OpenWA host (EASY API base URL)"><Input value={apiUrl} onChange={e=>setApiUrl(e.target.value)} placeholder="https://wa.yourhost.com"/></Field>
+        <Field label="API Key" hint={cfg&&cfg.hasApiKey? `Encrypted in DB (${cfg.apiKeyMasked}). Leave blank to keep.` : 'Stored encrypted in the database — never shown again'}><Input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={cfg&&cfg.hasApiKey?'•••••• (unchanged)':'openwa api key'}/></Field>
+        <Field label="Default Recipient" hint="Default phone number for alerts (international format)"><Input value={defaultSender} onChange={e=>setDefaultSender(e.target.value)} placeholder="+33 6 12 34 56 78"/></Field>
       </div>
-      <div className="flex items-center gap-3 pt-1"><Btn onClick={save}>Save settings</Btn>{saved&&<span className="text-sm text-success flex items-center gap-1 fadein"><Icon name="check" className="w-4 h-4"/>Saved</span>}</div>
+      <div className="flex items-center gap-3 pt-1 flex-wrap">
+        <Btn onClick={save} disabled={busy}>{busy?'Saving…':'Save settings'}</Btn>
+        <Btn variant="outline" onClick={sendTest} disabled={!cfg||(!cfg.hasApiKey&&!apiKey)}><Icon name="msg" className="w-4 h-4"/>Send test message</Btn>
+        {saved&&<span className="text-sm text-success flex items-center gap-1 fadein"><Icon name="check" className="w-4 h-4"/>Saved</span>}
+        {test&&<span className={`text-sm flex items-center gap-1 ${test.state==='ok'?'text-success':test.state==='err'?'text-danger':'text-slate-400'}`}>{test.state==='sending'?'Sending…':test.msg}</span>}
+      </div>
     </Card>
     <Card className="p-5 mt-4">
+      <SectionTitle>How it works</SectionTitle>
+      <p className="text-sm text-slate-600 mb-4">OpenWA (<span className="font-mono text-xs bg-slate-100 px-1 rounded">@open-wa/wa-automate</span>) runs on your own always-on host and drives a real WhatsApp session. The Control Center backend calls its API to send alerts — the API key is <span className="font-medium">encrypted at rest</span> and never exposed to the browser.</p>
       <SectionTitle>Alert Types</SectionTitle>
       <ul className="text-sm text-slate-600 space-y-2">
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Bot status changes (active → error, paused, etc.)</li>
@@ -1350,13 +1356,15 @@ function AdminWhatsapp(){
    ADMIN — FUNDS
    ============================================================ */
 function AdminFunds(){
-  const {funds,setFunds,user}=useApp();
-  const [newName,setNewName]=useState(''); const [edit,setEdit]=useState(null); const [editVal,setEditVal]=useState(''); const [del,setDel]=useState(null); const [reassignTo,setReassignTo]=useState('');
+  const {funds,saveFunds,user}=useApp();
+  const [newName,setNewName]=useState(''); const [edit,setEdit]=useState(null); const [editVal,setEditVal]=useState(''); const [editColor,setEditColor]=useState('#C9A24D'); const [del,setDel]=useState(null); const [reassignTo,setReassignTo]=useState('');
   if(user.role!=='admin') return <Denied/>;
   const usedColors=funds.map(f=>f.color); const freeColor=FUND_PALETTE.find(c=>!usedColors.includes(c))||FUND_PALETTE[funds.length%8];
-  function create(){ if(!newName.trim())return; setFunds(f=>[...f,{id:'f'+Date.now(),name:newName.trim(),color:freeColor,bots:[]}]); setNewName(''); }
-  function reassign(botId,toId){ setFunds(fs=>fs.map(f=>({...f,bots: f.id===toId? [...f.bots.filter(b=>b!==botId),botId] : f.bots.filter(b=>b!==botId)}))); }
-  function doDelete(){ const victim=del; setFunds(fs=>{ const target=fs.find(f=>f.id===reassignTo); const moved=victim.bots; return fs.filter(f=>f.id!==victim.id).map(f=>f.id===reassignTo?{...f,bots:[...f.bots,...moved]}:f); }); setDel(null); setReassignTo(''); }
+  const persist=(next)=>{ saveFunds(next).catch(e=>alert(e.message)); };
+  function create(){ if(!newName.trim())return; persist([...funds,{id:'f'+Date.now(),name:newName.trim(),color:freeColor,bots:[]}]); setNewName(''); }
+  function reassign(botId,toId){ persist(funds.map(f=>({...f,bots: f.id===toId? [...f.bots.filter(b=>b!==botId),botId] : f.bots.filter(b=>b!==botId)}))); }
+  function saveEdit(id){ persist(funds.map(x=>x.id===id?{...x,name:editVal,color:editColor}:x)); setEdit(null); }
+  function doDelete(){ const victim=del; persist(funds.filter(f=>f.id!==victim.id).map(f=>f.id===reassignTo?{...f,bots:[...f.bots,...victim.bots]}:f)); setDel(null); setReassignTo(''); }
   return <div>
     <PageHead title="Funds" subtitle="Create funds and manage bot-to-fund assignments"/>
     <Card className="p-4 mb-5">
@@ -1371,12 +1379,12 @@ function AdminFunds(){
       {funds.map(f=><Card key={f.id} className="p-5">
         <div className="flex items-center justify-between mb-3">
           {edit===f.id? <div className="flex items-center gap-2 flex-1">
-            <input type="color" value={f.color} onChange={e=>setFunds(fs=>fs.map(x=>x.id===f.id?{...x,color:e.target.value}:x))} className="w-7 h-7 rounded cursor-pointer border border-slate-200"/>
-            <Input value={editVal} autoFocus onChange={e=>setEditVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){setFunds(fs=>fs.map(x=>x.id===f.id?{...x,name:editVal}:x));setEdit(null);}}}/>
-            <Btn size="icon" variant="subtle" onClick={()=>{setFunds(fs=>fs.map(x=>x.id===f.id?{...x,name:editVal}:x));setEdit(null);}}><Icon name="check" className="w-4 h-4"/></Btn>
+            <input type="color" value={editColor} onChange={e=>setEditColor(e.target.value)} className="w-7 h-7 rounded cursor-pointer border border-slate-200"/>
+            <Input value={editVal} autoFocus onChange={e=>setEditVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')saveEdit(f.id);}}/>
+            <Btn size="icon" variant="subtle" onClick={()=>saveEdit(f.id)}><Icon name="check" className="w-4 h-4"/></Btn>
           </div> : <div className="flex items-center gap-2"><span className="w-3.5 h-3.5 rounded-full" style={{background:f.color}}/><span className="font-semibold text-navy">{f.name}</span><span className="text-xs text-slate-400">{f.bots.length} bots</span></div>}
           {edit!==f.id&&<div className="flex gap-1">
-            <button onClick={()=>{setEdit(f.id);setEditVal(f.name);}} className="text-slate-400 hover:text-navy p-1" data-tip="Edit name"><Icon name="pencil" className="w-4 h-4"/></button>
+            <button onClick={()=>{setEdit(f.id);setEditVal(f.name);setEditColor(f.color);}} className="text-slate-400 hover:text-navy p-1" data-tip="Edit name"><Icon name="pencil" className="w-4 h-4"/></button>
             <button onClick={()=>{setDel(f);setReassignTo(funds.find(x=>x.id!==f.id)?.id||'');}} disabled={funds.length<=1} className="text-slate-400 hover:text-danger p-1 disabled:opacity-30"><Icon name="trash" className="w-4 h-4"/></button>
           </div>}
         </div>
@@ -1424,14 +1432,14 @@ function AdminFunds(){
    PROFILE
    ============================================================ */
 function ProfilePage(){
-  const {user,setUsers,saveAuth}=useApp();
+  const {user,setUser}=useApp();
   const [v,setV]=useState({firstName:user.firstName,lastName:user.lastName}); const [saved,setSaved]=useState(false);
   const [pw,setPw]=useState({cur:'',n1:'',n2:''}); const [pwMsg,setPwMsg]=useState(null);
   const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||'');
   const fileRef=useRef();
-  function patchSelf(patch){ setUsers(us=>us.map(u=>u.id===user.id?{...u,...patch}:u)); saveAuth({...user,...patch}); }
-  function saveInfo(){ patchSelf({firstName:v.firstName,lastName:v.lastName}); setSaved(true); setTimeout(()=>setSaved(false),1800); }
-  function changePw(){ if(!pw.n1)return setPwMsg({err:'New password must not be empty'}); if(pw.n1!==pw.n2)return setPwMsg({err:'Confirmation must match'}); if(pw.cur!==user.password)return setPwMsg({err:'Current password is incorrect'}); patchSelf({password:pw.n1}); setPw({cur:'',n1:'',n2:''}); setPwMsg({ok:'Password updated'}); }
+  async function patchSelf(patch){ try{ const r=await api('profile',{method:'PATCH',body:patch}); setUser(r.user); return true; }catch(e){ alert(e.message); return false; } }
+  async function saveInfo(){ if(await patchSelf({firstName:v.firstName,lastName:v.lastName})){ setSaved(true); setTimeout(()=>setSaved(false),1800); } }
+  async function changePw(){ if(!pw.n1)return setPwMsg({err:'New password must not be empty'}); if(pw.n1!==pw.n2)return setPwMsg({err:'Confirmation must match'}); try{ await api('auth',{method:'POST',body:{action:'changePassword',current:pw.cur,next:pw.n1}}); setPw({cur:'',n1:'',n2:''}); setPwMsg({ok:'Password updated'}); }catch(e){ setPwMsg({err:e.message||'Could not update password'}); } }
   function upload(e){ const file=e.target.files[0]; if(!file)return; if(!['image/png','image/jpeg'].includes(file.type))return alert('Accepted formats: PNG, JPEG'); if(file.size>5*1024*1024)return alert('Maximum file size is 5 MB'); const r=new FileReader(); r.onload=()=>patchSelf({avatar:r.result}); r.readAsDataURL(file); }
   return <div className="max-w-2xl">
     <PageHead title="Profile & Settings" subtitle="Manage your personal account details"/>
@@ -1551,7 +1559,7 @@ function Shell(){
   else if(a==='logs') page=<LogsPage/>;
   else if(a==='admin'&&b==='users') page=<AdminUsers/>;
   else if(a==='admin'&&b==='exchanges') page=<AdminExchanges/>;
-  else if(a==='admin'&&b==='whatsapp') page=<AdminWhatsapp/>;
+  else if(a==='admin'&&(b==='openwa'||b==='whatsapp')) page=<AdminOpenWA/>;
   else if(a==='admin'&&b==='funds') page=<AdminFunds/>;
   else if(a==='profile') page=<ProfilePage/>;
   else if(a==='support') page=<SupportPage/>;
@@ -1568,33 +1576,45 @@ function Shell(){
 
 function Root(){
   const route=useHashRoute();
-  const [auth,setAuth]=useState(()=>SS.get('lno_auth',null));
-  const [users,setUsers]=useState(()=>LS.get('lno_users',DEFAULT_USERS));
-  const [funds,setFunds]=useState(()=>LS.get('lno_funds',DEFAULT_FUNDS));
-  const [exchanges,setExchanges]=useState(()=>LS.get('lno_exchanges',DEFAULT_EXCHANGES));
-  const [whatsapp,setWhatsapp]=useState(()=>LS.get('lno_whatsapp_config',DEFAULT_WA));
-  useEffect(()=>LS.set('lno_users',users),[users]);
-  useEffect(()=>LS.set('lno_funds',funds),[funds]);
-  useEffect(()=>LS.set('lno_exchanges',exchanges),[exchanges]);
-  useEffect(()=>LS.set('lno_whatsapp_config',whatsapp),[whatsapp]);
-
-  // resolve current user (fresh from users list)
-  const user = auth? (users.find(u=>u.id===auth.id)||auth) : null;
+  const [user,setUser]=useState(null);
+  const [booting,setBooting]=useState(true);
+  const [funds,setFunds]=useState([]);
   const {data,status:dataStatus}=useLiveData(!!user);
 
-  function login(username,password){
-    const u=users.find(x=>x.username===username&&x.password===password&&x.active);
-    if(u){ SS.set('lno_auth',{id:u.id}); setAuth({id:u.id}); return true; }
-    return false;
+  // restore session from the JWT on load
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      if(!getToken()){ if(alive){setBooting(false);} return; }
+      try{ const r=await api('auth'); if(alive) setUser(r.user); }
+      catch(e){ setToken(null); }
+      finally{ if(alive) setBooting(false); }
+    })();
+    return ()=>{alive=false;};
+  },[]);
+
+  // funds are read by many pages (Activity/Realtime) — load once authed
+  useEffect(()=>{
+    if(!user){ setFunds([]); return; }
+    let alive=true;
+    api('funds').then(r=>{ if(alive) setFunds(r.funds||[]); }).catch(()=>{});
+    return ()=>{alive=false;};
+  },[user]);
+  const reloadFunds=useCallback(async()=>{ const r=await api('funds'); setFunds(r.funds||[]); return r.funds; },[]);
+  const saveFunds=useCallback(async(next)=>{ const r=await api('funds',{method:'PUT',body:{funds:next}}); setFunds(r.funds||[]); return r.funds; },[]);
+
+  async function login(username,password){
+    const r=await api('auth',{method:'POST',body:{action:'login',username,password}});
+    setToken(r.token); setUser(r.user); return r.user;
   }
-  function logout(){ SS.del('lno_auth'); setAuth(null); window.location.hash='#/activity'; }
-  function saveAuth(u){ /* user object lives in users list; nothing extra needed */ }
+  function logout(){ api('auth',{method:'POST',body:{action:'logout'}}).catch(()=>{}); setToken(null); setUser(null); window.location.hash='#/activity'; }
   function navigate(to){ window.location.hash='#'+to; }
 
-  const ctx={route,navigate,user,login,logout,saveAuth,users,setUsers,funds,setFunds,exchanges,setExchanges,whatsapp,setWhatsapp,data,dataStatus};
+  const ctx={route,navigate,user,setUser,login,logout,api,funds,setFunds,reloadFunds,saveFunds,data,dataStatus};
 
+  if(booting) return <App.Provider value={ctx}><LoadingScreen status="loading"/></App.Provider>;
   if(!user) return <App.Provider value={ctx}><Login/></App.Provider>;
-  if(!data) return <App.Provider value={ctx}><LoadingScreen status={dataStatus}/></App.Provider>;
+  if(!data||!funds.length) return <App.Provider value={ctx}><LoadingScreen status={dataStatus}/></App.Provider>;
   return <App.Provider value={ctx}><Shell/></App.Provider>;
 }
 
