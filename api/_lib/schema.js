@@ -59,6 +59,16 @@ export async function migrate() {
     acked_at TIMESTAMPTZ,
     acked_by TEXT
   )`);
+  // generated report archive (PDF kept as base64 so it can be re-downloaded)
+  await query(`CREATE TABLE IF NOT EXISTS reports (
+    id BIGSERIAL PRIMARY KEY,
+    kind TEXT NOT NULL DEFAULT 'monthly',
+    period_label TEXT NOT NULL,
+    equity BIGINT NOT NULL DEFAULT 0,
+    pnl BIGINT NOT NULL DEFAULT 0,
+    pdf_base64 TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`);
 }
 
 export async function seedIfEmpty() {

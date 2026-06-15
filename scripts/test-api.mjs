@@ -136,5 +136,16 @@ ok('alert now shows acknowledged', !!r.body.alerts.find(al => al.code === pendin
 r = await call(snapshots, { method: 'GET', headers: authH });
 ok('cron wrote an equity snapshot (history accrues)', r.status === 200 && r.body.snapshots.length >= 1 && typeof r.body.snapshots[0].equity === 'number', r.body && r.body.snapshots);
 
+// report archive: admin generates a report -> it lists -> the PDF downloads
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
+const genReport = r.body.report;
+ok('admin generates + archives a report', r.status === 200 && genReport && genReport.id && genReport.kind === 'monthly', r.body);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { reports: 'list' } });
+ok('report archive lists the generated report', r.status === 200 && (r.body.reports || []).some(x => x.id === genReport.id), r.body && r.body.reports);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { report: String(genReport.id) } });
+ok('archived report downloads as a valid %PDF', r.status === 200 && Buffer.from(r.body.pdfBase64, 'base64').slice(0, 5).toString() === '%PDF-', r.body && r.body.filename);
+r = await call(snapshots, { method: 'GET', query: { reports: 'list' } });
+ok('report archive requires auth -> 401', r.status === 401, r.status);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

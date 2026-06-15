@@ -85,7 +85,10 @@ export default async function handler(req, res) {
       const pnl30 = pnlOver(30);
       sent.push({ type: 'monthly', ...(await notify(`🗓️ LNO monthly report\nEquity ${fUSD(m.totalEquity)}\nPnL 30d ${fmt(pnl30)}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% (${m.ddDurationDays}d) · Sharpe ${m.sharpe.toFixed(2)} · Sortino ${m.sortino.toFixed(2)}`)) });
       try {
-        const b64 = await buildMonthlyPdf({ equity: m.totalEquity, pnl30, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, best: p.best, worst: p.worst, byExchange: p.byExchange, dateLabel: new Date(dt).toISOString().slice(0, 10) });
+        const label = new Date(dt).toISOString().slice(0, 10);
+        const b64 = await buildMonthlyPdf({ equity: m.totalEquity, pnl30, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, best: p.best, worst: p.worst, byExchange: p.byExchange, dateLabel: label });
+        // archive it so it can be re-downloaded from the Reports page
+        try { await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5)', ['monthly', label, Math.round(m.totalEquity), Math.round(pnl30), b64]); } catch (e) {}
         const tos = await getRecipients(); let fsent = 0;
         for (const to of tos) { const r = await sendFile(cfg, to, b64, 'lno-monthly-report.pdf', 'LNO monthly report'); if (r.ok) fsent++; }
         sent.push({ type: 'monthly-pdf', sent: fsent, total: tos.length, bytes: b64.length });

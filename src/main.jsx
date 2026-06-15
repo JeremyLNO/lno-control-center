@@ -217,6 +217,38 @@ const PREF={
   get:(k,d)=>{ try{ const v=localStorage.getItem('lno_pref_'+k); return v==null?d:JSON.parse(v); }catch(e){ return d; } },
   set:(k,v)=>{ try{ localStorage.setItem('lno_pref_'+k,JSON.stringify(v)); }catch(e){} },
 };
+
+/* ============================================================
+   DATA EXPORT — CSV (no dep) + XLSX (code-split). Rows are
+   arrays-of-arrays aligned to `headers`.
+   ============================================================ */
+function downloadBlob(blob,filename){
+  const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url; a.download=filename; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },0);
+}
+function b64ToBlob(b64,type='application/pdf'){
+  const bin=atob(b64); const arr=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  return new Blob([arr],{type});
+}
+// starred items (assets/bots) kept in localStorage
+function useWatchlist(key){
+  const [list,setList]=useState(()=>PREF.get(key,[]));
+  const has=(id)=>list.includes(id);
+  const toggle=(id)=>setList(l=>{ const n=l.includes(id)?l.filter(x=>x!==id):[...l,id]; PREF.set(key,n); return n; });
+  return {list,has,toggle};
+}
+function toCSV(headers,rows){
+  const esc=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  return [headers.map(esc).join(','),...rows.map(r=>r.map(esc).join(','))].join('\n');
+}
+async function exportRows({filename,headers,rows,format}){
+  if(format==='csv'){ downloadBlob(new Blob(['﻿'+toCSV(headers,rows)],{type:'text/csv;charset=utf-8'}),filename+'.csv'); return; }
+  const mod=await import('xlsx'); const XLSX=mod.utils?mod:(mod.default||mod);
+  const ws=XLSX.utils.aoa_to_sheet([headers,...rows]); const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Data'); XLSX.writeFile(wb,filename+'.xlsx');
+}
 async function api(path,{method='GET',body}={}){
   const headers={}; const tok=getToken(); if(tok) headers['Authorization']='Bearer '+tok;
   if(body!==undefined) headers['Content-Type']='application/json';
@@ -295,11 +327,19 @@ const ICONS = {
   dollar:[['path','M12 1v22'],['path','M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6']],
   trendup:[['path','M23 6l-9.5 9.5-5-5L1 18'],['path','M17 6h6v6']],
   power:[['path','M18.36 6.64a9 9 0 1 1-12.73 0'],['path','M12 2v10']],
+  star:[['path','M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z']],
+  keyboard:[['rect',2,6,20,12,2],['path','M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8']],
+  columns:[['rect',4,4,6,16,1],['rect',14,4,6,16,1]],
+  save:[['path','M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z'],['path','M17 21v-8H7v8M7 3v5h8']],
+  refresh:[['path','M23 4v6h-6M1 20v-6h6'],['path','M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15']],
+  filetext:[['path','M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'],['path','M14 2v6h6M16 13H8M16 17H8M10 9H8']],
+  database:[['path','M12 2C7.58 2 4 3.79 4 6s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4z'],['path','M4 6v6c0 2.21 3.58 4 8 4s8-1.79 8-4V6'],['path','M4 12v6c0 2.21 3.58 4 8 4s8-1.79 8-4v-6']],
+  zap:[['path','M13 2L3 14h9l-1 8 10-12h-9l1-8z']],
 };
-function Icon({name,className='w-5 h-5',sw=2}){
+function Icon({name,className='w-5 h-5',sw=2,fill='none'}){
   const items=ICONS[name]||[];
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
-    {items.map((it,i)=> it[0]==='circle'? <circle key={i} cx={it[1]} cy={it[2]} r={it[3]}/> : it[0]==='line'? <line key={i} x1={it[1]} y1={it[2]} x2={it[3]} y2={it[4]}/> : <path key={i} d={it[1]}/>)}
+  return <svg className={className} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
+    {items.map((it,i)=> it[0]==='circle'? <circle key={i} cx={it[1]} cy={it[2]} r={it[3]}/> : it[0]==='line'? <line key={i} x1={it[1]} y1={it[2]} x2={it[3]} y2={it[4]}/> : it[0]==='rect'? <rect key={i} x={it[1]} y={it[2]} width={it[3]} height={it[4]} rx={it[5]||0}/> : <path key={i} d={it[1]}/>)}
   </svg>;
 }
 // Official LNO logo (from LNO logo v2.svg): chart bars + trend line + Anurati
@@ -378,6 +418,21 @@ function Select({value,onChange,options,className=''}){
 }
 function Field({label,children,hint}){ return <label className="block"><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>{children}{hint&&<span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}</label>; }
 function Input(p){ return <input {...p} className={'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40 '+(p.className||'')}/>; }
+
+// Export-as menu (CSV / Excel). getRows() returns array-of-arrays aligned to headers,
+// resolved lazily on click so it always reflects the current filters/sort.
+function ExportMenu({getRows,headers,filename,disabled,label='Export',size='sm',variant='gold'}){
+  const [open,setOpen]=useState(false); const ref=useRef();
+  useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  const run=async(format)=>{ setOpen(false); try{ const rows=getRows(); if(!rows.length){ toast.info('Nothing to export with the current filters.'); return; } await exportRows({filename,headers,rows,format}); toast.success(`Exported ${rows.length} row${rows.length===1?'':'s'} as ${format.toUpperCase()}`); }catch(e){ toast.error('Export failed: '+e.message); } };
+  return <div ref={ref} className="relative">
+    <Btn variant={variant} size={size} disabled={disabled} onClick={()=>setOpen(o=>!o)}><Icon name="download" className="w-4 h-4"/>{label}<Icon name="chevdown" className={`w-3 h-3 transition ${open?'rotate-180':''}`}/></Btn>
+    {open&&<div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-xl border border-slate-200 p-1 z-40 fadein">
+      <button onClick={()=>run('csv')} className="w-full text-left px-2.5 py-1.5 rounded-md hover:bg-slate-50 text-sm flex items-center gap-2 text-navy"><Icon name="filetext" className="w-4 h-4 text-slate-400"/>CSV (.csv)</button>
+      <button onClick={()=>run('xlsx')} className="w-full text-left px-2.5 py-1.5 rounded-md hover:bg-slate-50 text-sm flex items-center gap-2 text-navy"><Icon name="briefcase" className="w-4 h-4 text-slate-400"/>Excel (.xlsx)</button>
+    </div>}
+  </div>;
+}
 
 function Modal({open,onClose,title,children,wide}){
   if(!open) return null;
@@ -658,11 +713,16 @@ const MAIN_NAV=[
   ['briefcase','Trades','/trades','Trades'],
   ['list','Activity Log','/logs','Logs'],
 ];
+const TOOLS_NAV=[
+  ['clock','Timeline','/timeline'],
+  ['database','System Status','/status'],
+];
 const ADMIN_NAV=[
   ['users','Users','/admin/users'],
   ['link','Exchanges','/admin/exchanges'],
   ['msg','OpenWA','/admin/openwa'],
   ['layers','Funds','/admin/funds'],
+  ['filetext','Reports','/admin/reports'],
 ];
 const ACCT_NAV=[
   ['usercircle','Profile','/profile'],
@@ -686,6 +746,8 @@ function Sidebar(){
     <nav className="flex-1 overflow-y-auto px-3 space-y-1">
       <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-2 pb-1">Main</div>
       {MAIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Tools</div>
+      {TOOLS_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
       {user.role==='admin'&&<>
         <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Administration</div>
         {ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
@@ -783,10 +845,10 @@ function MobileNav(){
   return <>
     <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex z-30">
       {MAIN_NAV.map(([i,l,p,s])=><button key={p} onClick={()=>navigate(p)} className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] ${cur===p||cur.startsWith(p+'/')?'text-gold':'text-slate-500'}`}><Icon name={i} className="w-5 h-5"/>{s||l.split(' ')[0]}</button>)}
-      {user.role==='admin'&&<button onClick={()=>setMore(!more)} className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] text-slate-500"><Icon name="menu" className="w-5 h-5"/>More</button>}
+      <button onClick={()=>setMore(!more)} className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] text-slate-500"><Icon name="menu" className="w-5 h-5"/>More</button>
     </nav>
     {more&&<div className="lg:hidden fixed inset-0 z-40" onClick={()=>setMore(false)}><div className="absolute bottom-14 inset-x-3 bg-white rounded-xl shadow-xl border border-slate-200 p-2" onClick={e=>e.stopPropagation()}>
-      {[...ADMIN_NAV,...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{l}</button>)}
+      {[...TOOLS_NAV,...(user.role==='admin'?ADMIN_NAV:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{l}</button>)}
     </div></div>}
   </>;
 }
@@ -1028,7 +1090,9 @@ function ActivityPage({botId}){
 
       {/* Bot performance ranking */}
       <Card className={`overflow-hidden ${!bot&&!selFund?'xl:col-span-2':'xl:col-span-3'}`}>
-        <div className="p-5 pb-0"><SectionTitle>Bot Performance Ranking</SectionTitle></div>
+        <div className="p-5 pb-0"><SectionTitle right={hasPerm(user,'export_data')&&<ExportMenu filename="lno_bot_ranking" size="sm" variant="outline" label="Export"
+          headers={['Bot','Fund','Exchange','Symbol','PnL','Win %','Trades','Status']}
+          getRows={()=>sortedRank.map(r=>[r.name,r.fund?.name||'',r.exchange,r.symbol,Math.round(r.pnl),Number(r.winRate.toFixed(1)),r.trades,r.status])}/>}>Bot Performance Ranking</SectionTitle></div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs"><tr className="border-b border-slate-100">
@@ -1118,24 +1182,34 @@ function PricesPage(){
   const {data,user}=useApp();
   const assets=useMemo(uniqueAssets,[]);
   const [spark,setSpark]=useState({});
+  const wl=useWatchlist('watchlist_assets'); const [wlOnly,setWlOnly]=useState(false);
   useEffect(()=>{
     let alive=true;
     const load=async()=>{ const res={}; await Promise.all(assets.map(async a=>{ try{ const r=await fetchKlines(a.exchange,a.symbol,24,'hour'); res[a.base]=r; }catch(e){ res[a.base]=null; } })); if(alive)setSpark(res); };
     load(); const iv=setInterval(load,60000); return ()=>{alive=false;clearInterval(iv);};
   },[]);
   if(!hasPerm(user,'view_activity')) return <Denied/>;
+  const shown=[...assets].sort((a,b)=>(wl.has(b.base)?1:0)-(wl.has(a.base)?1:0)).filter(a=>!wlOnly||wl.has(a.base));
   return <div>
     <PageHead title="Prices" subtitle="Live prices for the crypto assets traded by LNO bots"
-      actions={<span className="flex items-center gap-1.5 text-xs text-success font-medium"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>Live · 24h change</span>}/>
+      actions={<div className="flex items-center gap-3">
+        <button onClick={()=>setWlOnly(v=>!v)} className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${wlOnly?'border-gold text-gold bg-gold/5':'border-slate-200 text-slate-500 hover:text-navy'}`}><Icon name="star" fill={wlOnly?'currentColor':'none'} className="w-3.5 h-3.5"/>Watchlist{wl.list.length>0&&<span className="text-[10px]">{wl.list.length}</span>}</button>
+        <span className="flex items-center gap-1.5 text-xs text-success font-medium"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>Live · 24h change</span>
+      </div>}/>
+    {wlOnly&&shown.length===0&&<Card className="p-10 text-center text-slate-400 text-sm"><Icon name="star" className="w-9 h-9 mx-auto text-slate-200 mb-2"/>Your watchlist is empty — tap the ☆ on any asset to add it.</Card>}
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {assets.map(a=>{
+      {shown.map(a=>{
         const d=data.bots[a.botId]; const up=d.changePct>=0;
         const sp=spark[a.base]; const hi=sp&&sp.length?Math.max(...sp.map(x=>x.h)):null; const lo=sp&&sp.length?Math.min(...sp.map(x=>x.l)):null;
+        const starred=wl.has(a.base);
         return <Card key={a.base} className="p-4 relative overflow-hidden">
           <span className="absolute left-0 top-0 bottom-0 w-1" style={{background:up?'#10B981':'#EF4444'}}/>
           <div className="flex items-start justify-between gap-2">
             <div>
-              <div className="flex items-center gap-2"><span className="font-bold text-navy text-lg">{a.base}</span><span className="text-xs text-slate-400">{ASSET_NAMES[a.base]||a.base}</span></div>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>wl.toggle(a.base)} title={starred?'Remove from watchlist':'Add to watchlist'} className={starred?'text-gold':'text-slate-300 hover:text-gold'}><Icon name="star" fill={starred?'currentColor':'none'} className="w-4 h-4"/></button>
+                <span className="font-bold text-navy text-lg">{a.base}</span><span className="text-xs text-slate-400">{ASSET_NAMES[a.base]||a.base}</span>
+              </div>
               <div className="text-2xl font-bold text-navy tnum mt-1">{fmtPrice(d.price)}</div>
             </div>
             <span className={`flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold tnum ${up?'bg-success/10 text-success':'bg-danger/10 text-danger'}`}>
@@ -1266,14 +1340,88 @@ function RealtimePage(){
 }
 
 /* ============================================================
+   TABLE PRODUCTIVITY HELPERS — virtual rows, column picker, presets
+   ============================================================ */
+// Windowed row virtualization for a fixed-row-height scroll container.
+function useVirtual({count,rowH,overscan=10,resetKey}){
+  const ref=useRef(null);
+  const [scrollTop,setScrollTop]=useState(0);
+  const [h,setH]=useState(640);
+  useEffect(()=>{ const el=ref.current; if(!el)return; const onScroll=()=>setScrollTop(el.scrollTop); const measure=()=>setH(el.clientHeight||640); measure(); el.addEventListener('scroll',onScroll,{passive:true}); window.addEventListener('resize',measure); return ()=>{ el.removeEventListener('scroll',onScroll); window.removeEventListener('resize',measure); }; },[]);
+  useEffect(()=>{ const el=ref.current; if(el) el.scrollTop=0; setScrollTop(0); },[resetKey]);
+  const start=Math.max(0,Math.floor(scrollTop/rowH)-overscan);
+  const end=Math.min(count,Math.ceil((scrollTop+h)/rowH)+overscan);
+  return {ref,start,end,padTop:start*rowH,padBottom:Math.max(0,(count-end)*rowH)};
+}
+// Show/hide columns; order always follows the canonical `columns` array.
+function ColumnPicker({columns,visible,onChange}){
+  const [open,setOpen]=useState(false); const ref=useRef();
+  useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  const toggle=(k)=>{ const set=new Set(visible); set.has(k)?set.delete(k):set.add(k); if(set.size===0)return; onChange(columns.filter(c=>set.has(c.key)).map(c=>c.key)); };
+  return <div ref={ref} className="relative">
+    <Btn variant="outline" size="sm" onClick={()=>setOpen(o=>!o)}><Icon name="columns" className="w-4 h-4"/>Columns</Btn>
+    {open&&<div className="absolute right-0 mt-1 w-52 bg-white rounded-lg shadow-xl border border-slate-200 p-2 z-40 fadein max-h-72 overflow-y-auto">
+      <div className="text-[10px] uppercase tracking-wide text-slate-400 px-1 pb-1">Visible columns</div>
+      {columns.map(c=><label key={c.key} className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-slate-50 text-sm cursor-pointer text-navy">
+        <input type="checkbox" checked={visible.includes(c.key)} onChange={()=>toggle(c.key)} className="accent-navy w-4 h-4"/>{c.label}
+      </label>)}
+    </div>}
+  </div>;
+}
+// Saved views: persists named snapshots (filters/sort/columns) to localStorage.
+function PresetMenu({storeKey,current,onApply}){
+  const [presets,setPresets]=useState(()=>PREF.get(storeKey,[]));
+  const [open,setOpen]=useState(false); const [name,setName]=useState(''); const ref=useRef();
+  useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  const persist=(next)=>{ setPresets(next); PREF.set(storeKey,next); };
+  const save=()=>{ const n=name.trim(); if(!n)return; persist([...presets.filter(p=>p.name!==n),{name:n,state:current}]); setName(''); toast.success(`View “${n}” saved`); };
+  return <div ref={ref} className="relative">
+    <Btn variant="outline" size="sm" onClick={()=>setOpen(o=>!o)}><Icon name="save" className="w-4 h-4"/>Views{presets.length>0&&<span className="text-[10px] text-slate-400">{presets.length}</span>}</Btn>
+    {open&&<div className="absolute right-0 mt-1 w-60 bg-white rounded-lg shadow-xl border border-slate-200 p-2 z-40 fadein">
+      <div className="text-[10px] uppercase tracking-wide text-slate-400 px-1 pb-1">Saved views</div>
+      {presets.length===0&&<div className="text-xs text-slate-400 px-1 py-2">No saved views yet — set up filters and columns, then save.</div>}
+      {presets.map(p=><div key={p.name} className="flex items-center gap-1">
+        <button onClick={()=>{onApply(p.state);setOpen(false);}} className="flex-1 text-left px-2 py-1.5 rounded-md hover:bg-slate-50 text-sm text-navy truncate">{p.name}</button>
+        <button onClick={()=>persist(presets.filter(x=>x.name!==p.name))} className="text-slate-300 hover:text-danger px-1" title="Delete view"><Icon name="trash" className="w-3.5 h-3.5"/></button>
+      </div>)}
+      <div className="flex items-center gap-1 mt-2 pt-2 border-t border-slate-100">
+        <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')save();}} placeholder="Save current view…" className="flex-1 min-w-0 bg-slate-100 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"/>
+        <Btn size="sm" onClick={save} disabled={!name.trim()}>Save</Btn>
+      </div>
+    </div>}
+  </div>;
+}
+
+/* ============================================================
    TRADES
    ============================================================ */
+const TRADE_COLS=[
+  {key:'entry',label:'Entry',cell:t=>fmtDT(t.entry),csv:t=>fmtDT(t.entry),cls:'text-slate-500',def:true},
+  {key:'exit',label:'Exit',cell:t=>t.exit?fmtDT(t.exit):'—',csv:t=>t.exit?fmtDT(t.exit):'',cls:'text-slate-500',def:true},
+  {key:'bot',label:'Bot',cell:t=><span className="font-medium text-navy">{t.bot}</span>,csv:t=>t.bot,def:true},
+  {key:'symbol',label:'Symbol',cell:t=><span className="font-mono text-xs">{t.symbol}</span>,csv:t=>t.symbol,def:true},
+  {key:'exchange',label:'Exchange',cell:t=><span className="text-slate-500">{t.exchange}</span>,csv:t=>t.exchange,def:true},
+  {key:'side',label:'Side',cell:t=><span className={t.side==='Long'?'text-success':'text-danger'}>{t.side}</span>,csv:t=>t.side,def:true},
+  {key:'status',label:'Status',cell:t=><StatusPill status={t.status}/>,csv:t=>t.status,def:true},
+  {key:'pnl',label:'PnL',align:'right',cell:t=><span className={`font-medium tnum ${clsPnl(t.pnl)}`}>{fmtSigned(t.pnl)}</span>,csv:t=>Number(t.pnl.toFixed(2)),def:true},
+  {key:'pnlPct',label:'PnL%',align:'right',cell:t=><span className={`tnum ${clsPnl(t.pnlPct)}`}>{fmtPct(t.pnlPct)}</span>,csv:t=>Number(t.pnlPct.toFixed(2)),def:true},
+  {key:'size',label:'Size',align:'right',cell:t=><span className="tnum text-slate-500">{fmtUSD(t.size)}</span>,csv:t=>Math.round(t.size),def:true},
+  {key:'leverage',label:'Lev',align:'right',cell:t=><span className="tnum text-slate-500">{t.leverage}×</span>,csv:t=>t.leverage,def:false},
+  {key:'strategy',label:'Strategy',cell:t=><span className="text-slate-500">{t.strategy}</span>,csv:t=>t.strategy,def:true},
+  {key:'durMin',label:'Duration',align:'right',cell:t=><span className="text-slate-500">{fmtDur(t.durMin)}</span>,csv:t=>fmtDur(t.durMin),def:true},
+];
+const TRADE_GETTERS={entry:r=>r.entry,exit:r=>r.exit||0,bot:r=>r.bot,symbol:r=>r.symbol,exchange:r=>r.exchange,side:r=>r.side,status:r=>r.status,pnl:r=>r.pnl,pnlPct:r=>r.pnlPct,size:r=>r.size,leverage:r=>r.leverage,strategy:r=>r.strategy,durMin:r=>r.durMin};
+
 function TradesPage(){
   const {user,data}=useApp();
-  const [f,setF]=useState({bot:'all',exchange:'All',side:'All',status:'All',q:''});
-  const [sort,setSort]=useState({col:'entry',dir:'desc'});
-  if(!hasPerm(user,'view_trades')) return <Denied/>;
+  const [f,setF]=useState(()=>PREF.get('trades_filter',{bot:'all',exchange:'All',side:'All',status:'All',q:''}));
+  const [sort,setSort]=useState(()=>PREF.get('trades_sort',{col:'entry',dir:'desc'}));
+  const [colKeys,setColKeys]=useState(()=>PREF.get('trades_cols',TRADE_COLS.filter(c=>c.def).map(c=>c.key)));
+  useEffect(()=>{ PREF.set('trades_filter',f); },[f]);
+  useEffect(()=>{ PREF.set('trades_sort',sort); },[sort]);
+  useEffect(()=>{ PREF.set('trades_cols',colKeys); },[colKeys]);
 
+  const cols=colKeys.map(k=>TRADE_COLS.find(c=>c.key===k)).filter(Boolean);
   let rows=data.trades.filter(t=>
     (f.bot==='all'||t.botId===f.bot)&&
     (f.exchange==='All'||t.exchange===f.exchange)&&
@@ -1281,20 +1429,22 @@ function TradesPage(){
     (f.status==='All'||t.status===f.status)&&
     (!f.q|| (t.bot+t.symbol+t.strategy).toLowerCase().includes(f.q.toLowerCase()))
   );
-  rows=sortRows(rows,sort,{entry:r=>r.entry,exit:r=>r.exit||0,bot:r=>r.bot,symbol:r=>r.symbol,exchange:r=>r.exchange,side:r=>r.side,status:r=>r.status,pnl:r=>r.pnl,pnlPct:r=>r.pnlPct,size:r=>r.size,leverage:r=>r.leverage,strategy:r=>r.strategy,durMin:r=>r.durMin});
+  rows=sortRows(rows,sort,TRADE_GETTERS);
+  const vt=useVirtual({count:rows.length,rowH:41,resetKey:JSON.stringify(f)+sort.col+sort.dir});
 
+  if(!hasPerm(user,'view_trades')) return <Denied/>;
   const clear=()=>setF({bot:'all',exchange:'All',side:'All',status:'All',q:''});
   const active = f.bot!=='all'||f.exchange!=='All'||f.side!=='All'||f.status!=='All'||f.q;
-
-  async function exportXlsx(){
-    const mod=await import('xlsx'); const XLSX=mod.utils?mod:(mod.default||mod);
-    const data=rows.map(t=>({Entry:fmtDT(t.entry),Exit:t.exit?fmtDT(t.exit):'',Bot:t.bot,Symbol:t.symbol,Exchange:t.exchange,Side:t.side,Status:t.status,PnL:Number(t.pnl.toFixed(2)),'PnL%':Number(t.pnlPct.toFixed(2)),Size:t.size,Leverage:t.leverage,Strategy:t.strategy,Duration:fmtDur(t.durMin)}));
-    const ws=XLSX.utils.json_to_sheet(data); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Trades'); XLSX.writeFile(wb,'lno_trades.xlsx');
-  }
+  const exportHeaders=cols.map(c=>c.label);
+  const getExportRows=()=>rows.map(t=>cols.map(c=>c.csv(t)));
 
   return <div>
     <PageHead title="Trades" subtitle={`${rows.length} of ${data.trades.length} trades`}
-      actions={hasPerm(user,'export_data')&&<Btn variant="gold" onClick={exportXlsx}><Icon name="download" className="w-4 h-4"/>Download XLSX</Btn>}/>
+      actions={<div className="flex items-center gap-2">
+        <PresetMenu storeKey="trades_presets" current={{f,sort,colKeys}} onApply={s=>{ if(s.f)setF(s.f); if(s.sort)setSort(s.sort); if(s.colKeys)setColKeys(s.colKeys); }}/>
+        <ColumnPicker columns={TRADE_COLS} visible={colKeys} onChange={setColKeys}/>
+        {hasPerm(user,'export_data')&&<ExportMenu filename="lno_trades" headers={exportHeaders} getRows={getExportRows}/>}
+      </div>}/>
     <Card className="p-3 mb-4">
       <div className="flex flex-wrap items-center gap-2">
         <Select value={f.bot} onChange={v=>setF({...f,bot:v})} className="w-44" options={[{value:'all',label:'All bots'},...BASE_BOTS.map(b=>({value:b.id,label:b.name}))]}/>
@@ -1306,39 +1456,17 @@ function TradesPage(){
       </div>
     </Card>
     <Card className="overflow-hidden">
-      <div className="overflow-x-auto">
+      <div ref={vt.ref} className="overflow-auto" style={{maxHeight:'68vh'}}>
         <table className="w-full text-sm">
-          <thead className="text-xs"><tr className="border-b border-slate-100">
-            <SortHeader label="Entry" col="entry" sort={sort} setSort={setSort}/>
-            <SortHeader label="Exit" col="exit" sort={sort} setSort={setSort} className="hidden lg:table-cell"/>
-            <SortHeader label="Bot" col="bot" sort={sort} setSort={setSort}/>
-            <SortHeader label="Symbol" col="symbol" sort={sort} setSort={setSort}/>
-            <SortHeader label="Exchange" col="exchange" sort={sort} setSort={setSort} className="hidden md:table-cell"/>
-            <SortHeader label="Side" col="side" sort={sort} setSort={setSort}/>
-            <SortHeader label="Status" col="status" sort={sort} setSort={setSort}/>
-            <SortHeader label="PnL" col="pnl" sort={sort} setSort={setSort} align="right"/>
-            <SortHeader label="PnL%" col="pnlPct" sort={sort} setSort={setSort} align="right" className="hidden sm:table-cell"/>
-            <SortHeader label="Size" col="size" sort={sort} setSort={setSort} align="right" className="hidden lg:table-cell"/>
-            <SortHeader label="Lev" col="leverage" sort={sort} setSort={setSort} align="right" className="hidden lg:table-cell"/>
-            <SortHeader label="Strategy" col="strategy" sort={sort} setSort={setSort} className="hidden xl:table-cell"/>
-            <SortHeader label="Duration" col="durMin" sort={sort} setSort={setSort} align="right" className="hidden md:table-cell"/>
+          <thead className="text-xs sticky top-0 z-10"><tr className="bg-white border-b border-slate-200 shadow-sm">
+            {cols.map(c=><SortHeader key={c.key} label={c.label} col={c.key} sort={sort} setSort={setSort} align={c.align||'left'}/>)}
           </tr></thead>
           <tbody>
-            {rows.slice(0,200).map(t=><tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50/60">
-              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDT(t.entry)}</td>
-              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap hidden lg:table-cell">{t.exit?fmtDT(t.exit):'—'}</td>
-              <td className="px-3 py-2.5 font-medium text-navy">{t.bot}</td>
-              <td className="px-3 py-2.5 font-mono text-xs">{t.symbol}</td>
-              <td className="px-3 py-2.5 text-slate-500 hidden md:table-cell">{t.exchange}</td>
-              <td className="px-3 py-2.5"><span className={t.side==='Long'?'text-success':'text-danger'}>{t.side}</span></td>
-              <td className="px-3 py-2.5"><StatusPill status={t.status}/></td>
-              <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(t.pnl)}`}>{fmtSigned(t.pnl)}</td>
-              <td className={`px-3 py-2.5 text-right hidden sm:table-cell tnum ${clsPnl(t.pnlPct)}`}>{fmtPct(t.pnlPct)}</td>
-              <td className="px-3 py-2.5 text-right hidden lg:table-cell tnum text-slate-500">{fmtUSD(t.size)}</td>
-              <td className="px-3 py-2.5 text-right hidden lg:table-cell tnum text-slate-500">{t.leverage}×</td>
-              <td className="px-3 py-2.5 hidden xl:table-cell text-slate-500">{t.strategy}</td>
-              <td className="px-3 py-2.5 text-right hidden md:table-cell text-slate-500">{fmtDur(t.durMin)}</td>
+            {vt.padTop>0&&<tr style={{height:vt.padTop}}><td colSpan={cols.length}/></tr>}
+            {rows.slice(vt.start,vt.end).map(t=><tr key={t.id} style={{height:41}} className="border-b border-slate-50 hover:bg-slate-50/60">
+              {cols.map(c=><td key={c.key} className={`px-3 py-2.5 whitespace-nowrap ${c.align==='right'?'text-right':''} ${c.cls||''}`}>{c.cell(t)}</td>)}
             </tr>)}
+            {vt.padBottom>0&&<tr style={{height:vt.padBottom}}><td colSpan={cols.length}/></tr>}
           </tbody>
         </table>
       </div>
@@ -1358,7 +1486,9 @@ function LogsPage(){
   const PER=50; const pages=Math.ceil(rows.length/PER); const slice=rows.slice(page*PER,page*PER+PER);
   const lvlColor={critical:'text-danger bg-danger/10',error:'text-danger bg-danger/10',warning:'text-amber-600 bg-warn/10',info:'text-blue-600 bg-blue-50',debug:'text-slate-500 bg-slate-100'};
   return <div>
-    <PageHead title="Activity Log" subtitle={`${rows.length} events`}/>
+    <PageHead title="Activity Log" subtitle={`${rows.length} events`}
+      actions={hasPerm(user,'export_data')&&<ExportMenu filename="lno_logs" headers={['Timestamp','Level','Type','Source','Message']}
+        getRows={()=>rows.map(l=>[fmtDT(l.t),l.level,l.type,l.source,l.message])}/>}/>
     <Card className="p-3 mb-4"><div className="flex flex-wrap items-center gap-2">
       <Select value={sev} onChange={v=>{setSev(v);setPage(0);}} className="w-40" options={['All','Critical','Error','Warning','Info','Debug']}/>
       <Select value={type} onChange={v=>{setType(v);setPage(0);}} className="w-40" options={['All','Signal','Trading','Position','System']}/>
@@ -1414,14 +1544,46 @@ function AdminUsers(){
   const {user}=useApp();
   const [users,setUsers]=useState([]);
   const [exp,setExp]=useState(null); const [add,setAdd]=useState(false); const [del,setDel]=useState(null); const [editName,setEditName]=useState(null); const [nameVal,setNameVal]=useState('');
+  const [sel,setSel]=useState(()=>new Set()); const [bulkDel,setBulkDel]=useState(false);
   useEffect(()=>{ if(user.role==='admin') api('users').then(r=>setUsers(r.users||[])).catch(()=>{}); },[]);
   if(user.role!=='admin') return <Denied/>;
   const up=async(id,patch)=>{ try{ const r=await api('users',{method:'PATCH',body:{id,...patch}}); setUsers(us=>us.map(u=>u.id===id?r.user:u)); }catch(e){ toast.error(e.message); } };
+  const toggleSel=(id)=>setSel(s=>{ const n=new Set(s); n.has(id)?n.delete(id):n.add(id); return n; });
+  const ids=[...sel];
+  async function bulkPatch(patch,{skipSelf=false,verb='Updated'}={}){
+    const targets=ids.filter(id=>!(skipSelf&&id===user.id)); if(!targets.length){ toast.info('Nothing to update (only your own account was selected).'); return; }
+    let ok=0; await Promise.all(targets.map(async id=>{ try{ const r=await api('users',{method:'PATCH',body:{id,...patch}}); setUsers(us=>us.map(u=>u.id===id?r.user:u)); ok++; }catch(e){} }));
+    toast.success(`${verb} ${ok} user${ok===1?'':'s'}${targets.length<ids.length?' · skipped you':''}`); setSel(new Set());
+  }
+  async function bulkDelete(){
+    const targets=ids.filter(id=>id!==user.id); let ok=0;
+    await Promise.all(targets.map(async id=>{ try{ await api('users',{method:'DELETE',body:{id}}); ok++; }catch(e){} }));
+    setUsers(us=>us.filter(u=>!targets.includes(u.id))); toast.success(`Deleted ${ok} user${ok===1?'':'s'}`); setSel(new Set()); setBulkDel(false); setExp(null);
+  }
+  const allSel=users.length>0&&sel.size===users.length;
   return <div>
     <PageHead title="Users" subtitle={`${users.length} accounts`} actions={<Btn onClick={()=>setAdd(true)}><Icon name="plus" className="w-4 h-4"/>Add User</Btn>}/>
+    <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+      <label className="flex items-center gap-2 text-sm text-slate-500 cursor-pointer select-none">
+        <input type="checkbox" checked={allSel} ref={el=>{ if(el) el.indeterminate=sel.size>0&&!allSel; }} onChange={e=>setSel(e.target.checked?new Set(users.map(u=>u.id)):new Set())} className="accent-navy w-4 h-4"/>
+        {sel.size>0?`${sel.size} selected`:'Select all'}
+      </label>
+      <div className="flex items-center gap-2 flex-wrap">
+        {sel.size>0&&<>
+          <Btn size="sm" variant="outline" onClick={()=>bulkPatch({active:true},{verb:'Activated'})}><Icon name="power" className="w-3.5 h-3.5"/>Activate</Btn>
+          <Btn size="sm" variant="outline" onClick={()=>bulkPatch({active:false},{skipSelf:true,verb:'Deactivated'})}>Deactivate</Btn>
+          <Select value="" onChange={v=>{ if(v) bulkPatch({role:v,permissions:ROLE_PERMS[v].slice()},{skipSelf:true,verb:'Re-roled'}); }} className="w-32" options={[{value:'',label:'Set role…'},{value:'admin',label:'Admin'},{value:'operator',label:'Operator'},{value:'viewer',label:'Viewer'}]}/>
+          <Btn size="sm" variant="danger" onClick={()=>setBulkDel(true)}><Icon name="trash" className="w-3.5 h-3.5"/>Delete</Btn>
+        </>}
+        <ExportMenu filename="lno_users" size="sm" variant="outline" headers={['Username','Email','First name','Last name','Role','Active','Permissions']}
+          getRows={()=>(sel.size?users.filter(u=>sel.has(u.id)):users).map(u=>[u.username,u.email,u.firstName||'',u.lastName||'',u.role,u.active?'yes':'no',(u.role==='admin'?ALL_PERMS:u.permissions||[]).join(' ')])}/>
+      </div>
+    </div>
     <div className="space-y-3">
-      {users.map(u=><Card key={u.id} className="overflow-hidden">
-        <button onClick={()=>setExp(exp===u.id?null:u.id)} className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50/60">
+      {users.map(u=><Card key={u.id} className={`overflow-hidden ${sel.has(u.id)?'ring-1 ring-gold/40':''}`}>
+        <div className="flex items-center">
+        <label className="pl-4 flex items-center shrink-0"><input type="checkbox" checked={sel.has(u.id)} onChange={()=>toggleSel(u.id)} className="accent-navy w-4 h-4"/></label>
+        <button onClick={()=>setExp(exp===u.id?null:u.id)} className="flex-1 min-w-0 flex items-center gap-3 p-4 text-left hover:bg-slate-50/60">
           {u.avatar?<img src={u.avatar} className="w-10 h-10 rounded-full object-cover"/>:<span className="w-10 h-10 rounded-full bg-navy text-white grid place-items-center text-xs font-semibold shrink-0">{initialsOf(u)}</span>}
           <div className="flex-1 min-w-0">
             <div className="font-medium text-navy flex items-center gap-2">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.username}
@@ -1432,6 +1594,7 @@ function AdminUsers(){
           <StatusPill status={u.active?'active':'inactive'}/>
           <Icon name="chevdown" className={`w-4 h-4 text-slate-400 transition ${exp===u.id?'rotate-180':''}`}/>
         </button>
+        </div>
         {exp===u.id&&<div className="border-t border-slate-100 p-4 space-y-4 fadein">
           <div className="flex flex-wrap gap-4">
             <div className="w-44"><Field label="Username">
@@ -1459,6 +1622,7 @@ function AdminUsers(){
     </div>
     <AddUserModal open={add} onClose={()=>setAdd(false)} onCreated={u=>{setUsers(us=>[...us,u]);setAdd(false);}}/>
     <Confirm open={!!del} title="Delete user" message={`Permanently remove ${del?.username}? This cannot be undone.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('users',{method:'DELETE',body:{id:del.id}});setUsers(us=>us.filter(u=>u.id!==del.id));toast.success('User deleted');}catch(e){toast.error(e.message);}setDel(null);setExp(null);}}/>
+    <Confirm open={bulkDel} title="Delete selected users" message={`Permanently remove ${ids.filter(id=>id!==user.id).length} user(s)? Your own account is never deleted. This cannot be undone.`} confirmLabel="Delete all" onCancel={()=>setBulkDel(false)} onConfirm={bulkDelete}/>
   </div>;
 }
 function AddUserModal({open,onClose,onCreated}){
@@ -1778,6 +1942,172 @@ function SupportPage(){
 }
 
 /* ============================================================
+   SYSTEM STATUS
+   ============================================================ */
+const fmtAgo=(t)=>{ if(t==null)return '—'; const min=Math.round((NOW-new Date(t).getTime())/60000); if(min<1)return 'just now'; if(min<60)return min+'m ago'; const h=Math.floor(min/60); if(h<24)return h+'h ago'; return Math.floor(h/24)+'d ago'; };
+function StatusPage(){
+  const {user,data,dataStatus}=useApp();
+  const services=useServiceHealth();
+  const [snaps,setSnaps]=useState(null); const [alerts,setAlerts]=useState(null); const [openwa,setOpenwa]=useState(undefined); const [dbErr,setDbErr]=useState(null);
+  useEffect(()=>{
+    api('snapshots?limit=3').then(r=>setSnaps(r.snapshots||[])).catch(e=>{ setSnaps([]); setDbErr(e.message); });
+    api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>setAlerts([]));
+    if(user.role==='admin') api('openwa').then(r=>setOpenwa(r.config)).catch(()=>setOpenwa(null));
+  },[]);
+  if(!hasPerm(user,'view_activity')) return <Denied/>;
+
+  const exDown=services.filter(s=>s.ex&&s.status==='down');
+  const exDegraded=services.filter(s=>s.status==='degraded');
+  const lastSnap=snaps&&snaps.length? snaps[snaps.length-1] : null;
+  const dbOk=dbErr==null;
+  const unacked=(alerts||[]).filter(a=>!a.ackedAt);
+  const acked=(alerts||[]).filter(a=>a.ackedAt);
+  const mttaMin=acked.length? acked.reduce((s,a)=>s+(new Date(a.ackedAt)-new Date(a.createdAt)),0)/acked.length/60000 : null;
+  const ackRate=(alerts&&alerts.length)? acked.length/alerts.length*100 : null;
+
+  const checks=[
+    {label:'Market data feed', state:dataStatus==='live'?'ok':dataStatus==='partial'?'warn':dataStatus==='sim'?'down':'neutral', sub:dataStatus==='live'?'All exchanges streaming':dataStatus==='partial'?'Some feeds degraded':dataStatus==='sim'?'Simulation fallback':'Connecting…'},
+    {label:'Database', state:dbOk?'ok':'down', sub:dbOk?(lastSnap?`Last snapshot ${lastSnap.day}`:'Connected'):'Unreachable'},
+    {label:'Exchange APIs', state:exDown.length?'down':exDegraded.length?'warn':'ok', sub:exDown.length?`${exDown.map(s=>s.ex).join(', ')} down`:exDegraded.length?`${exDegraded.length} degraded`:'Binance · Bybit · OKX OK'},
+    {label:'Alerting', state:alerts==null?'neutral':'ok', sub:alerts==null?'Checking…':`${unacked.length} pending acknowledgement`},
+    ...(user.role==='admin'?[{label:'WhatsApp (OpenWA)', state:openwa==null?'neutral':openwa.enabled?(openwa.hasApiKey?'ok':'warn'):'neutral', sub:openwa===undefined?'Checking…':openwa===null?'—':openwa.enabled?(openwa.hasApiKey?'Enabled & configured':'Enabled · no API key'):'Disabled (optional)'}]:[]),
+  ];
+  const anyDown=checks.some(c=>c.state==='down'); const anyWarn=checks.some(c=>c.state==='warn');
+  const overall=anyDown?['Degraded','bg-danger','text-danger']:anyWarn?['Partial outage','bg-amber-500','text-amber-600']:['All systems operational','bg-success','text-success'];
+  const dotCls=(s)=>s==='ok'?'bg-success':s==='warn'?'bg-amber-500':s==='down'?'bg-danger':'bg-slate-300';
+
+  return <div>
+    <PageHead title="System Status" subtitle="Live health of feeds, database, alerting and integrations"/>
+    <Card className="p-5 mb-5 flex items-center gap-3">
+      <span className={`w-3 h-3 rounded-full ${overall[1]} ${anyDown?'':'pulse-dot'}`}/>
+      <span className={`text-lg font-semibold ${overall[2]}`}>{overall[0]}</span>
+      <span className="ml-auto"><LiveBadge status={dataStatus}/></span>
+    </Card>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
+      {checks.map(c=><Card key={c.label} className="p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-navy">{c.label}</span>
+          <span className={`w-2.5 h-2.5 rounded-full ${dotCls(c.state)}`}/>
+        </div>
+        <div className="text-xs text-slate-500 mt-1.5">{c.sub}</div>
+      </Card>)}
+    </div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <Card className="p-5">
+        <SectionTitle right={<span className="text-[11px] text-slate-400">live ping · 10s</span>}>Service Health</SectionTitle>
+        <div className="space-y-2">
+          {services.map(s=><div key={s.name} className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${s.status==='active'?'bg-success':s.status==='degraded'?'bg-amber-500':s.status==='pending'?'bg-slate-300 animate-pulse':'bg-danger'}`}/>{s.name}</span>
+            <span className={`font-mono text-xs ${s.latency==null?'text-slate-300':s.latency>250?'text-amber-600':'text-slate-400'}`}>{s.latency==null?(s.status==='down'?'down':'—'):s.latency+'ms'}</span>
+          </div>)}
+        </div>
+      </Card>
+      <Card className="p-5">
+        <SectionTitle right={<span className="text-[11px] text-slate-400">acknowledgement</span>}>Alert Analytics</SectionTitle>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">Mean time to ack</div><div className="text-lg font-bold text-navy mt-0.5">{mttaMin==null?'—':fmtDur(mttaMin)}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">Ack rate</div><div className="text-lg font-bold text-navy mt-0.5">{ackRate==null?'—':fmtPctPlain(ackRate)}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">Total alerts</div><div className="text-lg font-bold text-navy mt-0.5">{alerts==null?'—':alerts.length}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">Pending ack</div><div className={`text-lg font-bold mt-0.5 ${unacked.length?'text-danger':'text-navy'}`}>{alerts==null?'—':unacked.length}</div></div>
+        </div>
+        <div className="text-[11px] text-slate-400 mt-3">{lastSnap?`Last recorded snapshot ${lastSnap.day} · ${fmtAgo(lastSnap.day)}`:'No recorded snapshots yet — the daily cron writes one per day.'}</div>
+      </Card>
+    </div>
+  </div>;
+}
+
+/* ============================================================
+   UNIFIED TIMELINE
+   ============================================================ */
+function TimelinePage(){
+  const {user,data}=useApp();
+  const [kind,setKind]=useState('all'); const [limit,setLimit]=useState(50);
+  const [alerts,setAlerts]=useState([]);
+  useEffect(()=>{ api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>{}); },[]);
+  const events=useMemo(()=>{
+    const ev=[];
+    data.trades.forEach(t=>{
+      if(t.status==='Closed'&&t.exit) ev.push({t:t.exit,kind:'trade',icon:'briefcase',color:t.pnl>=0?'text-success':'text-danger',dot:t.pnl>=0?'bg-success':'bg-danger',title:`Closed ${t.side} ${t.symbol}`,sub:`${t.bot} · ${fmtSigned(t.pnl)} (${fmtPct(t.pnlPct)})`});
+      else if(t.status==='Open') ev.push({t:t.entry,kind:'trade',icon:'briefcase',color:'text-blue-500',dot:'bg-blue-500',title:`Opened ${t.side} ${t.symbol}`,sub:`${t.bot} · size ${fmtUSD(t.size)}`});
+    });
+    LOGS.filter(l=>l.level==='critical'||l.level==='error'||l.level==='warning').forEach(l=>ev.push({t:l.t,kind:'log',icon:l.level==='warning'?'triangle':'info',color:l.level==='warning'?'text-amber-500':'text-danger',dot:l.level==='warning'?'bg-amber-500':'bg-danger',title:l.message,sub:`${l.source} · ${l.level}`}));
+    INCIDENTS.forEach(i=>ev.push({t:i.t,kind:'incident',icon:'zap',color:i.severity==='critical'?'text-danger':i.severity==='warning'?'text-amber-500':'text-blue-500',dot:i.severity==='critical'?'bg-danger':i.severity==='warning'?'bg-amber-500':'bg-blue-500',title:i.message,sub:'System incident'}));
+    alerts.forEach(a=>ev.push({t:new Date(a.createdAt).getTime(),kind:'alert',icon:'bell',color:'text-danger',dot:'bg-danger',title:a.summary,sub:`Alert ${a.code}${a.ackedAt?' · acknowledged':' · pending'}`}));
+    return ev.sort((x,y)=>y.t-x.t);
+  },[data,alerts]);
+  if(!hasPerm(user,'view_activity')) return <Denied/>;
+
+  const filtered=kind==='all'?events:events.filter(e=>e.kind===kind);
+  const shown=filtered.slice(0,limit);
+  const kinds=[['all','All'],['trade','Trades'],['log','Logs'],['incident','Incidents'],['alert','Alerts']];
+  return <div>
+    <PageHead title="Timeline" subtitle="Unified chronological feed across trades, logs, incidents and alerts"/>
+    <div className="flex items-center gap-2 mb-4 flex-wrap">
+      {kinds.map(([k,l])=><button key={k} onClick={()=>{setKind(k);setLimit(50);}} className={`px-3 py-1.5 rounded-lg text-sm border transition ${kind===k?'border-gold text-gold bg-gold/5':'border-slate-200 text-slate-500 hover:text-navy'}`}>{l}</button>)}
+      <span className="text-xs text-slate-400 ml-auto">{filtered.length} events</span>
+    </div>
+    <Card className="p-5">
+      <div className="relative">
+        <div className="absolute left-1.5 top-2 bottom-2 w-px bg-slate-200"/>
+        <div className="space-y-4">
+          {shown.map((e,i)=><div key={i} className="relative pl-7">
+            <span className={`absolute left-0 top-1 w-3 h-3 rounded-full ring-2 ring-white ${e.dot}`}/>
+            <div className="flex items-start gap-2">
+              <Icon name={e.icon} className={`w-4 h-4 mt-0.5 shrink-0 ${e.color}`}/>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-navy leading-snug">{e.title}</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">{e.sub} · {fmtDT(e.t)}</div>
+              </div>
+            </div>
+          </div>)}
+          {shown.length===0&&<div className="text-sm text-slate-400 py-6 text-center">No events for this filter.</div>}
+        </div>
+      </div>
+      {filtered.length>shown.length&&<div className="text-center mt-4"><Btn variant="outline" size="sm" onClick={()=>setLimit(l=>l+50)}>Show more ({filtered.length-shown.length})</Btn></div>}
+    </Card>
+  </div>;
+}
+
+/* ============================================================
+   ADMIN — REPORT ARCHIVE
+   ============================================================ */
+function AdminReports(){
+  const {user}=useApp();
+  const [reports,setReports]=useState(null); const [busy,setBusy]=useState(false); const [dl,setDl]=useState(null);
+  const load=()=>api('snapshots?reports=list').then(r=>setReports(r.reports||[])).catch(()=>setReports([]));
+  useEffect(()=>{ if(user.role==='admin') load(); },[]);
+  if(user.role!=='admin') return <Denied/>;
+  async function generate(){ setBusy(true); try{ await api('snapshots',{method:'POST',body:{action:'generateReport'}}); toast.success('Report generated & archived'); load(); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
+  async function download(rep){ setDl(rep.id); try{ const r=await api('snapshots?report='+rep.id); downloadBlob(b64ToBlob(r.pdfBase64), r.filename||('lno-report-'+rep.periodLabel+'.pdf')); toast.success('Report downloaded'); }catch(e){ toast.error(e.message); } finally{ setDl(null); } }
+  return <div>
+    <PageHead title="Reports" subtitle="Archive of generated portfolio reports — re-download any as PDF"
+      actions={<Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?'Generating…':'Generate report now'}</Btn>}/>
+    {reports==null? <Card className="p-10 text-center text-slate-400 text-sm">Loading…</Card>
+    : reports.length===0? <Card className="p-10 text-center text-slate-400 text-sm"><Icon name="filetext" className="w-10 h-10 mx-auto text-slate-200 mb-2"/>No reports yet. Generate one now, or wait for the monthly cron (1st of each month).</Card>
+    : <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
+        <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+          <th className="px-4 py-2.5 text-left font-medium">Kind</th>
+          <th className="px-4 py-2.5 text-left font-medium">Period</th>
+          <th className="px-4 py-2.5 text-right font-medium">Equity</th>
+          <th className="px-4 py-2.5 text-right font-medium">PnL 30d</th>
+          <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Generated</th>
+          <th className="px-4 py-2.5"></th>
+        </tr></thead>
+        <tbody>
+          {reports.map(r=><tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+            <td className="px-4 py-2.5 capitalize"><span className="inline-flex items-center gap-1.5"><Icon name="filetext" className="w-4 h-4 text-gold"/>{r.kind}</span></td>
+            <td className="px-4 py-2.5 font-mono text-xs">{r.periodLabel}</td>
+            <td className="px-4 py-2.5 text-right tnum">{fmtUSD(r.equity)}</td>
+            <td className={`px-4 py-2.5 text-right tnum ${clsPnl(r.pnl)}`}>{fmtSigned(r.pnl)}</td>
+            <td className="px-4 py-2.5 text-slate-500 hidden sm:table-cell">{fmtDT(r.createdAt)}</td>
+            <td className="px-4 py-2.5 text-right"><Btn size="sm" variant="outline" disabled={dl===r.id} onClick={()=>download(r)}><Icon name="download" className="w-4 h-4"/>{dl===r.id?'…':'PDF'}</Btn></td>
+          </tr>)}
+        </tbody>
+      </table></div></Card>}
+  </div>;
+}
+
+/* ============================================================
    ROUTER + ROOT
    ============================================================ */
 function useHashRoute(){
@@ -1824,8 +2154,56 @@ function useServiceHealth(){
   });
 }
 
+// Global keyboard navigation: `g` then a letter jumps between pages, `/` focuses
+// search, `?` toggles help. Ignored while typing in a field (except Escape).
+function useKeyboardNav(navigate,user){
+  const [help,setHelp]=useState(false);
+  useEffect(()=>{
+    let gPending=false, gTimer=null;
+    const isTyping=(el)=>el&&(el.tagName==='INPUT'||el.tagName==='TEXTAREA'||el.tagName==='SELECT'||el.isContentEditable);
+    const onKey=(e)=>{
+      if(e.metaKey||e.ctrlKey||e.altKey) return;
+      const typing=isTyping(document.activeElement);
+      if(e.key==='Escape'){ setHelp(false); if(typing)document.activeElement.blur(); return; }
+      if(typing) return;
+      if(e.key==='?'){ e.preventDefault(); setHelp(h=>!h); return; }
+      if(e.key==='/'){ e.preventDefault(); const s=document.querySelector('input[placeholder^="Search bots"]'); if(s)s.focus(); return; }
+      if(gPending){
+        gPending=false; clearTimeout(gTimer); const k=e.key.toLowerCase();
+        const go={a:'/activity',r:'/realtime',p:'/prices',t:'/trades',l:'/logs',s:'/status',i:'/timeline'}[k];
+        const adminGo={u:'/admin/users',e:'/admin/exchanges',w:'/admin/openwa',f:'/admin/funds'}[k];
+        if(go){ e.preventDefault(); navigate(go); }
+        else if(adminGo&&user.role==='admin'){ e.preventDefault(); navigate(adminGo); }
+        return;
+      }
+      if(e.key==='g'){ gPending=true; gTimer=setTimeout(()=>{gPending=false;},1200); }
+    };
+    window.addEventListener('keydown',onKey);
+    return ()=>{ window.removeEventListener('keydown',onKey); clearTimeout(gTimer); };
+  },[navigate,user]);
+  return {help,setHelp};
+}
+function ShortcutsModal({open,onClose,isAdmin}){
+  const rows=[
+    ['g a','Activity Dashboard'],['g r','Real-Time'],['g p','Prices'],['g t','Trades'],['g l','Activity Log'],
+    ['g s','System Status'],['g i','Timeline'],
+    ...(isAdmin?[['g u','Admin · Users'],['g e','Admin · Exchanges'],['g w','Admin · OpenWA'],['g f','Admin · Funds']]:[]),
+    ['/','Focus search'],['?','Toggle this help'],['Esc','Close / blur field'],
+  ];
+  return <Modal open={open} onClose={onClose} title="Keyboard shortcuts">
+    <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1">
+      {rows.map(([k,d])=><div key={k} className="flex items-center justify-between gap-3 py-1">
+        <span className="text-sm text-slate-600">{d}</span>
+        <span className="flex gap-1">{k.split(' ').map((part,i)=><kbd key={i} className="px-1.5 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-[11px] font-mono text-navy">{part}</kbd>)}</span>
+      </div>)}
+    </div>
+    <div className="text-[11px] text-slate-400 mt-4">Press <kbd className="px-1 rounded bg-slate-100 border border-slate-200 font-mono">g</kbd> then a letter to jump between pages.</div>
+  </Modal>;
+}
+
 function Shell(){
-  const route=useApp().route;
+  const {route,navigate,user}=useApp();
+  const {help,setHelp}=useKeyboardNav(navigate,user);
   const [a,b,c]=route.parts;
   let page;
   if(a==='activity'){ page = b==='bot'? <ActivityPage botId={c}/> : <ActivityPage/>; }
@@ -1833,10 +2211,13 @@ function Shell(){
   else if(a==='prices') page=<PricesPage/>;
   else if(a==='trades') page=<TradesPage/>;
   else if(a==='logs') page=<LogsPage/>;
+  else if(a==='status') page=<StatusPage/>;
+  else if(a==='timeline') page=<TimelinePage/>;
   else if(a==='admin'&&b==='users') page=<AdminUsers/>;
   else if(a==='admin'&&b==='exchanges') page=<AdminExchanges/>;
   else if(a==='admin'&&(b==='openwa'||b==='whatsapp')) page=<AdminOpenWA/>;
   else if(a==='admin'&&b==='funds') page=<AdminFunds/>;
+  else if(a==='admin'&&b==='reports') page=<AdminReports/>;
   else if(a==='profile') page=<ProfilePage/>;
   else if(a==='support') page=<SupportPage/>;
   else page=<ActivityPage/>;
@@ -1847,6 +2228,7 @@ function Shell(){
       <main className="flex-1 overflow-y-auto p-4 lg:p-6 pb-20 lg:pb-6">{page}</main>
       <MobileNav/>
     </div>
+    <ShortcutsModal open={help} onClose={()=>setHelp(false)} isAdmin={user.role==='admin'}/>
   </div>;
 }
 
