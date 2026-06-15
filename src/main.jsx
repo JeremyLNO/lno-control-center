@@ -211,13 +211,46 @@ const LOGS = genLogs();
 const TOKEN_KEY='lno_token';
 const getToken=()=>{ try{ return sessionStorage.getItem(TOKEN_KEY)||null; }catch(e){ return null; } };
 const setToken=(t)=>{ try{ t? sessionStorage.setItem(TOKEN_KEY,t): sessionStorage.removeItem(TOKEN_KEY); }catch(e){} };
+
+// lightweight UI preference store (last period, dismissed cards, …) in localStorage
+const PREF={
+  get:(k,d)=>{ try{ const v=localStorage.getItem('lno_pref_'+k); return v==null?d:JSON.parse(v); }catch(e){ return d; } },
+  set:(k,v)=>{ try{ localStorage.setItem('lno_pref_'+k,JSON.stringify(v)); }catch(e){} },
+};
 async function api(path,{method='GET',body}={}){
   const headers={}; const tok=getToken(); if(tok) headers['Authorization']='Bearer '+tok;
   if(body!==undefined) headers['Content-Type']='application/json';
   const r=await fetch('/api/'+path,{method,headers,body:body!==undefined?JSON.stringify(body):undefined});
   let data=null; try{ data=await r.json(); }catch(e){}
-  if(!r.ok){ const err=new Error((data&&data.error)||('HTTP '+r.status)); err.status=r.status; err.data=data; throw err; }
+  if(!r.ok){
+    // a 401 while holding a token = expired/invalid session -> let the app sign out gracefully
+    if(r.status===401 && tok) { try{ window.dispatchEvent(new CustomEvent('lno:unauthorized')); }catch(e){} }
+    const err=new Error((data&&data.error)||('HTTP '+r.status)); err.status=r.status; err.data=data; throw err;
+  }
   return data;
+}
+
+/* ============================================================
+   TOASTS — imperative (toast.success/error/info), rendered by <Toaster/>
+   ============================================================ */
+const _toastSubs=new Set();
+const toast={
+  _emit(t){ const item={id:(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()+Math.random()),...t}; _toastSubs.forEach(fn=>fn(item)); },
+  success(msg){ this._emit({kind:'success',msg}); },
+  error(msg){ this._emit({kind:'error',msg}); },
+  info(msg){ this._emit({kind:'info',msg}); },
+};
+function Toaster(){
+  const [items,setItems]=useState([]);
+  useEffect(()=>{ const fn=(t)=>{ setItems(x=>[...x,t]); setTimeout(()=>setItems(x=>x.filter(i=>i.id!==t.id)), t.kind==='error'?6000:3500); }; _toastSubs.add(fn); return ()=>_toastSubs.delete(fn); },[]);
+  const sty={success:['bg-success/10 border-success/30 text-success','check'],error:['bg-danger/10 border-danger/30 text-danger','triangle'],info:['bg-navy/5 border-slate-200 text-navy','info']};
+  return <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-xs w-full pointer-events-none">
+    {items.map(t=>{ const [cls,ic]=sty[t.kind]||sty.info; return <div key={t.id} className={`pointer-events-auto flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl border bg-white shadow-lg slidein ${cls}`}>
+      <Icon name={ic} className="w-4 h-4 mt-0.5 shrink-0"/>
+      <div className="text-sm text-navy flex-1 leading-snug">{t.msg}</div>
+      <button onClick={()=>setItems(x=>x.filter(i=>i.id!==t.id))} className="text-slate-400 hover:text-navy"><Icon name="x" className="w-3.5 h-3.5"/></button>
+    </div>; })}
+  </div>;
 }
 
 /* ============================================================
@@ -499,14 +532,17 @@ function RiskPanel({series,botIds,data}){
   const byEx={},byAsset={};
   botIds.forEach(id=>{ const b=BASE_BOTS.find(x=>x.id===id); const eq=data.bots[id].currentEquity; byEx[b.exchange]=(byEx[b.exchange]||0)+eq; const base=EX.parse(b.symbol).base; byAsset[base]=(byAsset[base]||0)+eq; });
   const total=Object.values(byEx).reduce((a,b)=>a+b,0)||1;
-  const M=({label,value,cls})=><div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">{label}</div><div className={`text-lg font-bold tnum mt-0.5 ${cls||'text-navy'}`}>{value}</div></div>;
+  const M=({label,value,cls,tip})=><div className="bg-slate-50 rounded-lg p-3" title={tip||undefined}>
+    <div className="text-[11px] text-slate-500 flex items-center gap-1">{label}{tip&&<Icon name="info" className="w-3 h-3 text-slate-300 cursor-help"/>}</div>
+    <div className={`text-lg font-bold tnum mt-0.5 ${cls||'text-navy'}`}>{value}</div>
+  </div>;
   return <Card className="p-5">
     <SectionTitle right={<span className="text-[11px] text-slate-400">on the selected period</span>}>Risk & Exposure</SectionTitle>
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-      <M label="Sharpe" value={m.sharpe.toFixed(2)}/>
-      <M label="Sortino" value={m.sortino.toFixed(2)}/>
-      <M label="Max Drawdown" value={fmtPctPlain(m.maxDrawdownPct)} cls="text-danger"/>
-      <M label="DD Duration" value={m.ddDurationDays+' d'}/>
+      <M label="Sharpe" value={m.sharpe.toFixed(2)} tip="Risk-adjusted return: annualised mean daily return ÷ volatility of all returns. Higher is better — above 1 is solid, above 2 is excellent."/>
+      <M label="Sortino" value={m.sortino.toFixed(2)} tip="Like Sharpe, but only downside (losing-day) volatility is penalised. Rewards strategies whose swings are mostly to the upside."/>
+      <M label="Max Drawdown" value={fmtPctPlain(m.maxDrawdownPct)} cls="text-danger" tip="The largest peak-to-trough drop in equity over the period — your worst observed loss from a high-water mark."/>
+      <M label="DD Duration" value={m.ddDurationDays+' d'} tip="Longest stretch, in days, the portfolio stayed below a previous equity peak before recovering."/>
     </div>
     <div className="grid sm:grid-cols-2 gap-5">
       <ExposureBars title="Exposure by exchange" items={Object.entries(byEx).sort((a,b)=>b[1]-a[1])} total={total}/>
@@ -695,7 +731,7 @@ function Header(){
   const loadAlerts=()=>api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>{});
   useEffect(()=>{ loadAlerts(); const iv=setInterval(loadAlerts,60000); return ()=>clearInterval(iv); },[]);
   const unacked=alerts.filter(a=>!a.ackedAt).length;
-  async function ack(id){ try{ await api('alerts',{method:'POST',body:{id}}); loadAlerts(); }catch(e){ alert(e.message); } }
+  async function ack(id){ try{ await api('alerts',{method:'POST',body:{id}}); loadAlerts(); }catch(e){ toast.error(e.message); } }
   return <header className="h-16 shrink-0 bg-white border-b border-slate-200 flex items-center gap-4 px-4 lg:px-6">
     <Logo className="lg:hidden h-6 text-navy"/>
     <GlobalSearch/>
@@ -811,11 +847,43 @@ function PeriodControls({period,setPeriod,custom,setCustom,fund,setFund,funds,sh
   </div>;
 }
 
+// First-run setup nudge for admins on the main dashboard. Dismissible; the OpenWA
+// step is detected live, the others are reminders the admin ticks off then dismisses.
+function OnboardingCard(){
+  const {user,navigate}=useApp();
+  const [dismissed,setDismissed]=useState(()=>PREF.get('onboarding_dismissed',false));
+  const [openwaOk,setOpenwaOk]=useState(null);
+  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>setOpenwaOk(!!(r.config&&r.config.enabled&&r.config.hasApiKey))).catch(()=>{}); },[]);
+  if(user.role!=='admin'||dismissed) return null;
+  const steps=[
+    {label:'Change the default admin password', done:false, to:'/profile'},
+    {label:'Connect your exchange API keys', done:false, to:'/admin/exchanges'},
+    {label:'Set up WhatsApp alerts (OpenWA)', done:!!openwaOk, to:'/admin/openwa'},
+  ];
+  const left=steps.filter(s=>!s.done).length;
+  return <Card className="p-4 mb-5 border border-gold/30 bg-gold/5">
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center gap-2"><Icon name="shield" className="w-4 h-4 text-gold"/><span className="text-sm font-semibold text-navy">Finish setting up your Control Center</span><span className="text-[11px] text-slate-400">{left} step{left>1?'s':''} left</span></div>
+      <button onClick={()=>{setDismissed(true);PREF.set('onboarding_dismissed',true);}} className="text-slate-400 hover:text-navy text-xs flex items-center gap-1"><Icon name="x" className="w-3.5 h-3.5"/>Dismiss</button>
+    </div>
+    <div className="mt-3 grid sm:grid-cols-3 gap-2">
+      {steps.map((s,i)=><button key={i} onClick={()=>navigate(s.to)} className="flex items-center gap-2 text-left p-2 rounded-lg border border-transparent hover:border-slate-200 hover:bg-white transition text-sm">
+        <span className={`w-4 h-4 rounded-full grid place-items-center shrink-0 ${s.done?'bg-success text-white':'border border-slate-300'}`}>{s.done&&<Icon name="check" className="w-3 h-3"/>}</span>
+        <span className={s.done?'text-slate-400 line-through':'text-navy'}>{s.label}</span>
+      </button>)}
+    </div>
+  </Card>;
+}
+
 function ActivityPage({botId}){
   const {funds,navigate,user,data}=useApp();
-  const [period,setPeriod]=useState('30');
+  const [period,setPeriod]=useState(()=>PREF.get('activity_period','30'));
   const [custom,setCustom]=useState({start:null,end:null});
-  const [fund,setFund]=useState('all');
+  const [fund,setFund]=useState(()=>PREF.get('activity_fund','all'));
+  useEffect(()=>{ PREF.set('activity_period',period); },[period]);
+  useEffect(()=>{ PREF.set('activity_fund',fund); },[fund]);
+  // a remembered fund that no longer exists falls back to the whole portfolio
+  useEffect(()=>{ if(fund!=='all'&&funds.length&&!funds.find(f=>f.id===fund)) setFund('all'); },[funds]);// eslint-disable-line
   const [sort,setSort]=useState({col:'pnl',dir:'desc'});
   const [btc,setBtc]=useState(null); const [showBench,setShowBench]=useState(false);
   useEffect(()=>{ let alive=true; fetchKlines('Binance','BTCUSDT',365,'day').then(r=>{ if(!alive)return; const m={}; r.forEach(x=>{ m[new Date(x.t).toISOString().slice(0,10)]=x.close; }); setBtc(m); }).catch(()=>{}); return ()=>{alive=false;}; },[]);
@@ -898,6 +966,7 @@ function ActivityPage({botId}){
 
     {bot&&<div className="mb-5"><PeriodControls {...{period,setPeriod,custom,setCustom,fund,setFund,funds}} showFund={false}/></div>}
 
+    {!bot&&!selFund&&<OnboardingCard/>}
     {!bot&&!selFund&&<MarketTicker/>}
 
     {/* KPI cards */}
@@ -1347,7 +1416,7 @@ function AdminUsers(){
   const [exp,setExp]=useState(null); const [add,setAdd]=useState(false); const [del,setDel]=useState(null); const [editName,setEditName]=useState(null); const [nameVal,setNameVal]=useState('');
   useEffect(()=>{ if(user.role==='admin') api('users').then(r=>setUsers(r.users||[])).catch(()=>{}); },[]);
   if(user.role!=='admin') return <Denied/>;
-  const up=async(id,patch)=>{ try{ const r=await api('users',{method:'PATCH',body:{id,...patch}}); setUsers(us=>us.map(u=>u.id===id?r.user:u)); }catch(e){ alert(e.message); } };
+  const up=async(id,patch)=>{ try{ const r=await api('users',{method:'PATCH',body:{id,...patch}}); setUsers(us=>us.map(u=>u.id===id?r.user:u)); }catch(e){ toast.error(e.message); } };
   return <div>
     <PageHead title="Users" subtitle={`${users.length} accounts`} actions={<Btn onClick={()=>setAdd(true)}><Icon name="plus" className="w-4 h-4"/>Add User</Btn>}/>
     <div className="space-y-3">
@@ -1389,7 +1458,7 @@ function AdminUsers(){
       </Card>)}
     </div>
     <AddUserModal open={add} onClose={()=>setAdd(false)} onCreated={u=>{setUsers(us=>[...us,u]);setAdd(false);}}/>
-    <Confirm open={!!del} title="Delete user" message={`Permanently remove ${del?.username}? This cannot be undone.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('users',{method:'DELETE',body:{id:del.id}});setUsers(us=>us.filter(u=>u.id!==del.id));}catch(e){alert(e.message);}setDel(null);setExp(null);}}/>
+    <Confirm open={!!del} title="Delete user" message={`Permanently remove ${del?.username}? This cannot be undone.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('users',{method:'DELETE',body:{id:del.id}});setUsers(us=>us.filter(u=>u.id!==del.id));toast.success('User deleted');}catch(e){toast.error(e.message);}setDel(null);setExp(null);}}/>
   </div>;
 }
 function AddUserModal({open,onClose,onCreated}){
@@ -1457,9 +1526,9 @@ function AdminExchanges(){
         if(modal.mode==='add') await api('exchanges',{method:'POST',body});
         else await api('exchanges',{method:'PATCH',body:{id:d.id,...body}});
         await reload(); setModal(null);
-      }catch(e){ alert(e.message); }
+      }catch(e){ toast.error(e.message); }
     }}/>
-    <Confirm open={!!del} title="Delete exchange" message={`Remove ${del?.label}? Bots using this connection will lose API access.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('exchanges',{method:'DELETE',body:{id:del.id}});await reload();}catch(e){alert(e.message);}setDel(null);}}/>
+    <Confirm open={!!del} title="Delete exchange" message={`Remove ${del?.label}? Bots using this connection will lose API access.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('exchanges',{method:'DELETE',body:{id:del.id}});await reload();toast.success('Exchange removed');}catch(e){toast.error(e.message);}setDel(null);}}/>
   </div>;
 }
 function ExchangeModal({modal,onClose,onSave}){
@@ -1493,7 +1562,7 @@ function AdminOpenWA(){
   const metricOpts=[{value:'drawdown',label:'Max drawdown (%)'},{value:'pnlDay',label:'Daily PnL ($)'}];
   const updateRule=(i,patch)=>setRules(rs=>rs.map((r,j)=>j===i?{...r,...patch}:r));
   const addRule=()=>setRules(rs=>[...rs,{id:'r'+Date.now(),scope:'portfolio',metric:'drawdown',value:10,enabled:true}]);
-  async function save(){ setBusy(true); try{ const body={apiUrl,defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ alert(e.message); } finally{ setBusy(false); } }
+  async function save(){ setBusy(true); try{ const body={apiUrl,defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
   async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } }
   async function runReport(){ setReport({state:'sending'}); try{ const r=await api('cron/daily',{method:'POST'}); const n=(r.sent||[]).reduce((a,s)=>a+(s.sent||0),0); setReport({state:'ok',msg:`Ran ✓ — ${n} message(s) delivered`}); }catch(e){ setReport({state:'err',msg:e.message}); } }
   return <div className="max-w-2xl">
@@ -1567,7 +1636,7 @@ function AdminFunds(){
   const [newName,setNewName]=useState(''); const [edit,setEdit]=useState(null); const [editVal,setEditVal]=useState(''); const [editColor,setEditColor]=useState('#C9A24D'); const [del,setDel]=useState(null); const [reassignTo,setReassignTo]=useState('');
   if(user.role!=='admin') return <Denied/>;
   const usedColors=funds.map(f=>f.color); const freeColor=FUND_PALETTE.find(c=>!usedColors.includes(c))||FUND_PALETTE[funds.length%8];
-  const persist=(next)=>{ saveFunds(next).catch(e=>alert(e.message)); };
+  const persist=(next)=>{ saveFunds(next).catch(e=>toast.error(e.message)); };
   function create(){ if(!newName.trim())return; persist([...funds,{id:'f'+Date.now(),name:newName.trim(),color:freeColor,bots:[]}]); setNewName(''); }
   function reassign(botId,toId){ persist(funds.map(f=>({...f,bots: f.id===toId? [...f.bots.filter(b=>b!==botId),botId] : f.bots.filter(b=>b!==botId)}))); }
   function saveEdit(id){ persist(funds.map(x=>x.id===id?{...x,name:editVal,color:editColor}:x)); setEdit(null); }
@@ -1644,10 +1713,10 @@ function ProfilePage(){
   const [pw,setPw]=useState({cur:'',n1:'',n2:''}); const [pwMsg,setPwMsg]=useState(null);
   const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||'');
   const fileRef=useRef();
-  async function patchSelf(patch){ try{ const r=await api('profile',{method:'PATCH',body:patch}); setUser(r.user); return true; }catch(e){ alert(e.message); return false; } }
+  async function patchSelf(patch){ try{ const r=await api('profile',{method:'PATCH',body:patch}); setUser(r.user); return true; }catch(e){ toast.error(e.message); return false; } }
   async function saveInfo(){ if(await patchSelf({firstName:v.firstName,lastName:v.lastName})){ setSaved(true); setTimeout(()=>setSaved(false),1800); } }
   async function changePw(){ if(!pw.n1)return setPwMsg({err:'New password must not be empty'}); if(pw.n1!==pw.n2)return setPwMsg({err:'Confirmation must match'}); try{ await api('auth',{method:'POST',body:{action:'changePassword',current:pw.cur,next:pw.n1}}); setPw({cur:'',n1:'',n2:''}); setPwMsg({ok:'Password updated'}); }catch(e){ setPwMsg({err:e.message||'Could not update password'}); } }
-  function upload(e){ const file=e.target.files[0]; if(!file)return; if(!['image/png','image/jpeg'].includes(file.type))return alert('Accepted formats: PNG, JPEG'); if(file.size>5*1024*1024)return alert('Maximum file size is 5 MB'); const r=new FileReader(); r.onload=()=>patchSelf({avatar:r.result}); r.readAsDataURL(file); }
+  function upload(e){ const file=e.target.files[0]; if(!file)return; if(!['image/png','image/jpeg'].includes(file.type))return toast.error('Accepted formats: PNG, JPEG'); if(file.size>5*1024*1024)return toast.error('Maximum file size is 5 MB'); const r=new FileReader(); r.onload=()=>patchSelf({avatar:r.result}); r.readAsDataURL(file); }
   return <div className="max-w-2xl">
     <PageHead title="Profile & Settings" subtitle="Manage your personal account details"/>
     <Card className="p-5 mb-4">
@@ -1800,6 +1869,13 @@ function Root(){
     return ()=>{alive=false;};
   },[]);
 
+  // graceful session expiry: any 401 with a token -> sign out + tell the user
+  useEffect(()=>{
+    const onUnauth=()=>{ if(getToken()){ setToken(null); setUser(null); window.location.hash='#/activity'; toast.error('Session expired — please sign in again.'); } };
+    window.addEventListener('lno:unauthorized', onUnauth);
+    return ()=>window.removeEventListener('lno:unauthorized', onUnauth);
+  },[]);
+
   // funds are read by many pages (Activity/Realtime) — load once authed
   useEffect(()=>{
     if(!user){ setFunds([]); return; }
@@ -1819,10 +1895,11 @@ function Root(){
 
   const ctx={route,navigate,user,setUser,login,logout,api,funds,setFunds,reloadFunds,saveFunds,data,dataStatus};
 
-  if(booting) return <App.Provider value={ctx}><LoadingScreen status="loading"/></App.Provider>;
-  if(!user) return <App.Provider value={ctx}><Login/></App.Provider>;
-  if(!data||!funds.length) return <App.Provider value={ctx}><LoadingScreen status={dataStatus}/></App.Provider>;
-  return <App.Provider value={ctx}><Shell/></App.Provider>;
+  const content = booting ? <LoadingScreen status="loading"/>
+    : !user ? <Login/>
+    : (!data||!funds.length) ? <LoadingScreen status={dataStatus}/>
+    : <Shell/>;
+  return <App.Provider value={ctx}>{content}<Toaster/></App.Provider>;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
