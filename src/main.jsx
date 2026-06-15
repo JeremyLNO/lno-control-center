@@ -269,6 +269,29 @@ function Icon({name,className='w-5 h-5',sw=2}){
     {items.map((it,i)=> it[0]==='circle'? <circle key={i} cx={it[1]} cy={it[2]} r={it[3]}/> : it[0]==='line'? <line key={i} x1={it[1]} y1={it[2]} x2={it[3]} y2={it[4]}/> : <path key={i} d={it[1]}/>)}
   </svg>;
 }
+// LNO logo — chart icon (gold accent bar + rising trend) + LNO wordmark.
+// Dark parts use currentColor so it adapts: text-white on the navy sidebar/login,
+// text-navy on the white header. Gold accents stay gold (#C9A24D).
+const GOLD='#C9A24D';
+function Logo({className='h-7'}){
+  return <svg viewBox="0 0 290 80" className={className} fill="none" role="img" aria-label="LNO Control Center">
+    {/* chart icon */}
+    <rect x="2" y="32" width="12" height="36" rx="3" fill={GOLD}/>
+    <rect x="20" y="22" width="12" height="46" rx="3" fill="currentColor"/>
+    <rect x="38" y="40" width="12" height="28" rx="3" fill="currentColor"/>
+    <rect x="56" y="14" width="12" height="54" rx="3" fill="currentColor"/>
+    <polyline points="7,57 26,40 44,49 62,28 80,16" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+    <circle cx="7" cy="57" r="4" fill="currentColor"/>
+    <circle cx="44" cy="49" r="3" fill="currentColor"/>
+    <circle cx="80" cy="16" r="5" fill={GOLD}/>
+    {/* wordmark LNO */}
+    <path d="M100 14 H115 V51 H143 V66 H100 Z" fill="currentColor"/>
+    <rect x="160" y="14" width="15" height="52" fill="currentColor"/>
+    <polygon points="160,14 177,14 217,66 200,66" fill="currentColor"/>
+    <rect x="202" y="14" width="15" height="52" fill="currentColor"/>
+    <circle cx="255" cy="40" r="20" fill="none" stroke="currentColor" strokeWidth="15"/>
+  </svg>;
+}
 
 /* ============================================================
    PRIMITIVES
@@ -549,7 +572,7 @@ function MarketTicker(){
 function LoadingScreen({status}){
   return <div className="h-full grid place-items-center bg-bg">
     <div className="text-center">
-      <div className="text-3xl font-black text-gold tracking-tight mb-3">LNO</div>
+      <Logo className="h-8 text-navy mx-auto mb-3"/>
       <div className="flex items-center justify-center gap-2 text-slate-500 text-sm">
         <span className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-gold animate-spin"/>
         {status==='sim'?'Live data unavailable — loading simulation…':'Connecting to live market data…'}
@@ -578,7 +601,7 @@ function Login(){
     <div className="absolute inset-0 opacity-[0.07]" style={{backgroundImage:'radial-gradient(circle at 20% 20%, #C9A24D 0, transparent 40%), radial-gradient(circle at 80% 70%, #3B82F6 0, transparent 40%)'}}/>
     <div className="relative w-full max-w-sm">
       <div className="text-center mb-7">
-        <div className="text-4xl font-black text-gold tracking-tight">LNO</div>
+        <Logo className="h-11 text-white mx-auto"/>
         <div className="text-slate-300 text-sm mt-1">Control Center</div>
       </div>
       <form onSubmit={submit} className="bg-white rounded-2xl shadow-2xl p-6 space-y-4">
@@ -626,7 +649,7 @@ function Sidebar(){
   const isAct=(p)=> cur===p || cur.startsWith(p+'/');
   return <aside className="hidden lg:flex flex-col w-60 shrink-0 bg-navy text-white h-full">
     <div className="px-5 py-5 flex items-center gap-2">
-      <div className="text-2xl font-black text-gold tracking-tight">LNO</div>
+      <Logo className="h-6 text-white"/>
       <div className="text-[10px] text-slate-400 leading-tight mt-1.5">Control<br/>Center</div>
     </div>
     <nav className="flex-1 overflow-y-auto px-3 space-y-1">
@@ -679,7 +702,7 @@ function Header(){
   const unacked=alerts.filter(a=>!a.ackedAt).length;
   async function ack(id){ try{ await api('alerts',{method:'POST',body:{id}}); loadAlerts(); }catch(e){ alert(e.message); } }
   return <header className="h-16 shrink-0 bg-white border-b border-slate-200 flex items-center gap-4 px-4 lg:px-6">
-    <div className="lg:hidden text-xl font-black text-gold">LNO</div>
+    <Logo className="lg:hidden h-6 text-navy"/>
     <GlobalSearch/>
     {user.firstName&&<div className="hidden md:block text-sm text-slate-500">Hello, <span className="font-semibold text-navy">{user.firstName}</span></div>}
     <LiveBadge status={dataStatus}/>
