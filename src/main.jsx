@@ -1446,14 +1446,19 @@ function ExchangeModal({modal,onClose,onSave}){
    ADMIN — WHATSAPP
    ============================================================ */
 function AdminOpenWA(){
-  const {user}=useApp();
+  const {user,funds}=useApp();
   const [cfg,setCfg]=useState(null);
   const [apiUrl,setApiUrl]=useState(''); const [apiKey,setApiKey]=useState(''); const [defaultSender,setDefaultSender]=useState(''); const [enabled,setEnabled]=useState(false);
   const [ddPct,setDdPct]=useState(10); const [pnlThr,setPnlThr]=useState(-5000); const [dailyReport,setDailyReport]=useState(true);
+  const [rules,setRules]=useState([]);
   const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
-  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setApiUrl(c.apiUrl); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); }).catch(()=>{}); },[]);
+  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setApiUrl(c.apiUrl); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); },[]);
   if(user.role!=='admin') return <Denied/>;
-  async function save(){ setBusy(true); try{ const body={apiUrl,defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ alert(e.message); } finally{ setBusy(false); } }
+  const scopeOpts=[{value:'portfolio',label:'Portfolio'},...funds.map(f=>({value:'fund:'+f.id,label:'Fund · '+f.name})),...BASE_BOTS.map(b=>({value:'bot:'+b.id,label:'Bot · '+b.name}))];
+  const metricOpts=[{value:'drawdown',label:'Max drawdown (%)'},{value:'pnlDay',label:'Daily PnL ($)'}];
+  const updateRule=(i,patch)=>setRules(rs=>rs.map((r,j)=>j===i?{...r,...patch}:r));
+  const addRule=()=>setRules(rs=>[...rs,{id:'r'+Date.now(),scope:'portfolio',metric:'drawdown',value:10,enabled:true}]);
+  async function save(){ setBusy(true); try{ const body={apiUrl,defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ alert(e.message); } finally{ setBusy(false); } }
   async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } }
   async function runReport(){ setReport({state:'sending'}); try{ const r=await api('cron/daily',{method:'POST'}); const n=(r.sent||[]).reduce((a,s)=>a+(s.sent||0),0); setReport({state:'ok',msg:`Ran ✓ — ${n} message(s) delivered`}); }catch(e){ setReport({state:'err',msg:e.message}); } }
   return <div className="max-w-2xl">
@@ -1493,14 +1498,27 @@ function AdminOpenWA(){
       </div>
     </Card>
 
+    <Card className="p-5 mt-4 space-y-3">
+      <SectionTitle right={<Btn variant="outline" size="sm" onClick={addRule}><Icon name="plus" className="w-3.5 h-3.5"/>Add rule</Btn>}>Scoped rules (per fund / bot)</SectionTitle>
+      {rules.length===0&&<div className="text-sm text-slate-400 py-2">No scoped rules. The global thresholds above still apply to the whole portfolio.</div>}
+      {rules.map((r,i)=><div key={r.id} className="flex flex-wrap items-center gap-2">
+        <Select className="w-48" value={r.scope} onChange={v=>updateRule(i,{scope:v})} options={scopeOpts}/>
+        <Select className="w-40" value={r.metric} onChange={v=>updateRule(i,{metric:v})} options={metricOpts}/>
+        <Input type="number" className="w-24" value={r.value} onChange={e=>updateRule(i,{value:e.target.value})}/>
+        <div data-tip="Enabled"><Toggle on={r.enabled} onChange={v=>updateRule(i,{enabled:v})} size="sm"/></div>
+        <button onClick={()=>setRules(rs=>rs.filter((_,j)=>j!==i))} className="text-slate-400 hover:text-danger p-1"><Icon name="trash" className="w-4 h-4"/></button>
+      </div>)}
+      <div className="flex items-center gap-3 pt-1"><Btn onClick={save} disabled={busy}>{busy?'Saving…':'Save rules'}</Btn><span className="text-[11px] text-slate-400">Drawdown alerts when the scope's drawdown exceeds the % · PnL alerts when the day's PnL falls below the $ value · evaluated daily.</span></div>
+    </Card>
+
     <Card className="p-5 mt-4">
       <SectionTitle>How it works</SectionTitle>
       <p className="text-sm text-slate-600 mb-4">OpenWA (<span className="font-mono text-xs bg-slate-100 px-1 rounded">@open-wa/wa-automate</span>) runs on your own always-on host and drives a real WhatsApp session. The Control Center backend calls its API to send alerts — the API key is <span className="font-medium">encrypted at rest</span> and never exposed to the browser. Alerts route to the default recipient plus every user who enabled WhatsApp notifications in their profile.</p>
       <SectionTitle>Active alerts</SectionTitle>
       <ul className="text-sm text-slate-600 space-y-2">
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Login-failure alerts to admins (after 3 failed attempts)</li>
-        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Drawdown &amp; daily-PnL threshold breaches</li>
-        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Automatic daily portfolio report</li>
+        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Drawdown &amp; daily-PnL breaches — portfolio, per fund, or per bot</li>
+        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Daily report, plus weekly (Mondays) &amp; monthly (1st) summaries</li>
       </ul>
     </Card>
   </div>;

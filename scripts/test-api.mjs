@@ -108,6 +108,13 @@ ok('cron computes risk metrics (sharpe/sortino/drawdown)', r.status === 200 && t
 ok('cron sends daily report via OpenWA', sentMessages.some(m => /daily report/i.test(m.content)), sentMessages.map(m => m.content.slice(0, 20)));
 ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { method: 'POST' })).status === 401);
 
+// scoped per-bot rule + weekly/monthly reports (force)
+sentMessages.length = 0;
+await call(openwa, { method: 'PUT', headers: authH, body: { alertRules: [{ id: 'r1', scope: 'bot:b1', metric: 'drawdown', value: 0.5, enabled: true }] } });
+r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'all' } });
+ok('scoped per-bot alert rule breach detected', r.body.breaches.some(b => /Alpha-BTC-Momentum/.test(b)), r.body.breaches);
+ok('weekly + monthly reports sent (force=all)', r.body.sent.some(s => s.type === 'weekly') && r.body.sent.some(s => s.type === 'monthly'), r.body.sent.map(s => s.type));
+
 // the cron records a daily equity snapshot
 r = await call(snapshots, { method: 'GET', headers: authH });
 ok('cron wrote an equity snapshot (history accrues)', r.status === 200 && r.body.snapshots.length >= 1 && typeof r.body.snapshots[0].equity === 'number', r.body && r.body.snapshots);

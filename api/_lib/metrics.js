@@ -58,7 +58,17 @@ export async function computePortfolio(){
   BASE_BOTS.forEach(b=>{ const s=per[b.id].series; const cur=s[s.length-1].equity; const pnl=cur-s[Math.max(0,s.length-2)].equity;
     byExchange[b.exchange]=(byExchange[b.exchange]||0)+cur; bySymbol[EX.parse(b.symbol).base]=(bySymbol[EX.parse(b.symbol).base]||0)+cur;
     if(pnl>best.pnl) best={name:b.name,pnl}; if(pnl<worst.pnl) worst={name:b.name,pnl}; });
-  return { series, byExchange, bySymbol, best, worst, fails };
+  return { series, per, byExchange, bySymbol, best, worst, fails };
+}
+
+// Sum several per-bot series into one (aligned by shortest length) — for fund-scoped rules.
+export function sumSeries(list){
+  const ss=list.filter(Boolean).map(x=>x.series||x);
+  if(!ss.length) return [];
+  const minLen=Math.min(...ss.map(s=>s.length));
+  const out=[];
+  for(let i=0;i<minLen;i++){ let sum=0,t=0; ss.forEach(s=>{ const pt=s[s.length-minLen+i]; sum+=pt.equity; t=pt.t; }); out.push({t,equity:sum}); }
+  return out;
 }
 
 export function riskMetrics(series){

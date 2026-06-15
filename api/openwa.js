@@ -21,6 +21,7 @@ function pub(cfg) {
     hasApiKey: !!cfg.apiKeyEnc, apiKeyMasked: cfg.apiKeyEnc ? mask(decrypt(cfg.apiKeyEnc)) : '',
     drawdownPct: cfg.drawdownPct ?? 10, pnlDayThreshold: cfg.pnlDayThreshold ?? -5000,
     dailyReport: cfg.dailyReport ?? true,
+    alertRules: Array.isArray(cfg.alertRules) ? cfg.alertRules : [],
   };
 }
 
@@ -40,6 +41,7 @@ export default async function handler(req, res) {
         drawdownPct: body.drawdownPct ?? cfg.drawdownPct ?? 10,
         pnlDayThreshold: body.pnlDayThreshold ?? cfg.pnlDayThreshold ?? -5000,
         dailyReport: body.dailyReport ?? cfg.dailyReport ?? true,
+        alertRules: Array.isArray(body.alertRules) ? body.alertRules : (cfg.alertRules || []),
       };
       if (typeof body.apiKey === 'string' && body.apiKey !== '') next.apiKeyEnc = encrypt(body.apiKey);
       await setCfg(next);
