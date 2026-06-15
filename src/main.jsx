@@ -88,9 +88,10 @@ async function fetchTickers(exchange, syms){
 async function fetchKlines(exchange, sym, limit, interval='day'){
   const iv = interval==='hour' ? {Binance:'1h',Bybit:'60',OKX:'1H'} : {Binance:'1d',Bybit:'D',OKX:'1D'};
   let rows=[];
-  if(exchange==='Binance'){ const j=await EX.json(`https://api.binance.com/api/v3/klines?symbol=${EX.bn(sym)}&interval=${iv.Binance}&limit=${limit}`); rows=j.map(k=>({t:+k[0],close:+k[4]})); }
-  else if(exchange==='Bybit'){ const j=await EX.json(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${EX.bn(sym)}&interval=${iv.Bybit}&limit=${limit}`); rows=((j.result&&j.result.list)||[]).map(k=>({t:+k[0],close:+k[4]})); }
-  else { const j=await EX.json(`https://www.okx.com/api/v5/market/candles?instId=${EX.okx(sym)}&bar=${iv.OKX}&limit=${Math.min(limit,300)}`); rows=(j.data||[]).map(k=>({t:+k[0],close:+k[4]})); }
+  const M=k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],close:+k[4]});
+  if(exchange==='Binance'){ const j=await EX.json(`https://api.binance.com/api/v3/klines?symbol=${EX.bn(sym)}&interval=${iv.Binance}&limit=${limit}`); rows=j.map(M); }
+  else if(exchange==='Bybit'){ const j=await EX.json(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${EX.bn(sym)}&interval=${iv.Bybit}&limit=${limit}`); rows=((j.result&&j.result.list)||[]).map(M); }
+  else { const j=await EX.json(`https://www.okx.com/api/v5/market/candles?instId=${EX.okx(sym)}&bar=${iv.OKX}&limit=${Math.min(limit,300)}`); rows=(j.data||[]).map(M); }
   return rows.filter(x=>isFinite(x.close)&&x.close>0).sort((a,b)=>a.t-b.t);
 }
 
@@ -353,22 +354,48 @@ function Confirm({open,title,message,onConfirm,onCancel,danger=true,confirmLabel
 /* ============================================================
    CHARTS
    ============================================================ */
-function AreaChart({data,positive,height=260}){
+function AreaChart({data,positive,height=260,resetKey}){
   const id=useId().replace(/:/g,'');
+  const ref=useRef();
+  const [hover,setHover]=useState(null);
+  const [zoom,setZoom]=useState(null);   // {a,b} indices into full data
+  const [drag,setDrag]=useState(null);
+  useEffect(()=>{ setZoom(null); setHover(null); setDrag(null); },[resetKey]);
   const w=1000,h=height;
   if(!data||data.length<2) return <div style={{height}} className="grid place-items-center text-slate-300 text-sm">No data</div>;
-  const ys=data.map(d=>d.equity); const minY=Math.min(...ys),maxY=Math.max(...ys);
+  const base = zoom? Math.max(0,zoom.a) : 0;
+  const view = zoom? data.slice(zoom.a, zoom.b+1) : data;
+  const n=view.length;
+  const ys=view.map(d=>d.equity); const minY=Math.min(...ys),maxY=Math.max(...ys);
   const pad=(maxY-minY)*0.12||1; const y0=minY-pad,y1=maxY+pad;
-  const X=i=>(i/(data.length-1))*w; const Y=v=>h-((v-y0)/(y1-y0))*h;
-  const line=data.map((d,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(d.equity).toFixed(1)}`).join(' ');
+  const X=i=>(i/(n-1))*w; const Y=v=>h-((v-y0)/(y1-y0))*h;
+  const line=view.map((d,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(d.equity).toFixed(1)}`).join(' ');
   const area=`${line} L ${w} ${h} L 0 ${h} Z`;
   const color=positive?'#10B981':'#EF4444';
-  return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full" style={{height}}>
-    <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.22"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>
-    {[0.25,0.5,0.75].map(g=><line key={g} x1="0" x2={w} y1={h*g} y2={h*g} stroke="#eef0f3" strokeWidth="1" vectorEffect="non-scaling-stroke"/>)}
-    <path d={area} fill={`url(#${id})`}/>
-    <path d={line} fill="none" stroke={color} strokeWidth="2.5" vectorEffect="non-scaling-stroke"/>
-  </svg>;
+  const idxFromEvent=(e)=>{ const r=ref.current.getBoundingClientRect(); const f=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)); return Math.round(f*(n-1)); };
+  const onMove=(e)=>{ const i=idxFromEvent(e); setHover(i); if(drag) setDrag({...drag,b:i}); };
+  const onDown=(e)=>{ const i=idxFromEvent(e); setDrag({a:i,b:i}); };
+  const onUp=()=>{ if(drag){ const a=Math.min(drag.a,drag.b),b=Math.max(drag.a,drag.b); if(b-a>=2) setZoom({a:base+a,b:base+b}); } setDrag(null); };
+  const onLeave=()=>{ setHover(null); setDrag(null); };
+  const hv = hover!=null && hover<n ? view[hover] : null;
+  const hoverPct = hover!=null ? (hover/(n-1))*100 : 0;
+  return <div className="relative select-none cursor-crosshair" ref={ref} style={{height}}
+      onMouseMove={onMove} onMouseDown={onDown} onMouseUp={onUp} onMouseLeave={onLeave} onDoubleClick={()=>setZoom(null)}>
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full" style={{height}}>
+      <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.22"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>
+      {[0.25,0.5,0.75].map(g=><line key={g} x1="0" x2={w} y1={h*g} y2={h*g} stroke="#eef0f3" strokeWidth="1" vectorEffect="non-scaling-stroke"/>)}
+      <path d={area} fill={`url(#${id})`}/>
+      <path d={line} fill="none" stroke={color} strokeWidth="2.5" vectorEffect="non-scaling-stroke"/>
+      {drag && <rect x={X(Math.min(drag.a,drag.b))} y="0" width={Math.abs(X(drag.b)-X(drag.a))||1} height={h} fill="#0B1F3A" fillOpacity="0.08"/>}
+      {hv && <line x1={X(hover)} x2={X(hover)} y1="0" y2={h} stroke={color} strokeWidth="1" strokeDasharray="4 3" vectorEffect="non-scaling-stroke"/>}
+    </svg>
+    {hv && <div className="absolute -top-1 z-10 pointer-events-none" style={{left:hoverPct+'%',transform:`translateX(${hoverPct>75?'-100%':hoverPct<25?'0':'-50%'})`}}>
+      <div className="bg-navy text-white rounded-md px-2 py-1 text-[11px] shadow-lg whitespace-nowrap">
+        <span className="font-semibold tnum">{fmtUSD(hv.equity)}</span><span className="text-slate-300 ml-1.5">{fmtDate(hv.t)}</span>
+      </div>
+    </div>}
+    {zoom && <button onClick={()=>setZoom(null)} className="absolute top-1 right-1 text-[11px] bg-white/90 border border-slate-200 rounded px-1.5 py-0.5 text-slate-500 hover:text-navy z-10">reset zoom ✕</button>}
+  </div>;
 }
 function Donut({segments,size=180,onSlice}){
   const total=segments.reduce((a,s)=>a+s.value,0)||1;
@@ -417,6 +444,49 @@ function sliceByPeriod(series,period,custom){
   return series.filter(p=>p.t>=cutoff);
 }
 function maxDrawdown(series){ let peak=-Infinity,mdd=0; series.forEach(p=>{ peak=Math.max(peak,p.equity); mdd=Math.min(mdd,(p.equity-peak)/peak); }); return mdd*100; }
+// Sharpe/Sortino (annualised), max drawdown depth + duration (in days) from an equity series.
+function riskMetrics(series){
+  const eq=series.map(p=>p.equity); const rets=[];
+  for(let i=1;i<eq.length;i++) rets.push(eq[i]/eq[i-1]-1);
+  const n=rets.length||1; const mean=rets.reduce((a,b)=>a+b,0)/n;
+  const sd=Math.sqrt(rets.reduce((a,b)=>a+(b-mean)**2,0)/n);
+  const down=rets.filter(r=>r<0); const dd=Math.sqrt(down.reduce((a,b)=>a+b*b,0)/(down.length||1));
+  const ann=Math.sqrt(365);
+  let peak=eq[0],peakI=0,mdd=0,ddDur=0;
+  for(let i=0;i<eq.length;i++){ if(eq[i]>=peak){peak=eq[i];peakI=i;} else { const d=(eq[i]-peak)/peak; if(d<mdd)mdd=d; if(i-peakI>ddDur)ddDur=i-peakI; } }
+  return { sharpe:sd?(mean/sd)*ann:0, sortino:dd?(mean/dd)*ann:0, maxDrawdownPct:mdd*100, ddDurationDays:ddDur };
+}
+function ExposureBars({title,items,total}){
+  return <div>
+    <div className="text-xs font-medium text-slate-500 mb-2">{title}</div>
+    <div className="space-y-2">
+      {items.map(([k,v],i)=>{ const pct=v/total*100; const color=FUND_PALETTE[i%FUND_PALETTE.length]; return <div key={k}>
+        <div className="flex items-center justify-between text-xs mb-1"><span className="text-navy">{k}</span><span className="text-slate-400 tnum">{fmtUSD(v)} · {pct.toFixed(0)}%</span></div>
+        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{width:pct+'%',background:color}}/></div>
+      </div>; })}
+    </div>
+  </div>;
+}
+function RiskPanel({series,botIds,data}){
+  const m=riskMetrics(series);
+  const byEx={},byAsset={};
+  botIds.forEach(id=>{ const b=BASE_BOTS.find(x=>x.id===id); const eq=data.bots[id].currentEquity; byEx[b.exchange]=(byEx[b.exchange]||0)+eq; const base=EX.parse(b.symbol).base; byAsset[base]=(byAsset[base]||0)+eq; });
+  const total=Object.values(byEx).reduce((a,b)=>a+b,0)||1;
+  const M=({label,value,cls})=><div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">{label}</div><div className={`text-lg font-bold tnum mt-0.5 ${cls||'text-navy'}`}>{value}</div></div>;
+  return <Card className="p-5">
+    <SectionTitle right={<span className="text-[11px] text-slate-400">on the selected period</span>}>Risk & Exposure</SectionTitle>
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+      <M label="Sharpe" value={m.sharpe.toFixed(2)}/>
+      <M label="Sortino" value={m.sortino.toFixed(2)}/>
+      <M label="Max Drawdown" value={fmtPctPlain(m.maxDrawdownPct)} cls="text-danger"/>
+      <M label="DD Duration" value={m.ddDurationDays+' d'}/>
+    </div>
+    <div className="grid sm:grid-cols-2 gap-5">
+      <ExposureBars title="Exposure by exchange" items={Object.entries(byEx).sort((a,b)=>b[1]-a[1])} total={total}/>
+      <ExposureBars title="Exposure by asset" items={Object.entries(byAsset).sort((a,b)=>b[1]-a[1])} total={total}/>
+    </div>
+  </Card>;
+}
 
 /* ============================================================
    LIVE-DATA UI
@@ -761,7 +831,7 @@ function ActivityPage({botId}){
     {/* Equity curve */}
     <Card className="p-5 mb-5">
       <SectionTitle right={<span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} this period</span>}>Equity Curve</SectionTitle>
-      <AreaChart data={series} positive={positive}/>
+      <AreaChart data={series} positive={positive} resetKey={`${period}|${fund}|${botId||''}|${custom.start||''}`}/>
       <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{series.length?fmtDate(series[0].t):''}</span><span>{series.length?fmtDate(series[series.length-1].t):''}</span></div>
     </Card>
 
@@ -771,6 +841,9 @@ function ActivityPage({botId}){
       <Card className="p-4"><div className="text-xs text-slate-500">Win Rate</div><div className="text-xl font-bold mt-1 text-navy">{closedRange.length?fmtPctPlain(winRate):'—'}</div><div className="text-xs text-slate-400 mt-1">prev: {prevClosed.length?fmtPctPlain(prevWin):'—'}</div></Card>
       <Card className="p-4"><div className="text-xs text-slate-500">Total Trades</div><div className="text-xl font-bold mt-1 text-navy">{rangeTrades.length}</div><div className="text-xs text-slate-400 mt-1">prev: {prevTrades.length}</div></Card>
     </div>
+
+    {/* Risk & exposure */}
+    <div className="mb-5"><RiskPanel series={series} botIds={botIds} data={data}/></div>
 
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
       {/* Fund repartition (global only) */}
@@ -863,17 +936,19 @@ function uniqueAssets(){
   BASE_BOTS.forEach(b=>{ const base=EX.parse(b.symbol).base; if(!seen[base]){ seen[base]=1; out.push({base, symbol:b.symbol, exchange:b.exchange, botId:b.id}); } });
   return out;
 }
-function Sparkline({data,up,height=46}){
-  const id=useId().replace(/:/g,'');
+function Candles({data,height=64}){
   if(!data||data.length<2) return <div style={{height}} className="grid place-items-center text-[11px] text-slate-300">loading…</div>;
-  const w=240,h=height; const min=Math.min(...data),max=Math.max(...data); const range=(max-min)||1;
-  const X=i=>(i/(data.length-1))*w; const Y=v=>h-((v-min)/range)*(h*0.85)-h*0.08;
-  const line=data.map((v,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
-  const area=`${line} L ${w} ${h} L 0 ${h} Z`; const c=up?'#10B981':'#EF4444';
+  const w=240,h=height; const min=Math.min(...data.map(d=>d.l)),max=Math.max(...data.map(d=>d.h)); const range=(max-min)||1;
+  const Y=v=>h-((v-min)/range)*(h*0.9)-h*0.05;
+  const n=data.length, cw=w/n, bw=Math.max(1.4,cw*0.62);
   return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full" style={{height}}>
-    <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c} stopOpacity="0.22"/><stop offset="100%" stopColor={c} stopOpacity="0"/></linearGradient></defs>
-    <path d={area} fill={`url(#${id})`}/>
-    <path d={line} fill="none" stroke={c} strokeWidth="1.75" vectorEffect="non-scaling-stroke"/>
+    {data.map((d,i)=>{ const x=i*cw+cw/2; const up=d.close>=d.o; const c=up?'#10B981':'#EF4444';
+      const yO=Y(d.o),yC=Y(d.close); const top=Math.min(yO,yC), bh=Math.max(0.8,Math.abs(yC-yO));
+      return <g key={i}>
+        <line x1={x} x2={x} y1={Y(d.h)} y2={Y(d.l)} stroke={c} strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+        <rect x={x-bw/2} y={top} width={bw} height={bh} fill={c}/>
+      </g>;
+    })}
   </svg>;
 }
 function PricesPage(){
@@ -882,7 +957,7 @@ function PricesPage(){
   const [spark,setSpark]=useState({});
   useEffect(()=>{
     let alive=true;
-    const load=async()=>{ const res={}; await Promise.all(assets.map(async a=>{ try{ const r=await fetchKlines(a.exchange,a.symbol,24,'hour'); res[a.base]=r.map(x=>x.close); }catch(e){ res[a.base]=null; } })); if(alive)setSpark(res); };
+    const load=async()=>{ const res={}; await Promise.all(assets.map(async a=>{ try{ const r=await fetchKlines(a.exchange,a.symbol,24,'hour'); res[a.base]=r; }catch(e){ res[a.base]=null; } })); if(alive)setSpark(res); };
     load(); const iv=setInterval(load,60000); return ()=>{alive=false;clearInterval(iv);};
   },[]);
   if(!hasPerm(user,'view_activity')) return <Denied/>;
@@ -892,7 +967,7 @@ function PricesPage(){
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
       {assets.map(a=>{
         const d=data.bots[a.botId]; const up=d.changePct>=0;
-        const sp=spark[a.base]; const hi=sp&&sp.length?Math.max(...sp):null; const lo=sp&&sp.length?Math.min(...sp):null;
+        const sp=spark[a.base]; const hi=sp&&sp.length?Math.max(...sp.map(x=>x.h)):null; const lo=sp&&sp.length?Math.min(...sp.map(x=>x.l)):null;
         return <Card key={a.base} className="p-4 relative overflow-hidden">
           <span className="absolute left-0 top-0 bottom-0 w-1" style={{background:up?'#10B981':'#EF4444'}}/>
           <div className="flex items-start justify-between gap-2">
@@ -904,7 +979,7 @@ function PricesPage(){
               <Icon name="trendup" className={'w-4 h-4 '+(up?'':'rotate-180')}/>{fmtPct(d.changePct)}
             </span>
           </div>
-          <div className="mt-3"><Sparkline data={sp} up={up}/></div>
+          <div className="mt-3"><Candles data={sp}/></div>
           <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2">
             <span>24h low <span className="tnum text-slate-500">{lo!=null?fmtPrice(lo):'—'}</span></span>
             <span className="font-mono text-slate-300">{a.exchange}</span>
@@ -1315,11 +1390,13 @@ function AdminOpenWA(){
   const {user}=useApp();
   const [cfg,setCfg]=useState(null);
   const [apiUrl,setApiUrl]=useState(''); const [apiKey,setApiKey]=useState(''); const [defaultSender,setDefaultSender]=useState(''); const [enabled,setEnabled]=useState(false);
-  const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null);
-  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setApiUrl(c.apiUrl); setDefaultSender(c.defaultSender); setEnabled(c.enabled); }).catch(()=>{}); },[]);
+  const [ddPct,setDdPct]=useState(10); const [pnlThr,setPnlThr]=useState(-5000); const [dailyReport,setDailyReport]=useState(true);
+  const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
+  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setApiUrl(c.apiUrl); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); }).catch(()=>{}); },[]);
   if(user.role!=='admin') return <Denied/>;
-  async function save(){ setBusy(true); try{ const body={apiUrl,defaultSender,enabled}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ alert(e.message); } finally{ setBusy(false); } }
+  async function save(){ setBusy(true); try{ const body={apiUrl,defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ alert(e.message); } finally{ setBusy(false); } }
   async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } }
+  async function runReport(){ setReport({state:'sending'}); try{ const r=await api('cron/daily',{method:'POST'}); const n=(r.sent||[]).reduce((a,s)=>a+(s.sent||0),0); setReport({state:'ok',msg:`Ran ✓ — ${n} message(s) delivered`}); }catch(e){ setReport({state:'err',msg:e.message}); } }
   return <div className="max-w-2xl">
     <PageHead title="OpenWA" subtitle="Self-hosted WhatsApp automation (open-wa.org) for system alerts"/>
     <Card className="p-5 space-y-4">
@@ -1339,14 +1416,32 @@ function AdminOpenWA(){
         {test&&<span className={`text-sm flex items-center gap-1 ${test.state==='ok'?'text-success':test.state==='err'?'text-danger':'text-slate-400'}`}>{test.state==='sending'?'Sending…':test.msg}</span>}
       </div>
     </Card>
+
+    <Card className="p-5 mt-4 space-y-4">
+      <SectionTitle right={<span className="text-[11px] text-slate-400">checked daily · 08:00 UTC</span>}>Alert rules</SectionTitle>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Max drawdown alert (%)" hint="Alert when portfolio drawdown exceeds this"><Input type="number" value={ddPct} onChange={e=>setDdPct(e.target.value)} placeholder="10"/></Field>
+        <Field label="Daily PnL alert ($)" hint="Alert when the day's PnL falls below this (e.g. -5000)"><Input type="number" value={pnlThr} onChange={e=>setPnlThr(e.target.value)} placeholder="-5000"/></Field>
+      </div>
+      <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+        <div><div className="text-sm font-medium text-navy">Daily portfolio report</div><div className="text-xs text-slate-400">Automatic WhatsApp summary every day at 08:00 UTC</div></div>
+        <Toggle on={dailyReport} onChange={setDailyReport}/>
+      </div>
+      <div className="flex items-center gap-3 pt-1 flex-wrap">
+        <Btn onClick={save} disabled={busy}>{busy?'Saving…':'Save rules'}</Btn>
+        <Btn variant="outline" onClick={runReport} disabled={!cfg||!cfg.enabled}><Icon name="trendup" className="w-4 h-4"/>Run report now</Btn>
+        {report&&<span className={`text-sm flex items-center gap-1 ${report.state==='ok'?'text-success':report.state==='err'?'text-danger':'text-slate-400'}`}>{report.state==='sending'?'Running…':report.msg}</span>}
+      </div>
+    </Card>
+
     <Card className="p-5 mt-4">
       <SectionTitle>How it works</SectionTitle>
-      <p className="text-sm text-slate-600 mb-4">OpenWA (<span className="font-mono text-xs bg-slate-100 px-1 rounded">@open-wa/wa-automate</span>) runs on your own always-on host and drives a real WhatsApp session. The Control Center backend calls its API to send alerts — the API key is <span className="font-medium">encrypted at rest</span> and never exposed to the browser.</p>
-      <SectionTitle>Alert Types</SectionTitle>
+      <p className="text-sm text-slate-600 mb-4">OpenWA (<span className="font-mono text-xs bg-slate-100 px-1 rounded">@open-wa/wa-automate</span>) runs on your own always-on host and drives a real WhatsApp session. The Control Center backend calls its API to send alerts — the API key is <span className="font-medium">encrypted at rest</span> and never exposed to the browser. Alerts route to the default recipient plus every user who enabled WhatsApp notifications in their profile.</p>
+      <SectionTitle>Active alerts</SectionTitle>
       <ul className="text-sm text-slate-600 space-y-2">
-        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Bot status changes (active → error, paused, etc.)</li>
-        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Critical system incidents</li>
-        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Login failure alerts (after 3 failed attempts)</li>
+        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Login-failure alerts to admins (after 3 failed attempts)</li>
+        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Drawdown &amp; daily-PnL threshold breaches</li>
+        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Automatic daily portfolio report</li>
       </ul>
     </Card>
   </div>;

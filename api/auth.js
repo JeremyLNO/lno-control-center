@@ -1,6 +1,7 @@
 // Auth: GET = current user (me); POST {action:login|logout|changePassword}.
 import { query } from './_lib/db.js';
 import { verifyPassword, signToken, hashPassword, requireAuth, sanitizeUser } from './_lib/auth.js';
+import { notify } from './_lib/notify.js';
 
 export default async function handler(req, res) {
   try {
@@ -19,7 +20,13 @@ export default async function handler(req, res) {
         const u = rows[0];
         const ok = u && u.active && await verifyPassword(body.password, u.password_hash);
         if (!ok) {
-          if (u) await query('UPDATE users SET failed_attempts=failed_attempts+1 WHERE id=$1', [u.id]);
+          if (u) {
+            const up = await query('UPDATE users SET failed_attempts=failed_attempts+1 WHERE id=$1 RETURNING failed_attempts', [u.id]);
+            // alert admins on the 3rd consecutive failure (spec: after 3 failed attempts)
+            if (up.rows[0]?.failed_attempts === 3) {
+              await notify(`⚠️ LNO Control Center — 3 failed login attempts for user "${u.username}".`, { adminsOnly: true });
+            }
+          }
           return res.status(401).json({ error: 'Invalid username or password' });
         }
         await query('UPDATE users SET failed_attempts=0 WHERE id=$1', [u.id]);

@@ -27,4 +27,19 @@ export const DEFAULT_EXCHANGES = [
   { id:'e3', name:'okx',     label:'OKX Institutional',   apiKey:'OKX-77B0-3L8P-0099', secret:'',  status:'pending', note:'Awaiting verification' },
 ];
 // OpenWA (open-wa.org) integration config. apiKey is stored encrypted, never returned in clear.
-export const DEFAULT_OPENWA = { apiUrl:'', defaultSender:'', enabled:false };
+// drawdownPct / pnlDayThreshold drive automated alerts; dailyReport toggles the daily summary.
+export const DEFAULT_OPENWA = { apiUrl:'', defaultSender:'', enabled:false, drawdownPct:10, pnlDayThreshold:-5000, dailyReport:true };
+
+// Bots traded by the firm (static; mirrors the frontend). Used by the alert cron to
+// recompute portfolio metrics server-side from real exchange klines.
+export const BASE_BOTS = [
+  {id:'b1',name:'Alpha-BTC-Momentum',exchange:'Binance',symbol:'BTCUSDT',strategy:'Momentum'},
+  {id:'b2',name:'Beta-ETH-Grid',exchange:'Binance',symbol:'ETHUSDT',strategy:'Grid'},
+  {id:'b3',name:'Eta-AVAX-Breakout',exchange:'Bybit',symbol:'AVAXUSDT',strategy:'Breakout'},
+  {id:'b4',name:'Gamma-SOL-Mean',exchange:'Bybit',symbol:'SOLUSDT',strategy:'Mean Reversion'},
+  {id:'b5',name:'Delta-BNB-Arb',exchange:'OKX',symbol:'BNBUSDT',strategy:'Arbitrage'},
+  {id:'b6',name:'Theta-MATIC-Grid',exchange:'OKX',symbol:'MATICUSDT',strategy:'Grid'},
+  {id:'b7',name:'Epsilon-ADA-Trend',exchange:'Binance',symbol:'ADAUSDT',strategy:'Trend'},
+  {id:'b8',name:'Zeta-XRP-Scalp',exchange:'Bybit',symbol:'XRPUSDT',strategy:'Scalping'},
+];
+export const FALLBACK_PRICE = {BTCUSDT:67000,ETHUSDT:3500,AVAXUSDT:38,SOLUSDT:165,BNBUSDT:600,MATICUSDT:0.72,ADAUSDT:0.45,XRPUSDT:0.62};
