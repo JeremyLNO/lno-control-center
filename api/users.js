@@ -21,10 +21,12 @@ export default async function handler(req, res) {
       if (exists.rows[0]) return res.status(409).json({ error: 'Username must be unique' });
       const id = 'u' + Date.now();
       const perms = ROLE_PERMS[role] || ROLE_PERMS.viewer;
+      // pre-provisioned accounts sign in with Google (@lno.company) — no usable password
+      const unusable = await hashPassword('google:' + id + ':' + Math.random());
       await query(
-        `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,password_hash)
-         VALUES ($1,$2,$3,$4,$5,$6,true,$7::jsonb,$8)`,
-        [id, String(username).trim(), email, firstName, lastName, role, JSON.stringify(perms), await hashPassword('admin')]
+        `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,password_hash,auth_provider)
+         VALUES ($1,$2,$3,$4,$5,$6,true,$7::jsonb,$8,'google')`,
+        [id, String(username).trim(), email, firstName, lastName, role, JSON.stringify(perms), unusable]
       );
       const { rows } = await query('SELECT * FROM users WHERE id=$1', [id]);
       return res.status(201).json({ user: sanitizeUser(rows[0]) });

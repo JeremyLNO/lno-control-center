@@ -671,9 +671,27 @@ function LoadingScreen({status}){
    LOGIN
    ============================================================ */
 function Login(){
-  const {login}=useApp();
+  const {login,loginGoogle}=useApp();
   const [u,setU]=useState(''); const [p,setP]=useState(''); const [err,setErr]=useState(''); const [warn,setWarn]=useState(false);
   const [busy,setBusy]=useState(false); const attemptsRef=useRef(0);
+  const clientId=import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const [showPw,setShowPw]=useState(!clientId); // when Google is available it's the primary path
+  const gref=useRef();
+  useEffect(()=>{
+    if(!clientId) return; let cancelled=false;
+    const init=()=>{
+      if(cancelled||!window.google?.accounts?.id||!gref.current) return;
+      window.google.accounts.id.initialize({ client_id:clientId, callback:async(resp)=>{
+        setBusy(true); setErr('');
+        try{ await loginGoogle(resp.credential); }
+        catch(ex){ setErr(ex.message||'Google sign-in failed'); setBusy(false); }
+      }});
+      window.google.accounts.id.renderButton(gref.current,{ theme:'outline', size:'large', text:'signin_with', shape:'pill', width:300 });
+    };
+    if(window.google?.accounts?.id) init();
+    else { const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client'; s.async=true; s.defer=true; s.onload=init; document.head.appendChild(s); }
+    return ()=>{ cancelled=true; };
+  },[clientId]);
   async function submit(e){
     e.preventDefault(); if(busy) return; setBusy(true); setErr('');
     try{ await login(u.trim(),p); attemptsRef.current=0; }
@@ -690,15 +708,23 @@ function Login(){
         <Logo className="h-11 text-white mx-auto"/>
         <div className="text-slate-300 text-sm mt-1">Control Center</div>
       </div>
-      <form onSubmit={submit} className="bg-white rounded-2xl shadow-2xl p-6 space-y-4">
+      <div className="bg-white rounded-2xl shadow-2xl p-6 space-y-4">
         <h1 className="text-lg font-semibold text-navy">Sign in</h1>
-        <Field label="Username"><Input value={u} onChange={e=>setU(e.target.value)} placeholder="admin" autoFocus/></Field>
-        <Field label="Password"><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="admin"/></Field>
-        {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4"/>{err}</div>}
+        {clientId&&<>
+          <div className="flex justify-center min-h-[44px]" ref={gref}/>
+          <p className="text-[11px] text-slate-400 text-center">Use your <span className="font-medium text-slate-500">@lno.company</span> Google account.</p>
+        </>}
+        {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4 shrink-0"/>{err}</div>}
+        {clientId&&!showPw&&<button onClick={()=>setShowPw(true)} className="w-full text-xs text-slate-400 hover:text-navy">Sign in with a password instead</button>}
+        {showPw&&<form onSubmit={submit} className="space-y-4">
+          {clientId&&<div className="flex items-center gap-2 pt-1"><div className="flex-1 border-t border-slate-200"/><span className="text-[10px] uppercase tracking-wide text-slate-400">password sign-in</span><div className="flex-1 border-t border-slate-200"/></div>}
+          <Field label="Username"><Input value={u} onChange={e=>setU(e.target.value)} placeholder="admin" autoFocus={!clientId}/></Field>
+          <Field label="Password"><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="••••••"/></Field>
+          <Btn className="w-full" type="submit" disabled={busy}>{busy?'Signing in…':'Sign in'}</Btn>
+        </form>}
         {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>Multiple failed attempts detected. A security alert has been dispatched to the operations team.</span></div>}
-        <Btn className="w-full" type="submit" disabled={busy}>{busy?'Signing in…':'Sign in'}</Btn>
-        <div className="text-[11px] text-slate-400 text-center">Default credentials: <span className="font-mono">admin / admin</span></div>
-      </form>
+        {!clientId&&<div className="text-[11px] text-slate-400 text-center">Default credentials: <span className="font-mono">admin / admin</span></div>}
+      </div>
     </div>
   </div>;
 }
@@ -1645,7 +1671,7 @@ function AddUserModal({open,onClose,onCreated}){
       </div>
       <Field label="Role"><Select value={v.role} onChange={r=>setV({...v,role:r})} options={[{value:'admin',label:'Admin'},{value:'operator',label:'Operator'},{value:'viewer',label:'Viewer'}]}/></Field>
       {err&&<div className="text-sm text-danger">{err}</div>}
-      <div className="text-[11px] text-slate-400">New users are created with the default password <span className="font-mono">admin</span> and default permissions for their role.</div>
+      <div className="text-[11px] text-slate-400">Pre-provisions the account with a role. The user signs in with their <span className="font-mono">@lno.company</span> Google account — no password needed.</div>
       <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={submit} disabled={busy}>{busy?'Creating…':'Create user'}</Btn></div>
     </div>
   </Modal>;
@@ -1901,16 +1927,21 @@ function ProfilePage(){
       <div className="flex items-center gap-3 mt-4"><Btn onClick={saveInfo}>Save changes</Btn>{saved&&<span className="text-sm text-success flex items-center gap-1 fadein"><Icon name="check" className="w-4 h-4"/>Changes saved</span>}</div>
     </Card>
 
-    <Card className="p-5 mb-4">
-      <SectionTitle>Change Password</SectionTitle>
-      <div className="grid sm:grid-cols-3 gap-3">
-        <Field label="Current password"><Input type="password" value={pw.cur} onChange={e=>setPw({...pw,cur:e.target.value})}/></Field>
-        <Field label="New password"><Input type="password" value={pw.n1} onChange={e=>setPw({...pw,n1:e.target.value})}/></Field>
-        <Field label="Confirm new"><Input type="password" value={pw.n2} onChange={e=>setPw({...pw,n2:e.target.value})}/></Field>
-      </div>
-      <div className="flex items-center gap-3 mt-4"><Btn onClick={changePw}>Update password</Btn>
-        {pwMsg?.err&&<span className="text-sm text-danger">{pwMsg.err}</span>}{pwMsg?.ok&&<span className="text-sm text-success flex items-center gap-1"><Icon name="check" className="w-4 h-4"/>{pwMsg.ok}</span>}</div>
-    </Card>
+    {user.authProvider==='google'
+      ? <Card className="p-5 mb-4"><SectionTitle>Sign-in</SectionTitle>
+          <div className="flex items-center gap-3 text-sm text-slate-600"><span className="w-9 h-9 rounded-lg bg-gold/15 text-gold grid place-items-center shrink-0"><Icon name="shield" className="w-5 h-5"/></span>
+            <div>You sign in with <span className="font-medium text-navy">Google</span> (<span className="font-mono">{user.email}</span>). There's no password to manage.</div></div>
+        </Card>
+      : <Card className="p-5 mb-4">
+          <SectionTitle>Change Password</SectionTitle>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Field label="Current password"><Input type="password" value={pw.cur} onChange={e=>setPw({...pw,cur:e.target.value})}/></Field>
+            <Field label="New password"><Input type="password" value={pw.n1} onChange={e=>setPw({...pw,n1:e.target.value})}/></Field>
+            <Field label="Confirm new"><Input type="password" value={pw.n2} onChange={e=>setPw({...pw,n2:e.target.value})}/></Field>
+          </div>
+          <div className="flex items-center gap-3 mt-4"><Btn onClick={changePw}>Update password</Btn>
+            {pwMsg?.err&&<span className="text-sm text-danger">{pwMsg.err}</span>}{pwMsg?.ok&&<span className="text-sm text-success flex items-center gap-1"><Icon name="check" className="w-4 h-4"/>{pwMsg.ok}</span>}</div>
+        </Card>}
 
     <Card className="p-5">
       <SectionTitle>WhatsApp Notifications</SectionTitle>
@@ -2272,10 +2303,14 @@ function Root(){
     const r=await api('auth',{method:'POST',body:{action:'login',username,password}});
     setToken(r.token); setUser(r.user); return r.user;
   }
+  async function loginGoogle(credential){
+    const r=await api('auth',{method:'POST',body:{action:'google',credential}});
+    setToken(r.token); setUser(r.user); return r.user;
+  }
   function logout(){ api('auth',{method:'POST',body:{action:'logout'}}).catch(()=>{}); setToken(null); setUser(null); window.location.hash='#/activity'; }
   function navigate(to){ window.location.hash='#'+to; }
 
-  const ctx={route,navigate,user,setUser,login,logout,api,funds,setFunds,reloadFunds,saveFunds,data,dataStatus};
+  const ctx={route,navigate,user,setUser,login,loginGoogle,logout,api,funds,setFunds,reloadFunds,saveFunds,data,dataStatus};
 
   const content = booting ? <LoadingScreen status="loading"/>
     : !user ? <Login/>

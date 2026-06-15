@@ -47,5 +47,6 @@ export function sanitizeUser(row) {
     role: row.role, active: row.active,
     permissions: row.permissions || [],
     avatar: row.avatar || null, phone: row.phone || '', notify: !!row.notify,
+    authProvider: row.auth_provider || 'password',
   };
 }

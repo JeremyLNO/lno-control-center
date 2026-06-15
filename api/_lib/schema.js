@@ -21,6 +21,8 @@ export async function migrate() {
     failed_attempts INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
+  // how each account authenticates ('password' | 'google'); added idempotently for existing DBs
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'password'`);
   await query(`CREATE TABLE IF NOT EXISTS funds (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

@@ -147,5 +147,23 @@ ok('archived report downloads as a valid %PDF', r.status === 200 && Buffer.from(
 r = await call(snapshots, { method: 'GET', query: { reports: 'list' } });
 ok('report archive requires auth -> 401', r.status === 401, r.status);
 
+// Sign in with Google — verification stubbed (real flow verifies the Google JWKS signature).
+globalThis.__GOOGLE_VERIFY__ = async (cred) => JSON.parse(Buffer.from(cred, 'base64').toString());
+const gcred = (o) => Buffer.from(JSON.stringify(o)).toString('base64');
+r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'alice.new@lno.company', email_verified: true, hd: 'lno.company', given_name: 'Alice', family_name: 'New' }) } });
+ok('Google sign-in auto-creates an @lno.company user (viewer, username=local part, names saved)',
+  r.status === 200 && r.body.user.username === 'alice.new' && r.body.user.role === 'viewer' && r.body.user.firstName === 'Alice' && r.body.user.lastName === 'New' && r.body.user.authProvider === 'google' && !!r.body.token, r.body);
+r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'mallory@evil.com', email_verified: true, given_name: 'M', family_name: 'X' }) } });
+ok('Google sign-in rejects a non-@lno.company domain -> 403', r.status === 403, r.status);
+r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'bob@lno.company', email_verified: false, hd: 'lno.company' }) } });
+ok('Google sign-in rejects an unverified email -> 403', r.status === 403, r.status);
+r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'alice.new@lno.company', email_verified: true, hd: 'lno.company', given_name: 'Alice', family_name: 'Renamed' }) } });
+ok('repeat Google sign-in updates names, keeps same account', r.status === 200 && r.body.user.lastName === 'Renamed', r.body.user);
+r = await call(users, { method: 'GET', headers: authH });
+ok('no duplicate account for repeat Google sign-in', r.body.users.filter(x => x.username === 'alice.new').length === 1, r.body.users.filter(x => x.username === 'alice.new').length);
+r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'admin@lno.company', email_verified: true, hd: 'lno.company', given_name: 'Admin', family_name: 'User' }) } });
+ok('Google sign-in links an existing account by email (keeps admin role)', r.status === 200 && r.body.user.username === 'admin' && r.body.user.role === 'admin', r.body.user);
+delete globalThis.__GOOGLE_VERIFY__;
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
