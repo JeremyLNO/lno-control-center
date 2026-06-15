@@ -354,7 +354,7 @@ function Confirm({open,title,message,onConfirm,onCancel,danger=true,confirmLabel
 /* ============================================================
    CHARTS
    ============================================================ */
-function AreaChart({data,positive,height=260,resetKey}){
+function AreaChart({data,positive,height=260,resetKey,benchmark}){
   const id=useId().replace(/:/g,'');
   const ref=useRef();
   const [hover,setHover]=useState(null);
@@ -365,12 +365,16 @@ function AreaChart({data,positive,height=260,resetKey}){
   if(!data||data.length<2) return <div style={{height}} className="grid place-items-center text-slate-300 text-sm">No data</div>;
   const base = zoom? Math.max(0,zoom.a) : 0;
   const view = zoom? data.slice(zoom.a, zoom.b+1) : data;
+  const bm = benchmark&&benchmark.length===data.length ? (zoom? benchmark.slice(zoom.a,zoom.b+1): benchmark) : null;
   const n=view.length;
-  const ys=view.map(d=>d.equity); const minY=Math.min(...ys),maxY=Math.max(...ys);
+  const ys=view.map(d=>d.equity);
+  const allY = bm? ys.concat(bm.filter(v=>isFinite(v))) : ys;
+  const minY=Math.min(...allY),maxY=Math.max(...allY);
   const pad=(maxY-minY)*0.12||1; const y0=minY-pad,y1=maxY+pad;
   const X=i=>(i/(n-1))*w; const Y=v=>h-((v-y0)/(y1-y0))*h;
   const line=view.map((d,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(d.equity).toFixed(1)}`).join(' ');
   const area=`${line} L ${w} ${h} L 0 ${h} Z`;
+  const bline=bm? bm.map((v,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ') : null;
   const color=positive?'#10B981':'#EF4444';
   const idxFromEvent=(e)=>{ const r=ref.current.getBoundingClientRect(); const f=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)); return Math.round(f*(n-1)); };
   const onMove=(e)=>{ const i=idxFromEvent(e); setHover(i); if(drag) setDrag({...drag,b:i}); };
@@ -386,12 +390,17 @@ function AreaChart({data,positive,height=260,resetKey}){
       {[0.25,0.5,0.75].map(g=><line key={g} x1="0" x2={w} y1={h*g} y2={h*g} stroke="#eef0f3" strokeWidth="1" vectorEffect="non-scaling-stroke"/>)}
       <path d={area} fill={`url(#${id})`}/>
       <path d={line} fill="none" stroke={color} strokeWidth="2.5" vectorEffect="non-scaling-stroke"/>
+      {bline && <path d={bline} fill="none" stroke="#C9A24D" strokeWidth="1.75" strokeDasharray="5 4" vectorEffect="non-scaling-stroke"/>}
       {drag && <rect x={X(Math.min(drag.a,drag.b))} y="0" width={Math.abs(X(drag.b)-X(drag.a))||1} height={h} fill="#0B1F3A" fillOpacity="0.08"/>}
       {hv && <line x1={X(hover)} x2={X(hover)} y1="0" y2={h} stroke={color} strokeWidth="1" strokeDasharray="4 3" vectorEffect="non-scaling-stroke"/>}
     </svg>
+    {bm && <div className="absolute top-1 left-2 flex items-center gap-3 text-[10px] z-10 pointer-events-none">
+      <span className="flex items-center gap-1"><span className="w-3 h-0.5" style={{background:color}}/>Equity</span>
+      <span className="flex items-center gap-1 text-gold"><span className="w-3 border-t border-dashed border-gold"/>BTC hold</span>
+    </div>}
     {hv && <div className="absolute -top-1 z-10 pointer-events-none" style={{left:hoverPct+'%',transform:`translateX(${hoverPct>75?'-100%':hoverPct<25?'0':'-50%'})`}}>
       <div className="bg-navy text-white rounded-md px-2 py-1 text-[11px] shadow-lg whitespace-nowrap">
-        <span className="font-semibold tnum">{fmtUSD(hv.equity)}</span><span className="text-slate-300 ml-1.5">{fmtDate(hv.t)}</span>
+        <span className="font-semibold tnum">{fmtUSD(hv.equity)}</span>{bm&&isFinite(bm[hover])&&<span className="text-gold ml-1.5 tnum">BTC {fmtUSD(bm[hover])}</span>}<span className="text-slate-300 ml-1.5">{fmtDate(hv.t)}</span>
       </div>
     </div>}
     {zoom && <button onClick={()=>setZoom(null)} className="absolute top-1 right-1 text-[11px] bg-white/90 border border-slate-200 rounded px-1.5 py-0.5 text-slate-500 hover:text-navy z-10">reset zoom ✕</button>}
@@ -486,6 +495,36 @@ function RiskPanel({series,botIds,data}){
       <ExposureBars title="Exposure by asset" items={Object.entries(byAsset).sort((a,b)=>b[1]-a[1])} total={total}/>
     </div>
   </Card>;
+}
+// Underwater (drawdown-over-time) chart: red area from 0 down to the running drawdown.
+function Underwater({series,height=120}){
+  if(!series||series.length<2) return <div style={{height}} className="grid place-items-center text-slate-300 text-sm">No data</div>;
+  let peak=-Infinity; const dd=series.map(p=>{ peak=Math.max(peak,p.equity); return (p.equity-peak)/peak*100; });
+  const w=1000,h=height; const min=Math.min(-0.1,...dd);
+  const X=i=>(i/(dd.length-1))*w; const Y=v=>h*(v/min);
+  const line=dd.map((v,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
+  return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full" style={{height}}>
+    <line x1="0" x2={w} y1="0.5" y2="0.5" stroke="#e2e8f0" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+    <path d={`${line} L ${w} 0 L 0 0 Z`} fill="#EF4444" fillOpacity="0.12"/>
+    <path d={line} fill="none" stroke="#EF4444" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+  </svg>;
+}
+// GitHub-style daily-PnL heatmap (columns = weeks, rows = Mon..Sun).
+function PnlCalendar({series}){
+  if(!series||series.length<2) return <div className="text-slate-300 text-sm">No data</div>;
+  const pnls=[]; for(let i=1;i<series.length;i++) pnls.push({t:series[i].t, pnl:series[i].equity-series[i-1].equity});
+  const max=Math.max(1,...pnls.map(p=>Math.abs(p.pnl)));
+  const cellColor=(p)=>{ if(!p) return '#f1f5f9'; const f=0.18+Math.min(1,Math.abs(p.pnl)/max)*0.82; return (p.pnl>=0?`rgba(16,185,129,${f})`:`rgba(239,68,68,${f})`); };
+  const dow=t=>{ const d=new Date(t).getUTCDay(); return (d+6)%7; };
+  const cols=[]; let col=new Array(dow(pnls[0].t)).fill(null);
+  pnls.forEach(p=>{ col.push(p); if(col.length===7){ cols.push(col); col=[]; } });
+  if(col.length){ while(col.length<7) col.push(null); cols.push(col); }
+  return <div>
+    <div className="overflow-x-auto pb-1"><div className="inline-flex gap-1">
+      {cols.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:cellColor(p)}} title={p?`${fmtDate(p.t)} · ${fmtSigned(p.pnl)}`:''}/>)}</div>)}
+    </div></div>
+    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-2"><span>loss</span><span className="w-3 h-3 rounded-sm" style={{background:'rgba(239,68,68,0.9)'}}/><span className="w-3 h-3 rounded-sm bg-slate-100"/><span className="w-3 h-3 rounded-sm" style={{background:'rgba(16,185,129,0.9)'}}/><span>gain</span></div>
+  </div>;
 }
 
 /* ============================================================
@@ -743,6 +782,8 @@ function ActivityPage({botId}){
   const [custom,setCustom]=useState({start:null,end:null});
   const [fund,setFund]=useState('all');
   const [sort,setSort]=useState({col:'pnl',dir:'desc'});
+  const [btc,setBtc]=useState(null); const [showBench,setShowBench]=useState(false);
+  useEffect(()=>{ let alive=true; fetchKlines('Binance','BTCUSDT',365,'day').then(r=>{ if(!alive)return; const m={}; r.forEach(x=>{ m[new Date(x.t).toISOString().slice(0,10)]=x.close; }); setBtc(m); }).catch(()=>{}); return ()=>{alive=false;}; },[]);
   if(!hasPerm(user,'view_activity')) return <Denied/>;
 
   const bot = botId? BASE_BOTS.find(b=>b.id===botId): null;
@@ -767,6 +808,15 @@ function ActivityPage({botId}){
     const start=NOW-2*days*DAY, end=NOW-days*DAY;
     return full.filter(p=>p.t>=start&&p.t<=end);
   },[period,fund,botId]);
+
+  // BTC buy-and-hold benchmark, normalised to the period's starting equity
+  const benchmark = useMemo(()=>{
+    if(!showBench||!btc||series.length<2) return null;
+    const day=t=>new Date(t).toISOString().slice(0,10);
+    const baseBtc=btc[day(series[0].t)]; if(!baseBtc) return null;
+    let last=null;
+    return series.map(p=>{ const c=btc[day(p.t)]; if(c!=null) last=c; return last!=null? series[0].equity*(last/baseBtc): NaN; });
+  },[showBench,btc,series]);
 
   // trades in range
   const rangeStart = series.length? series[0].t : NOW;
@@ -830,8 +880,11 @@ function ActivityPage({botId}){
 
     {/* Equity curve */}
     <Card className="p-5 mb-5">
-      <SectionTitle right={<span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} this period</span>}>Equity Curve</SectionTitle>
-      <AreaChart data={series} positive={positive} resetKey={`${period}|${fund}|${botId||''}|${custom.start||''}`}/>
+      <SectionTitle right={<div className="flex items-center gap-3">
+        <button onClick={()=>setShowBench(v=>!v)} className={`text-xs px-2 py-1 rounded-lg border transition ${showBench?'border-gold text-gold bg-gold/5':'border-slate-200 text-slate-500 hover:text-navy'}`}>vs BTC hold</button>
+        <span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} this period</span>
+      </div>}>Equity Curve</SectionTitle>
+      <AreaChart data={series} positive={positive} resetKey={`${period}|${fund}|${botId||''}|${custom.start||''}`} benchmark={benchmark}/>
       <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{series.length?fmtDate(series[0].t):''}</span><span>{series.length?fmtDate(series[series.length-1].t):''}</span></div>
     </Card>
 
@@ -844,6 +897,12 @@ function ActivityPage({botId}){
 
     {/* Risk & exposure */}
     <div className="mb-5"><RiskPanel series={series} botIds={botIds} data={data}/></div>
+
+    {/* Drawdown + PnL calendar */}
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+      <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">underwater</span>}>Drawdown</SectionTitle><Underwater series={series}/></Card>
+      <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">daily</span>}>PnL Calendar</SectionTitle><PnlCalendar series={series}/></Card>
+    </div>
 
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
       {/* Fund repartition (global only) */}

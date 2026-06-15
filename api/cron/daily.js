@@ -4,6 +4,7 @@
 import { computePortfolio, riskMetrics } from '../_lib/metrics.js';
 import { getOpenWAConfig, notify } from '../_lib/notify.js';
 import { getAuth } from '../_lib/auth.js';
+import { query } from '../_lib/db.js';
 
 function authorized(req) {
   const secret = process.env.CRON_SECRET;
@@ -22,6 +23,15 @@ export default async function handler(req, res) {
     const cfg = await getOpenWAConfig();
     const p = await computePortfolio();
     const m = riskMetrics(p.series);
+
+    // record today's equity snapshot (real recorded history, one row/day)
+    const day = new Date(p.series[p.series.length - 1].t).toISOString().slice(0, 10);
+    await query(
+      `INSERT INTO equity_snapshots (day,equity,pnl_day,metrics) VALUES ($1,$2,$3,$4::jsonb)
+       ON CONFLICT (day) DO UPDATE SET equity=$2, pnl_day=$3, metrics=$4::jsonb`,
+      [day, Math.round(m.totalEquity), Math.round(m.pnlDay),
+       JSON.stringify({ sharpe: m.sharpe, sortino: m.sortino, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, pnlWeek: m.pnlWeek })]
+    );
 
     const ddLimit = Math.abs(cfg.drawdownPct ?? 10);
     const pnlLimit = cfg.pnlDayThreshold ?? -5000;

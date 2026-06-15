@@ -15,6 +15,7 @@ const users = (await import('../api/users.js')).default;
 const openwa = (await import('../api/openwa.js')).default;
 const profile = (await import('../api/profile.js')).default;
 const cronDaily = (await import('../api/cron/daily.js')).default;
+const snapshots = (await import('../api/snapshots.js')).default;
 
 function mockRes() {
   const r = { _status: 200, _json: null };
@@ -106,6 +107,10 @@ r = await call(cronDaily, { method: 'POST', headers: authH });
 ok('cron computes risk metrics (sharpe/sortino/drawdown)', r.status === 200 && typeof r.body.metrics.sharpe === 'number' && typeof r.body.metrics.sortino === 'number' && typeof r.body.metrics.maxDrawdownPct === 'number', r.body && r.body.metrics);
 ok('cron sends daily report via OpenWA', sentMessages.some(m => /daily report/i.test(m.content)), sentMessages.map(m => m.content.slice(0, 20)));
 ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { method: 'POST' })).status === 401);
+
+// the cron records a daily equity snapshot
+r = await call(snapshots, { method: 'GET', headers: authH });
+ok('cron wrote an equity snapshot (history accrues)', r.status === 200 && r.body.snapshots.length >= 1 && typeof r.body.snapshots[0].equity === 'number', r.body && r.body.snapshots);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

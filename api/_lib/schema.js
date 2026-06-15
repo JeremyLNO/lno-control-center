@@ -42,6 +42,14 @@ export async function migrate() {
     key TEXT PRIMARY KEY,
     value JSONB NOT NULL DEFAULT '{}'
   )`);
+  // one row per day — real recorded equity history (written by the daily cron)
+  await query(`CREATE TABLE IF NOT EXISTS equity_snapshots (
+    day DATE PRIMARY KEY,
+    equity BIGINT NOT NULL,
+    pnl_day BIGINT NOT NULL DEFAULT 0,
+    metrics JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`);
 }
 
 export async function seedIfEmpty() {
