@@ -6,9 +6,10 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 
 export const ALLOWED_DOMAIN = (process.env.ALLOWED_EMAIL_DOMAIN || 'lno.company').toLowerCase();
-// One Vercel env var (VITE_GOOGLE_CLIENT_ID) feeds both the client (Vite-exposed)
-// and these functions (process.env). GOOGLE_CLIENT_ID is accepted as a fallback.
-export function googleClientId() { return process.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || ''; }
+// Public OAuth client ID (not a secret). An env var overrides the baked-in default,
+// so it stays configurable per-environment without a code change.
+const DEFAULT_CLIENT_ID = '842329765719-vinrm66bckks5vfgq54oj4hb3v6e6r1m.apps.googleusercontent.com';
+export function googleClientId() { return process.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || DEFAULT_CLIENT_ID; }
 
 let _certs = null, _certsExp = 0;
 async function googleCerts() {

@@ -16,19 +16,20 @@ Password sign-in remains available as a break-glass fallback (e.g. the seeded `a
      ID token directly to the page.
 3. Copy the generated **Client ID** (looks like `xxxxx.apps.googleusercontent.com`).
 
-## Wire it up (Vercel)
+## Wire it up
 
-Set a single env var on the project (Production), then redeploy:
+The current LNO client ID is **baked in as the default** (`src/main.jsx` `GOOGLE_CLIENT_ID`
+and `api/_lib/google.js`) — a client ID is public, not a secret, so committing it is fine.
+The "Sign in with Google" button therefore works out of the box once deployed; the only
+hard requirement is that the OAuth client's **authorized JavaScript origin** includes
+`https://cc.lno.company`.
+
+To use a *different* client ID without editing code, set a Vercel env var (Production)
+and redeploy — it overrides the baked-in default for both the client and the functions:
 
 ```
 VITE_GOOGLE_CLIENT_ID = <your-client-id>.apps.googleusercontent.com
 ```
-
-- The `VITE_` prefix exposes it to the browser bundle **and** is readable by the serverless
-  functions (which verify the ID token's signature/audience). One variable feeds both.
-- After setting it, **redeploy** so the value is baked into the client build. The
-  "Sign in with Google" button appears automatically once it's present; until then the
-  login page falls back to username/password.
 
 Optional: `ALLOWED_EMAIL_DOMAIN` (defaults to `lno.company`) to change the allowed domain.
 

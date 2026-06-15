@@ -218,6 +218,11 @@ const PREF={
   set:(k,v)=>{ try{ localStorage.setItem('lno_pref_'+k,JSON.stringify(v)); }catch(e){} },
 };
 
+// Google OAuth client ID — public by design (baked into the browser bundle; the security
+// comes from the authorized origins + @lno.company restriction). A Vercel env var
+// VITE_GOOGLE_CLIENT_ID overrides this default if set.
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '842329765719-vinrm66bckks5vfgq54oj4hb3v6e6r1m.apps.googleusercontent.com';
+
 /* ============================================================
    DATA EXPORT — CSV (no dep) + XLSX (code-split). Rows are
    arrays-of-arrays aligned to `headers`.
@@ -674,7 +679,7 @@ function Login(){
   const {login,loginGoogle}=useApp();
   const [u,setU]=useState(''); const [p,setP]=useState(''); const [err,setErr]=useState(''); const [warn,setWarn]=useState(false);
   const [busy,setBusy]=useState(false); const attemptsRef=useRef(0);
-  const clientId=import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const clientId=GOOGLE_CLIENT_ID;
   const [showPw,setShowPw]=useState(!clientId); // when Google is available it's the primary path
   const gref=useRef();
   useEffect(()=>{
