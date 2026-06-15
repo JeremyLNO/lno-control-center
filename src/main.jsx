@@ -269,27 +269,22 @@ function Icon({name,className='w-5 h-5',sw=2}){
     {items.map((it,i)=> it[0]==='circle'? <circle key={i} cx={it[1]} cy={it[2]} r={it[3]}/> : it[0]==='line'? <line key={i} x1={it[1]} y1={it[2]} x2={it[3]} y2={it[4]}/> : <path key={i} d={it[1]}/>)}
   </svg>;
 }
-// LNO logo — chart icon (gold accent bar + rising trend) + LNO wordmark.
-// Dark parts use currentColor so it adapts: text-white on the navy sidebar/login,
-// text-navy on the white header. Gold accents stay gold (#C9A24D).
+// Official LNO logo (from LNO logo v2.svg): chart bars + trend line + Anurati
+// "LNO" wordmark outlined to a path. Navy parts use currentColor so it adapts —
+// navy on light backgrounds (header/loading), white on the navy sidebar/login —
+// while the gold accents (#C9A24D) stay gold. Shape is identical to the source file.
 const GOLD='#C9A24D';
+const LNO_PATH='M330.156 162.232L302 190.600L414.836 190.600L414.836 162.232ZM302 21.240L302 25.897L302 152.282L330.156 123.914L330.156 25.897L330.156 21.240Z M566.202 21.240L566.202 122.644L453.577 21.240L453.577 64.003L594.358 190.600L594.358 190.388L594.358 190.177L594.358 21.240Z M732.598 21.240C709.099 21.240 689.199 29.708 672.898 46.221C656.386 62.733 647.918 82.633 647.918 105.920C647.918 129.419 656.386 149.107 672.898 165.619C689.411 182.132 709.099 190.600 732.598 190.600C756.096 190.600 775.785 182.132 792.297 165.619C809.021 149.319 817.489 129.419 817.489 105.920C817.489 82.633 809.021 62.733 792.297 46.221C775.785 29.708 756.096 21.240 732.598 21.240ZM732.598 49.608C748.052 49.608 761.389 55.112 772.397 66.120C783.406 77.129 788.910 90.466 788.910 105.920C788.910 121.374 783.617 134.711 772.397 145.931C761.389 156.940 748.052 162.232 732.598 162.232C717.144 162.232 703.595 156.940 692.586 145.931C681.578 134.923 676.286 121.374 676.286 105.920C676.286 90.466 681.578 77.129 692.586 66.120C703.807 54.900 717.144 49.608 732.598 49.608Z';
 function Logo({className='h-7'}){
-  return <svg viewBox="0 0 290 80" className={className} fill="none" role="img" aria-label="LNO Control Center">
-    {/* chart icon */}
-    <rect x="2" y="32" width="12" height="36" rx="3" fill={GOLD}/>
-    <rect x="20" y="22" width="12" height="46" rx="3" fill="currentColor"/>
-    <rect x="38" y="40" width="12" height="28" rx="3" fill="currentColor"/>
-    <rect x="56" y="14" width="12" height="54" rx="3" fill="currentColor"/>
-    <polyline points="7,57 26,40 44,49 62,28 80,16" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <circle cx="7" cy="57" r="4" fill="currentColor"/>
-    <circle cx="44" cy="49" r="3" fill="currentColor"/>
-    <circle cx="80" cy="16" r="5" fill={GOLD}/>
-    {/* wordmark LNO */}
-    <path d="M100 14 H115 V51 H143 V66 H100 Z" fill="currentColor"/>
-    <rect x="160" y="14" width="15" height="52" fill="currentColor"/>
-    <polygon points="160,14 177,14 217,66 200,66" fill="currentColor"/>
-    <rect x="202" y="14" width="15" height="52" fill="currentColor"/>
-    <circle cx="255" cy="40" r="20" fill="none" stroke="currentColor" strokeWidth="15"/>
+  return <svg viewBox="0 0 824 190.6" className={className} fill="none" role="img" aria-label="LNO Control Center">
+    <rect fill={GOLD} x="17" y="110.6" width="36" height="80"/>
+    <rect fill="currentColor" x="77" y="80.6" width="36" height="110"/>
+    <rect fill="currentColor" x="137" y="50.6" width="36" height="140"/>
+    <rect fill="currentColor" x="197" y="20.6" width="36" height="170"/>
+    <polyline fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="6" points="7 150.6 35 140.6 95 110.6 155 130.6 215 80.6 255 40.6"/>
+    <circle fill="currentColor" cx="7" cy="150.6" r="7"/>
+    <circle fill={GOLD} cx="255" cy="40.6" r="7"/>
+    <path fill="currentColor" d={LNO_PATH}/>
   </svg>;
 }
 
