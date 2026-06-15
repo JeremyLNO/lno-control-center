@@ -671,20 +671,37 @@ function GlobalSearch(){
 function Header(){
   const {user,navigate,logout,dataStatus}=useApp();
   const [bell,setBell]=useState(false); const [menu,setMenu]=useState(false);
+  const [alerts,setAlerts]=useState([]);
   const bref=useRef(), mref=useRef();
   useEffect(()=>{ const h=e=>{ if(bref.current&&!bref.current.contains(e.target))setBell(false); if(mref.current&&!mref.current.contains(e.target))setMenu(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  const loadAlerts=()=>api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>{});
+  useEffect(()=>{ loadAlerts(); const iv=setInterval(loadAlerts,60000); return ()=>clearInterval(iv); },[]);
+  const unacked=alerts.filter(a=>!a.ackedAt).length;
+  async function ack(id){ try{ await api('alerts',{method:'POST',body:{id}}); loadAlerts(); }catch(e){ alert(e.message); } }
   return <header className="h-16 shrink-0 bg-white border-b border-slate-200 flex items-center gap-4 px-4 lg:px-6">
     <div className="lg:hidden text-xl font-black text-gold">LNO</div>
     <GlobalSearch/>
     {user.firstName&&<div className="hidden md:block text-sm text-slate-500">Hello, <span className="font-semibold text-navy">{user.firstName}</span></div>}
     <LiveBadge status={dataStatus}/>
     <div ref={bref} className="relative">
-      <button onClick={()=>setBell(!bell)} className="relative p-2 rounded-lg hover:bg-slate-100"><Icon name="bell" className="w-5 h-5 text-slate-600"/><span className="absolute top-1.5 right-1.5 w-2 h-2 bg-danger rounded-full"/></button>
-      {bell&&<div className="absolute right-0 mt-1.5 w-80 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-40 fadein">
-        <div className="text-xs font-semibold text-navy px-2 py-1.5">Recent alerts</div>
-        {INCIDENTS.slice(0,5).map(i=><div key={i.id} className="px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5">
-          <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${i.severity==='critical'?'bg-danger':i.severity==='warning'?'bg-amber-500':'bg-blue-500'}`}/>
-          <div><div className="text-xs text-navy leading-snug">{i.message}</div><div className="text-[10px] text-slate-400 mt-0.5">{fmtDT(i.t)}</div></div>
+      <button onClick={()=>setBell(!bell)} className="relative p-2 rounded-lg hover:bg-slate-100"><Icon name="bell" className="w-5 h-5 text-slate-600"/>{unacked>0&&<span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-danger text-white text-[10px] rounded-full grid place-items-center">{unacked}</span>}</button>
+      {bell&&<div className="absolute right-0 mt-1.5 w-80 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-40 fadein max-h-96 overflow-y-auto">
+        <div className="text-xs font-semibold text-navy px-2 py-1.5 flex items-center justify-between">Alerts {unacked>0&&<span className="text-[10px] text-danger font-normal">{unacked} pending ack</span>}</div>
+        {alerts.length===0 && <>
+          {INCIDENTS.slice(0,5).map(i=><div key={i.id} className="px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5">
+            <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${i.severity==='critical'?'bg-danger':i.severity==='warning'?'bg-amber-500':'bg-blue-500'}`}/>
+            <div><div className="text-xs text-navy leading-snug">{i.message}</div><div className="text-[10px] text-slate-400 mt-0.5">{fmtDT(i.t)}</div></div>
+          </div>)}
+        </>}
+        {alerts.map(a=><div key={a.id} className="px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5">
+          <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${a.ackedAt?'bg-success':'bg-danger'}`}/>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-navy leading-snug">{a.summary}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+              <span className="font-mono">{a.code}</span><span>{fmtDT(a.createdAt)}</span>
+              {a.ackedAt? <span className="text-success">✓ acked{a.ackedBy?' · '+a.ackedBy:''}</span> : (user.role==='admin'&&<button onClick={()=>ack(a.id)} className="text-gold hover:underline">acknowledge</button>)}
+            </div>
+          </div>
         </div>)}
       </div>}
     </div>

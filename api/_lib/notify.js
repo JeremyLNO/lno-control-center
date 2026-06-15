@@ -26,6 +26,22 @@ export async function sendOpenWA(cfg, to, message) {
   }
 }
 
+// Send a file (e.g. PDF report) as a WhatsApp document via OpenWA's /sendFile.
+export async function sendFile(cfg, to, base64, filename, caption) {
+  if (!cfg || !cfg.enabled || !cfg.apiUrl) return { ok: false, skipped: 'disabled' };
+  const num = String(to || '').replace(/[^0-9]/g, '');
+  if (!num) return { ok: false, skipped: 'no-recipient' };
+  const key = cfg.apiKeyEnc ? decrypt(cfg.apiKeyEnc) : '';
+  try {
+    const r = await fetch(cfg.apiUrl.replace(/\/$/, '') + '/sendFile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: 'Bearer ' + key } : {}) },
+      body: JSON.stringify({ args: { to: num + '@c.us', file: 'data:application/pdf;base64,' + base64, filename, caption: caption || '' } }),
+    });
+    return { ok: r.ok, status: r.status };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+}
+
 // Recipients = default recipient + active users who opted in (notify=true with a phone).
 // adminsOnly restricts the per-user set to admins (used for security alerts).
 export async function getRecipients({ adminsOnly = false, includeDefault = true } = {}) {

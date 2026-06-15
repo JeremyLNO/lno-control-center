@@ -16,6 +16,8 @@ const openwa = (await import('../api/openwa.js')).default;
 const profile = (await import('../api/profile.js')).default;
 const cronDaily = (await import('../api/cron/daily.js')).default;
 const snapshots = (await import('../api/snapshots.js')).default;
+const webhook = (await import('../api/webhook.js')).default;
+const alerts = (await import('../api/alerts.js')).default;
 
 function mockRes() {
   const r = { _status: 200, _json: null };
@@ -114,6 +116,21 @@ await call(openwa, { method: 'PUT', headers: authH, body: { alertRules: [{ id: '
 r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'all' } });
 ok('scoped per-bot alert rule breach detected', r.body.breaches.some(b => /Alpha-BTC-Momentum/.test(b)), r.body.breaches);
 ok('weekly + monthly reports sent (force=all)', r.body.sent.some(s => s.type === 'weekly') && r.body.sent.some(s => s.type === 'monthly'), r.body.sent.map(s => s.type));
+// monthly PDF document sent + the PDF builder produces a valid PDF
+const pdfPart = r.body.sent.find(s => s.type === 'monthly-pdf');
+ok('monthly PDF document sent via OpenWA', !!pdfPart && !pdfPart.error && pdfPart.sent >= 1, pdfPart);
+const { buildMonthlyPdf } = await import('../api/_lib/report.js');
+const pdfB64 = await buildMonthlyPdf({ equity: 1e6, pnl30: 5000, maxDrawdownPct: -8, ddDurationDays: 12, sharpe: 1.2, sortino: 1.5, best: { name: 'X', pnl: 1000 }, worst: { name: 'Y', pnl: -500 }, byExchange: { Binance: 5e5, Bybit: 3e5 }, dateLabel: '2026-06-15' });
+ok('buildMonthlyPdf produces a valid %PDF', Buffer.from(pdfB64, 'base64').slice(0, 5).toString() === '%PDF-', pdfB64.slice(0, 8));
+
+// acknowledgement: cron created an alert (breach) with a code -> webhook acks it -> /api/alerts shows acked
+r = await call(alerts, { method: 'GET', headers: authH });
+const pending = r.body.alerts.find(al => !al.ackedAt);
+ok('cron recorded an acknowledgeable alert', !!pending && !!pending.code, r.body.alerts.slice(0,2));
+r = await call(webhook, { method: 'POST', query: {}, body: { from: '33600000000@c.us', body: `ACK ${pending.code}` } });
+ok('WhatsApp "ACK <code>" reply acknowledges via webhook', r.body.acked === pending.code, r.body);
+r = await call(alerts, { method: 'GET', headers: authH });
+ok('alert now shows acknowledged', !!r.body.alerts.find(al => al.code === pending.code && al.ackedAt), r.body.alerts.find(al=>al.code===pending.code));
 
 // the cron records a daily equity snapshot
 r = await call(snapshots, { method: 'GET', headers: authH });

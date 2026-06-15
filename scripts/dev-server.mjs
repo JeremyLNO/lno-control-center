@@ -21,6 +21,8 @@ const handlers = {
   '/api/openwa': (await import('../api/openwa.js')).default,
   '/api/cron/daily': (await import('../api/cron/daily.js')).default,
   '/api/snapshots': (await import('../api/snapshots.js')).default,
+  '/api/webhook': (await import('../api/webhook.js')).default,
+  '/api/alerts': (await import('../api/alerts.js')).default,
 };
 // auto-seed on boot so the app is usable immediately
 await handlers['/api/init']({ method: 'POST', headers: {}, query: {}, body: null },

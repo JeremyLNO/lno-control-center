@@ -50,6 +50,15 @@ export async function migrate() {
     metrics JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
+  // critical alerts that can be acknowledged (via WhatsApp reply or the UI)
+  await query(`CREATE TABLE IF NOT EXISTS alerts (
+    id BIGSERIAL PRIMARY KEY,
+    code TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    acked_at TIMESTAMPTZ,
+    acked_by TEXT
+  )`);
 }
 
 export async function seedIfEmpty() {

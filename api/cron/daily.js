@@ -2,7 +2,8 @@
 // server-side from real klines, fires threshold alerts, and sends the daily report
 // via OpenWA. Secured by CRON_SECRET (Vercel sets the Bearer header) or an admin JWT.
 import { computePortfolio, riskMetrics, sumSeries } from '../_lib/metrics.js';
-import { getOpenWAConfig, notify } from '../_lib/notify.js';
+import { getOpenWAConfig, notify, sendFile, getRecipients } from '../_lib/notify.js';
+import { buildMonthlyPdf } from '../_lib/report.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
 import { BASE_BOTS } from '../_lib/constants.js';
@@ -62,8 +63,10 @@ export default async function handler(req, res) {
 
     const sent = [];
     if (breaches.length && cfg.enabled) {
-      const msg = `🚨 LNO ALERT\n${breaches.join('\n')}\nEquity ${fUSD(m.totalEquity)} · PnL day ${fmt(m.pnlDay)}`;
-      sent.push({ type: 'alert', ...(await notify(msg)) });
+      const code = Math.random().toString(36).slice(2, 6).toUpperCase();
+      await query('INSERT INTO alerts (code,summary) VALUES ($1,$2)', [code, breaches.join(' · ')]);
+      const msg = `🚨 LNO ALERT\n${breaches.join('\n')}\nEquity ${fUSD(m.totalEquity)} · PnL day ${fmt(m.pnlDay)}\n\nReply *ACK ${code}* to acknowledge.`;
+      sent.push({ type: 'alert', code, ...(await notify(msg)) });
     }
     if ((cfg.dailyReport ?? true) && cfg.enabled) {
       const exp = Object.entries(p.byExchange).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${fUSD(v)}`).join(' · ');
@@ -79,7 +82,14 @@ export default async function handler(req, res) {
       sent.push({ type: 'weekly', ...(await notify(`📅 LNO weekly report\nEquity ${fUSD(m.totalEquity)}\nPnL 7d ${fmt(pnlOver(7))}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% · Sharpe ${m.sharpe.toFixed(2)}`)) });
     }
     if (cfg.enabled && (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all')) {
-      sent.push({ type: 'monthly', ...(await notify(`🗓️ LNO monthly report\nEquity ${fUSD(m.totalEquity)}\nPnL 30d ${fmt(pnlOver(30))}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% (${m.ddDurationDays}d) · Sharpe ${m.sharpe.toFixed(2)} · Sortino ${m.sortino.toFixed(2)}`)) });
+      const pnl30 = pnlOver(30);
+      sent.push({ type: 'monthly', ...(await notify(`🗓️ LNO monthly report\nEquity ${fUSD(m.totalEquity)}\nPnL 30d ${fmt(pnl30)}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% (${m.ddDurationDays}d) · Sharpe ${m.sharpe.toFixed(2)} · Sortino ${m.sortino.toFixed(2)}`)) });
+      try {
+        const b64 = await buildMonthlyPdf({ equity: m.totalEquity, pnl30, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, best: p.best, worst: p.worst, byExchange: p.byExchange, dateLabel: new Date(dt).toISOString().slice(0, 10) });
+        const tos = await getRecipients(); let fsent = 0;
+        for (const to of tos) { const r = await sendFile(cfg, to, b64, 'lno-monthly-report.pdf', 'LNO monthly report'); if (r.ok) fsent++; }
+        sent.push({ type: 'monthly-pdf', sent: fsent, total: tos.length, bytes: b64.length });
+      } catch (e) { sent.push({ type: 'monthly-pdf', error: String(e.message || e) }); }
     }
     res.status(200).json({ ok: true, metrics: m, breaches, sent });
   } catch (e) {
