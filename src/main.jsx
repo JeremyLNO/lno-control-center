@@ -1822,15 +1822,17 @@ function AdminOpenWA(){
   const [ddPct,setDdPct]=useState(10); const [pnlThr,setPnlThr]=useState(-5000); const [dailyReport,setDailyReport]=useState(true);
   const [rules,setRules]=useState([]);
   const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
-  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); },[]);
+  const [log,setLog]=useState(null);
+  const loadLog=()=>api('openwa?log=1').then(r=>setLog(r.log||[])).catch(()=>setLog([]));
+  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); loadLog(); },[]);
   if(user.role!=='admin') return <Denied/>;
   const scopeOpts=[{value:'portfolio',label:'Portfolio'},...funds.map(f=>({value:'fund:'+f.id,label:'Fund · '+f.name})),...BASE_BOTS.map(b=>({value:'bot:'+b.id,label:'Bot · '+b.name}))];
   const metricOpts=[{value:'drawdown',label:'Max drawdown (%)'},{value:'pnlDay',label:'Daily PnL ($)'}];
   const updateRule=(i,patch)=>setRules(rs=>rs.map((r,j)=>j===i?{...r,...patch}:r));
   const addRule=()=>setRules(rs=>[...rs,{id:'r'+Date.now(),scope:'portfolio',metric:'drawdown',value:10,enabled:true}]);
   async function save(){ setBusy(true); try{ const body={defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
-  async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } }
-  async function runReport(){ setReport({state:'sending'}); try{ const r=await api('cron/daily',{method:'POST'}); const n=(r.sent||[]).reduce((a,s)=>a+(s.sent||0),0); setReport({state:'ok',msg:`Ran ✓ — ${n} message(s) delivered`}); }catch(e){ setReport({state:'err',msg:e.message}); } }
+  async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } loadLog(); }
+  async function runReport(){ setReport({state:'sending'}); try{ const r=await api('cron/daily',{method:'POST'}); const n=(r.sent||[]).reduce((a,s)=>a+(s.sent||0),0); setReport({state:'ok',msg:`Ran ✓ — ${n} message(s) delivered`}); }catch(e){ setReport({state:'err',msg:e.message}); } loadLog(); }
   return <div className="max-w-2xl">
     <PageHead title="WhatsApp Alerts" subtitle="Send alerts to WhatsApp via CallMeBot — no server to host"/>
     <Card className="p-5 space-y-4">
@@ -1895,6 +1897,22 @@ function AdminOpenWA(){
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Drawdown &amp; daily-PnL breaches — portfolio, per fund, or per bot</li>
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Daily report, plus weekly (Mondays) &amp; monthly (1st) summaries</li>
       </ul>
+    </Card>
+
+    <Card className="p-5 mt-4">
+      <SectionTitle right={<button onClick={loadLog} className="text-xs text-slate-400 hover:text-navy flex items-center gap-1"><Icon name="refresh" className="w-3.5 h-3.5"/>Refresh</button>}>Sent messages</SectionTitle>
+      {log===null? <div className="text-sm text-slate-400">Loading…</div>
+        : log.length===0? <div className="text-sm text-slate-400">No WhatsApp messages sent yet.</div>
+        : <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+            {log.map(l=><div key={l.id} className="flex items-start gap-2.5 border-b border-slate-50 pb-2 last:border-0">
+              <span className={`mt-1 w-2 h-2 rounded-full shrink-0 ${l.ok?'bg-success':'bg-danger'}`} title={l.ok?'Sent':'Failed'}/>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-navy whitespace-pre-wrap break-words line-clamp-2">{l.message}</div>
+                <div className="text-[11px] text-slate-400 mt-0.5"><span className="font-mono">{l.phone}</span> · {fmtDT(l.createdAt)}{l.ok?'':' · failed'}</div>
+                {!l.ok&&l.response&&<div className="text-[11px] text-danger mt-0.5 truncate" title={l.response}>{l.response}</div>}
+              </div>
+            </div>)}
+          </div>}
     </Card>
   </div>;
 }
@@ -2034,7 +2052,7 @@ function ProfilePage(){
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Your phone number"><Input value={phone} onChange={e=>setPhone(e.target.value)} onBlur={()=>patchSelf({phone})} placeholder="+33 6 12 34 56 78"/></Field>
-        <Field label="Your CallMeBot API key" hint={user.hasWaApikey?'Saved (encrypted). Leave blank to keep.':'Get it once via WhatsApp — see below'}><Input type="password" value={waKey} onChange={e=>setWaKey(e.target.value)} onBlur={()=>{ if(waKey){ patchSelf({waApikey:waKey}); setWaKey(''); } }} placeholder={user.hasWaApikey?'•••••• (unchanged)':'e.g. 1234567'}/></Field>
+        <Field label="Your CallMeBot API key" hint={user.hasWaApikey?'Saved (encrypted). Leave blank to keep.':'Get it once via WhatsApp — see below'}><Input type="password" value={waKey} onChange={e=>setWaKey(e.target.value)} onBlur={async()=>{ if(waKey){ const okp=await patchSelf({waApikey:waKey}); if(okp){ setNotify(true); setWaKey(''); toast.success('WhatsApp alerts enabled — check your phone'); } } }} placeholder={user.hasWaApikey?'•••••• (unchanged)':'e.g. 1234567'}/></Field>
       </div>
       <div className="text-[11px] text-slate-500 mt-2 space-y-1 bg-navy/5 border border-slate-200 rounded-lg p-3">
         <div className="font-medium text-slate-600">Activate your WhatsApp alerts (once):</div>

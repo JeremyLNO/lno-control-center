@@ -96,8 +96,8 @@ globalThis.fetch = async (url, opts) => {
 
 // configure WhatsApp (CallMeBot, enabled) + give admin a phone, key & notify so alerts route
 await call(openwa, { method: 'PUT', headers: authH, body: { apiKey: 'cmb-key-123', enabled: true, defaultSender: '+33600000000', drawdownPct: 1, pnlDayThreshold: 99999999 } });
-r = await call(profile, { method: 'PATCH', headers: authH, body: { phone: '+33611111111', notify: true, waApikey: 'cmb-user-key' } });
-ok('user can save a personal CallMeBot key (encrypted)', r.status === 200 && r.body.user.hasWaApikey === true, r.body.user);
+r = await call(profile, { method: 'PATCH', headers: authH, body: { phone: '+33611111111', waApikey: 'cmb-user-key' } });
+ok('saving a CallMeBot key (encrypted) auto-enables notifications', r.status === 200 && r.body.user.hasWaApikey === true && r.body.user.notify === true, r.body.user);
 q = await db.query("SELECT wa_apikey FROM users WHERE email='admin@lno.company'");
 ok('per-user CallMeBot key encrypted in DB (no plaintext)', !String(q.rows[0].wa_apikey || '').includes('cmb-user-key') && String(q.rows[0].wa_apikey).startsWith('v1:'), { v: q.rows[0].wa_apikey });
 ok('user gets a welcome WhatsApp when they save their key', sentMessages.some(m => /Welcome to LNO Control Center/i.test(m.text)), sentMessages.map(m => m.text));
@@ -113,6 +113,9 @@ r = await call(cronDaily, { method: 'POST', headers: authH });
 ok('cron computes risk metrics (sharpe/sortino/drawdown)', r.status === 200 && typeof r.body.metrics.sharpe === 'number' && typeof r.body.metrics.sortino === 'number' && typeof r.body.metrics.maxDrawdownPct === 'number', r.body && r.body.metrics);
 ok('cron sends daily report via OpenWA', sentMessages.some(m => /daily report/i.test(m.text)), sentMessages.map(m => (m.text || '').slice(0, 20)));
 ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { method: 'POST' })).status === 401);
+// every WhatsApp send is recorded in the admin-only message log
+r = await call(openwa, { method: 'GET', headers: authH, query: { log: '1' } });
+ok('admin WhatsApp log records sent messages', r.status === 200 && Array.isArray(r.body.log) && r.body.log.length >= 1 && typeof r.body.log[0].message === 'string', r.body.log && r.body.log.length);
 
 // scoped per-bot rule + weekly/monthly reports (force)
 sentMessages.length = 0;

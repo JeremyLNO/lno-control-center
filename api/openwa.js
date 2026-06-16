@@ -29,7 +29,13 @@ function pub(cfg) {
 export default async function handler(req, res) {
   const a = requireAdmin(req, res); if (!a) return;
   try {
-    if (req.method === 'GET') return res.status(200).json({ config: pub(await getCfg()) });
+    if (req.method === 'GET') {
+      if (req.query?.log) {
+        const { rows } = await query('SELECT id,phone,message,ok,status,response,created_at FROM wa_log ORDER BY created_at DESC LIMIT 100');
+        return res.status(200).json({ log: rows.map(r => ({ id: Number(r.id), phone: r.phone, message: r.message, ok: r.ok, status: r.status, response: r.response, createdAt: r.created_at })) });
+      }
+      return res.status(200).json({ config: pub(await getCfg()) });
+    }
 
     if (req.method === 'PUT') {
       const body = req.body || {};

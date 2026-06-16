@@ -14,17 +14,27 @@ export async function getOpenWAConfig() {
 }
 
 // Low-level send to one recipient (phone + that recipient's CallMeBot api key).
+// Every attempt is logged to wa_log (best-effort) for the admin WhatsApp message log.
 export async function sendCallMeBot(phone, apikey, message) {
   const num = String(phone || '').replace(/[^0-9]/g, '');
   if (!num) return { ok: false, skipped: 'no-phone' };
   if (!apikey) return { ok: false, skipped: 'no-apikey' };
+  let result;
   try {
     const url = `${CALLMEBOT_URL}?phone=${num}&text=${encodeURIComponent(message)}&apikey=${encodeURIComponent(apikey)}`;
     const r = await fetch(url);
-    return { ok: r.ok, status: r.status };
+    const body = await r.text().catch(() => '');
+    // CallMeBot returns HTTP 200 even on failure (reason in the body), so confirm success
+    const ok = r.ok && /queued|sent|success/i.test(body);
+    result = { ok, status: r.status, response: body.slice(0, 400) };
   } catch (e) {
-    return { ok: false, error: String(e.message || e) };
+    result = { ok: false, status: null, response: String(e.message || e) };
   }
+  try {
+    await query('INSERT INTO wa_log (phone,message,ok,status,response) VALUES ($1,$2,$3,$4,$5)',
+      [phone, String(message || '').slice(0, 1000), !!result.ok, result.status || null, (result.response || '').slice(0, 400)]);
+  } catch (e) { /* logging is best-effort */ }
+  return { ok: result.ok, status: result.status };
 }
 
 // CallMeBot is text-only — no document attachment. Kept so callers don't break; the

@@ -17,8 +17,12 @@ export default async function handler(req, res) {
     for (const k of Object.keys(map)) {
       if (k in body) { sets.push(`${map[k]}=$${i}`); vals.push(body[k]); i++; }
     }
-    // personal CallMeBot key — stored encrypted; blank means "keep unchanged"
-    if (typeof body.waApikey === 'string' && body.waApikey !== '') { sets.push(`wa_apikey=$${i}`); vals.push(encrypt(body.waApikey)); i++; }
+    // personal CallMeBot key — stored encrypted; blank means "keep unchanged".
+    // Adding a key auto-enables WhatsApp notifications (unless notify was set explicitly).
+    if (typeof body.waApikey === 'string' && body.waApikey !== '') {
+      sets.push(`wa_apikey=$${i}`); vals.push(encrypt(body.waApikey)); i++;
+      if (!('notify' in body)) { sets.push(`notify=$${i}`); vals.push(true); i++; }
+    }
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     vals.push(a.id);
     await query(`UPDATE users SET ${sets.join(',')} WHERE id=$${i}`, vals);

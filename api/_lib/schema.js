@@ -29,6 +29,16 @@ export async function migrate() {
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
   // per-user CallMeBot api key (encrypted) — for personal WhatsApp alerts
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wa_apikey TEXT`);
+  // log of every WhatsApp message sent (admin-only view on the WhatsApp page)
+  await query(`CREATE TABLE IF NOT EXISTS wa_log (
+    id BIGSERIAL PRIMARY KEY,
+    phone TEXT,
+    message TEXT,
+    ok BOOLEAN NOT NULL DEFAULT false,
+    status INT,
+    response TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`);
   await query(`CREATE TABLE IF NOT EXISTS funds (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
