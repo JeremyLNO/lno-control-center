@@ -2063,7 +2063,7 @@ function ProfilePage(){
     <Card className="p-5">
       <SectionTitle>WhatsApp Notifications</SectionTitle>
       <div className="flex items-center justify-between mb-3">
-        <div><div className="text-sm font-medium text-navy">Receive notifications</div><div className="text-xs text-slate-400">WhatsApp alerts must also be enabled by an admin to deliver</div></div>
+        <div><div className="text-sm font-medium text-navy">Receive notifications</div><div className="text-xs text-slate-400">{user.role==='shareholder'?'Get a WhatsApp when a new report is available':'WhatsApp alerts must also be enabled by an admin to deliver'}</div></div>
         <Toggle on={notify} onChange={x=>{setNotify(x);patchSelf({notify:x});}}/>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">

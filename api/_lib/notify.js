@@ -8,6 +8,9 @@ import { decrypt } from './crypto.js';
 
 const CALLMEBOT_URL = 'https://api.callmebot.com/whatsapp.php';
 
+// "new report" notice sent to opted-in shareholders (CallMeBot is text-only — they download the PDF)
+export const REPORT_AVAILABLE = '📄 A new LNO report is available. Open the Control Center ▸ Reports to download it.';
+
 export async function getOpenWAConfig() {
   const { rows } = await query("SELECT value FROM app_config WHERE key='openwa'");
   return rows[0] ? rows[0].value : {};
@@ -43,7 +46,7 @@ export async function sendFile() { return { ok: false, skipped: 'callmebot-no-fi
 
 // Recipients = the default recipient (config phone + key) + every active user who opted
 // in (notify=true) AND saved a phone + their own CallMeBot key. Returns {phone, apikey} pairs.
-export async function getRecipients({ adminsOnly = false, includeDefault = true } = {}) {
+export async function getRecipients({ adminsOnly = false, role = null, includeDefault = true } = {}) {
   const out = []; const seen = new Set();
   const add = (phone, apikey) => {
     const k = String(phone || '').replace(/[^0-9]/g, '');
@@ -51,8 +54,12 @@ export async function getRecipients({ adminsOnly = false, includeDefault = true 
   };
   const cfg = await getOpenWAConfig();
   if (includeDefault && cfg.defaultSender && cfg.apiKeyEnc) { try { add(cfg.defaultSender, decrypt(cfg.apiKeyEnc)); } catch (e) {} }
-  const sql = `SELECT phone, wa_apikey FROM users WHERE active=true AND notify=true AND phone IS NOT NULL AND phone <> '' AND wa_apikey IS NOT NULL AND wa_apikey <> ''`
-    + (adminsOnly ? " AND role='admin'" : '');
+  // Role routing: shareholders are reports-only — excluded from operational alerts by
+  // default, and targeted explicitly with role:'shareholder' for "new report" notices.
+  let roleClause = " AND role <> 'shareholder'";
+  if (adminsOnly) roleClause = " AND role='admin'";
+  else if (role && /^[a-z]+$/.test(role)) roleClause = ` AND role='${role}'`;
+  const sql = `SELECT phone, wa_apikey FROM users WHERE active=true AND notify=true AND phone IS NOT NULL AND phone <> '' AND wa_apikey IS NOT NULL AND wa_apikey <> ''` + roleClause;
   const { rows } = await query(sql);
   for (const r of rows) { try { add(r.phone, decrypt(r.wa_apikey)); } catch (e) {} }
   return out;

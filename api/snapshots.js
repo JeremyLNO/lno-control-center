@@ -2,11 +2,12 @@
 //   GET                  -> equity snapshots (any auth)
 //   GET ?reports=list    -> archived report metadata (any auth)
 //   GET ?report=<id>     -> a single archived report's PDF (base64) (any auth)
-//   POST {action:'generateReport'} -> build + store a report now (admin) — no WhatsApp send
+//   POST {action:'generateReport'} -> build + store a report now (admin); notifies shareholders
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
 import { computePortfolio, riskMetrics } from './_lib/metrics.js';
 import { buildMonthlyPdf } from './_lib/report.js';
+import { notify, REPORT_AVAILABLE } from './_lib/notify.js';
 
 export default async function handler(req, res) {
   try {
@@ -45,6 +46,7 @@ export default async function handler(req, res) {
         const b64 = await buildMonthlyPdf({ equity: m.totalEquity, pnl30, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, best: p.best, worst: p.worst, byExchange: p.byExchange, dateLabel: label });
         const { rows } = await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at',
           ['monthly', label, Math.round(m.totalEquity), Math.round(pnl30), b64]);
+        await notify(REPORT_AVAILABLE, { role: 'shareholder', includeDefault: false });
         return res.status(200).json({ ok: true, report: { id: Number(rows[0].id), kind: 'monthly', periodLabel: label, equity: Math.round(m.totalEquity), pnl: Math.round(pnl30), createdAt: rows[0].created_at } });
       }
       return res.status(400).json({ error: 'unknown action' });

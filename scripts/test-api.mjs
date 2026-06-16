@@ -166,6 +166,12 @@ ok('shareholder role grants exactly [view_activity, view_reports]',
 // the shareholder signs in with their EMAIL + password
 r = await call(auth, { method: 'POST', body: { action: 'login', email: 'investor@example.com', password: 'Str0ng#Passw0rd!' } });
 ok('shareholder signs in with email + password', r.status === 200 && !!r.body.token, r.status);
+// shareholder opts into WhatsApp -> gets a "new report available" notice when a report is generated
+const shH = { authorization: 'Bearer ' + r.body.token };
+await call(profile, { method: 'PATCH', headers: shH, body: { phone: '+33655555555', waApikey: 'sh-cmb-key' } });
+sentMessages.length = 0;
+await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
+ok('shareholder gets a "new report available" WhatsApp on report generation', sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
 // weak password is rejected by the policy
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'weak@example.com', role: 'shareholder', password: 'short' } });
 ok('weak shareholder password rejected -> 400', r.status === 400 && /Password needs/.test(r.body.error || ''), r.body);

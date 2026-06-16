@@ -2,7 +2,7 @@
 // server-side from real klines, fires threshold alerts, and sends the daily report
 // via OpenWA. Secured by CRON_SECRET (Vercel sets the Bearer header) or an admin JWT.
 import { computePortfolio, riskMetrics, sumSeries } from '../_lib/metrics.js';
-import { getOpenWAConfig, notify, sendFile, getRecipients } from '../_lib/notify.js';
+import { getOpenWAConfig, notify, REPORT_AVAILABLE } from '../_lib/notify.js';
 import { buildMonthlyPdf } from '../_lib/report.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
@@ -89,9 +89,9 @@ export default async function handler(req, res) {
         const b64 = await buildMonthlyPdf({ equity: m.totalEquity, pnl30, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, best: p.best, worst: p.worst, byExchange: p.byExchange, dateLabel: label });
         // archive it so it can be re-downloaded from the Reports page
         try { await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5)', ['monthly', label, Math.round(m.totalEquity), Math.round(pnl30), b64]); } catch (e) {}
-        const tos = await getRecipients(); let fsent = 0;
-        for (const to of tos) { const r = await sendFile(cfg, to, b64, 'lno-monthly-report.pdf', 'LNO monthly report'); if (r.ok) fsent++; }
-        sent.push({ type: 'monthly-pdf', sent: fsent, total: tos.length, bytes: b64.length });
+        // CallMeBot can't attach files — notify opted-in shareholders that a new report is available
+        const shr = await notify(REPORT_AVAILABLE, { role: 'shareholder', includeDefault: false });
+        sent.push({ type: 'monthly-pdf', archived: true, bytes: b64.length, shareholdersNotified: shr.sent || 0 });
       } catch (e) { sent.push({ type: 'monthly-pdf', error: String(e.message || e) }); }
     }
     res.status(200).json({ ok: true, metrics: m, breaches, sent });
