@@ -30,7 +30,7 @@ export const DEFAULT_EXCHANGES = [
 ];
 // OpenWA (open-wa.org) integration config. apiKey is stored encrypted, never returned in clear.
 // drawdownPct / pnlDayThreshold drive automated alerts; dailyReport toggles the daily summary.
-export const DEFAULT_OPENWA = { apiUrl:'', defaultSender:'', enabled:false, drawdownPct:10, pnlDayThreshold:-5000, dailyReport:true };
+export const DEFAULT_OPENWA = { apiUrl:'', sessionId:'', defaultSender:'', enabled:false, drawdownPct:10, pnlDayThreshold:-5000, dailyReport:true };
 
 // Bots traded by the firm (static; mirrors the frontend). Used by the alert cron to
 // recompute portfolio metrics server-side from real exchange klines.

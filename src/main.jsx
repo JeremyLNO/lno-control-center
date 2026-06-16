@@ -1818,29 +1818,30 @@ function ExchangeModal({modal,onClose,onSave}){
 function AdminOpenWA(){
   const {user,funds}=useApp();
   const [cfg,setCfg]=useState(null);
-  const [apiUrl,setApiUrl]=useState(''); const [apiKey,setApiKey]=useState(''); const [defaultSender,setDefaultSender]=useState(''); const [enabled,setEnabled]=useState(false);
+  const [apiUrl,setApiUrl]=useState(''); const [sessionId,setSessionId]=useState(''); const [apiKey,setApiKey]=useState(''); const [defaultSender,setDefaultSender]=useState(''); const [enabled,setEnabled]=useState(false);
   const [ddPct,setDdPct]=useState(10); const [pnlThr,setPnlThr]=useState(-5000); const [dailyReport,setDailyReport]=useState(true);
   const [rules,setRules]=useState([]);
   const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
-  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setApiUrl(c.apiUrl); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); },[]);
+  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setApiUrl(c.apiUrl); setSessionId(c.sessionId||''); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); },[]);
   if(user.role!=='admin') return <Denied/>;
   const scopeOpts=[{value:'portfolio',label:'Portfolio'},...funds.map(f=>({value:'fund:'+f.id,label:'Fund · '+f.name})),...BASE_BOTS.map(b=>({value:'bot:'+b.id,label:'Bot · '+b.name}))];
   const metricOpts=[{value:'drawdown',label:'Max drawdown (%)'},{value:'pnlDay',label:'Daily PnL ($)'}];
   const updateRule=(i,patch)=>setRules(rs=>rs.map((r,j)=>j===i?{...r,...patch}:r));
   const addRule=()=>setRules(rs=>[...rs,{id:'r'+Date.now(),scope:'portfolio',metric:'drawdown',value:10,enabled:true}]);
-  async function save(){ setBusy(true); try{ const body={apiUrl,defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
+  async function save(){ setBusy(true); try{ const body={apiUrl,sessionId,defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
   async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } }
   async function runReport(){ setReport({state:'sending'}); try{ const r=await api('cron/daily',{method:'POST'}); const n=(r.sent||[]).reduce((a,s)=>a+(s.sent||0),0); setReport({state:'ok',msg:`Ran ✓ — ${n} message(s) delivered`}); }catch(e){ setReport({state:'err',msg:e.message}); } }
   return <div className="max-w-2xl">
-    <PageHead title="OpenWA" subtitle="Self-hosted WhatsApp automation (open-wa.org) for system alerts"/>
+    <PageHead title="OpenWA" subtitle="Self-hosted WhatsApp gateway (rmyndharis/OpenWA) for system alerts"/>
     <Card className="p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div><div className="font-medium text-navy">Enable notifications</div><div className="text-xs text-slate-400">Master toggle for all OpenWA alerts</div></div>
         <Toggle on={enabled} onChange={setEnabled}/>
       </div>
       <div className="border-t border-slate-100 pt-4 space-y-3">
-        <Field label="OpenWA API URL" hint="Your always-on OpenWA host (EASY API base URL)"><Input value={apiUrl} onChange={e=>setApiUrl(e.target.value)} placeholder="https://wa.yourhost.com"/></Field>
-        <Field label="API Key" hint={cfg&&cfg.hasApiKey? `Encrypted in DB (${cfg.apiKeyMasked}). Leave blank to keep.` : 'Stored encrypted in the database — never shown again'}><Input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={cfg&&cfg.hasApiKey?'•••••• (unchanged)':'openwa api key'}/></Field>
+        <Field label="OpenWA API URL" hint="Your always-on OpenWA gateway base URL (rmyndharis/OpenWA, default port 2785)"><Input value={apiUrl} onChange={e=>setApiUrl(e.target.value)} placeholder="https://wa.yourhost.com:2785"/></Field>
+        <Field label="Session ID" hint="The WhatsApp session you created & linked in the OpenWA dashboard"><Input value={sessionId} onChange={e=>setSessionId(e.target.value)} placeholder="sess_abc123"/></Field>
+        <Field label="API Key (X-API-Key)" hint={cfg&&cfg.hasApiKey? `Encrypted in DB (${cfg.apiKeyMasked}). Leave blank to keep.` : 'Stored encrypted in the database — never shown again'}><Input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={cfg&&cfg.hasApiKey?'•••••• (unchanged)':'OpenWA API key'}/></Field>
         <Field label="Default Recipient" hint="Default phone number for alerts (international format)"><Input value={defaultSender} onChange={e=>setDefaultSender(e.target.value)} placeholder="+33 6 12 34 56 78"/></Field>
       </div>
       <div className="flex items-center gap-3 pt-1 flex-wrap">

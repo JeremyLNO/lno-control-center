@@ -1,5 +1,10 @@
 // OpenWA send + recipient routing. Used by login-failure alerts, the alert cron,
 // and the manual test button. The api key is decrypted only here, server-side.
+//
+// Targets the OpenWA gateway at github.com/rmyndharis/OpenWA (NestJS, whatsapp-web.js):
+// session-scoped REST API, `X-API-Key` auth, JSON bodies.
+//   text:     POST {apiUrl}/api/sessions/{sessionId}/messages/send-text     { chatId, text }
+//   document: POST {apiUrl}/api/sessions/{sessionId}/messages/send-document { chatId, document:{base64}, filename, caption }
 import { query } from './db.js';
 import { decrypt } from './crypto.js';
 
@@ -8,17 +13,25 @@ export async function getOpenWAConfig() {
   return rows[0] ? rows[0].value : {};
 }
 
+function sessionUrl(cfg, path) {
+  return cfg.apiUrl.replace(/\/$/, '') + '/api/sessions/' + encodeURIComponent(cfg.sessionId) + path;
+}
+function authHeaders(cfg) {
+  const key = cfg.apiKeyEnc ? decrypt(cfg.apiKeyEnc) : '';
+  return { 'Content-Type': 'application/json', ...(key ? { 'X-API-Key': key } : {}) };
+}
+
 export async function sendOpenWA(cfg, to, message) {
   if (!cfg || !cfg.enabled) return { ok: false, skipped: 'disabled' };
   if (!cfg.apiUrl) return { ok: false, skipped: 'no-url' };
+  if (!cfg.sessionId) return { ok: false, skipped: 'no-session' };
   const num = String(to || '').replace(/[^0-9]/g, '');
   if (!num) return { ok: false, skipped: 'no-recipient' };
-  const key = cfg.apiKeyEnc ? decrypt(cfg.apiKeyEnc) : '';
   try {
-    const r = await fetch(cfg.apiUrl.replace(/\/$/, '') + '/sendText', {
+    const r = await fetch(sessionUrl(cfg, '/messages/send-text'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: 'Bearer ' + key } : {}) },
-      body: JSON.stringify({ args: { to: num + '@c.us', content: message } }),
+      headers: authHeaders(cfg),
+      body: JSON.stringify({ chatId: num + '@c.us', text: message }),
     });
     return { ok: r.ok, status: r.status };
   } catch (e) {
@@ -26,17 +39,16 @@ export async function sendOpenWA(cfg, to, message) {
   }
 }
 
-// Send a file (e.g. PDF report) as a WhatsApp document via OpenWA's /sendFile.
+// Send a file (e.g. PDF report) as a WhatsApp document.
 export async function sendFile(cfg, to, base64, filename, caption) {
-  if (!cfg || !cfg.enabled || !cfg.apiUrl) return { ok: false, skipped: 'disabled' };
+  if (!cfg || !cfg.enabled || !cfg.apiUrl || !cfg.sessionId) return { ok: false, skipped: 'disabled' };
   const num = String(to || '').replace(/[^0-9]/g, '');
   if (!num) return { ok: false, skipped: 'no-recipient' };
-  const key = cfg.apiKeyEnc ? decrypt(cfg.apiKeyEnc) : '';
   try {
-    const r = await fetch(cfg.apiUrl.replace(/\/$/, '') + '/sendFile', {
+    const r = await fetch(sessionUrl(cfg, '/messages/send-document'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: 'Bearer ' + key } : {}) },
-      body: JSON.stringify({ args: { to: num + '@c.us', file: 'data:application/pdf;base64,' + base64, filename, caption: caption || '' } }),
+      headers: authHeaders(cfg),
+      body: JSON.stringify({ chatId: num + '@c.us', document: { base64: 'data:application/pdf;base64,' + base64 }, filename, caption: caption || '' }),
     });
     return { ok: r.ok, status: r.status };
   } catch (e) { return { ok: false, error: String(e.message || e) }; }

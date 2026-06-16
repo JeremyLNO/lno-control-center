@@ -17,7 +17,7 @@ async function setCfg(v) {
 }
 function pub(cfg) {
   return {
-    apiUrl: cfg.apiUrl || '', defaultSender: cfg.defaultSender || '', enabled: !!cfg.enabled,
+    apiUrl: cfg.apiUrl || '', sessionId: cfg.sessionId || '', defaultSender: cfg.defaultSender || '', enabled: !!cfg.enabled,
     hasApiKey: !!cfg.apiKeyEnc, apiKeyMasked: cfg.apiKeyEnc ? mask(decrypt(cfg.apiKeyEnc)) : '',
     drawdownPct: cfg.drawdownPct ?? 10, pnlDayThreshold: cfg.pnlDayThreshold ?? -5000,
     dailyReport: cfg.dailyReport ?? true,
@@ -36,6 +36,7 @@ export default async function handler(req, res) {
       const next = {
         ...cfg,
         apiUrl: body.apiUrl ?? cfg.apiUrl ?? '',
+        sessionId: body.sessionId ?? cfg.sessionId ?? '',
         defaultSender: body.defaultSender ?? cfg.defaultSender ?? '',
         enabled: body.enabled ?? cfg.enabled ?? false,
         drawdownPct: body.drawdownPct ?? cfg.drawdownPct ?? 10,
@@ -53,6 +54,7 @@ export default async function handler(req, res) {
       const cfg = await getCfg();
       if (!cfg.enabled) return res.status(400).json({ error: 'OpenWA is disabled' });
       if (!cfg.apiUrl) return res.status(400).json({ error: 'OpenWA API URL is not configured' });
+      if (!cfg.sessionId) return res.status(400).json({ error: 'OpenWA Session ID is not configured' });
       const to = body.to || cfg.defaultSender;
       if (!to) return res.status(400).json({ error: 'No recipient phone number' });
       const message = body.message || 'LNO Control Center — OpenWA test message ✅';

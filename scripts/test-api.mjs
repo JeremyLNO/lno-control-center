@@ -88,26 +88,26 @@ ok('GET openwa returns masked key only', r.status === 200 && r.body.config.hasAp
 const sentMessages = [];
 globalThis.fetch = async (url, opts) => {
   const u = String(url);
-  if (u.includes('/sendText')) { sentMessages.push(JSON.parse(opts.body).args); return { ok: true, status: 200, json: async () => ({ success: true }) }; }
+  if (u.includes('/messages/send-text') || u.includes('/messages/send-document')) { sentMessages.push(JSON.parse(opts.body)); return { ok: true, status: 200, json: async () => ({ messageId: 'm1', status: 'sent' }) }; }
   if (u.includes('binance.com')) { const a = []; let t = 1, p = 60000; for (let i = 0; i < 365; i++) { p *= 1 + Math.sin(i / 9) * 0.012; a.push([t, '0', '0', '0', String(p), '0']); t += 86400000; } return { ok: true, json: async () => a }; }
   if (u.includes('bybit.com')) { const list = []; let t = 365 * 86400000, p = 100; for (let i = 0; i < 365; i++) { p *= 1 + Math.cos(i / 7) * 0.01; list.push([String(t), '0', '0', '0', String(p)]); t -= 86400000; } return { ok: true, json: async () => ({ result: { list } }) }; }
   const data = []; let t = 300 * 86400000, p = 600; for (let i = 0; i < 300; i++) { p *= 1 + Math.sin(i / 5) * 0.011; data.push([String(t), '0', '0', '0', String(p)]); t -= 86400000; } return { ok: true, json: async () => ({ data }) };
 };
 
 // configure OpenWA (enabled) + give admin a phone & notify so alerts route
-await call(openwa, { method: 'PUT', headers: authH, body: { apiUrl: 'https://wa.test', apiKey: 'k', enabled: true, defaultSender: '+33600000000', drawdownPct: 1, pnlDayThreshold: 99999999 } });
+await call(openwa, { method: 'PUT', headers: authH, body: { apiUrl: 'https://wa.test', sessionId: 'sess_test', apiKey: 'k', enabled: true, defaultSender: '+33600000000', drawdownPct: 1, pnlDayThreshold: 99999999 } });
 await call(profile, { method: 'PATCH', headers: authH, body: { phone: '+33611111111', notify: true } });
 
 // login-failure alert: 3 wrong attempts triggers a WhatsApp to admins
 sentMessages.length = 0;
 for (let i = 0; i < 3; i++) await call(auth, { method: 'POST', body: { action: 'login', email: 'admin@lno.company', password: 'nope' } });
-ok('3 failed logins -> WhatsApp alert sent', sentMessages.some(m => /failed login/i.test(m.content)), sentMessages);
+ok('3 failed logins -> WhatsApp alert sent', sentMessages.some(m => /failed login/i.test(m.text)), sentMessages);
 
 // daily cron: computes metrics + sends report (admin-triggered)
 sentMessages.length = 0;
 r = await call(cronDaily, { method: 'POST', headers: authH });
 ok('cron computes risk metrics (sharpe/sortino/drawdown)', r.status === 200 && typeof r.body.metrics.sharpe === 'number' && typeof r.body.metrics.sortino === 'number' && typeof r.body.metrics.maxDrawdownPct === 'number', r.body && r.body.metrics);
-ok('cron sends daily report via OpenWA', sentMessages.some(m => /daily report/i.test(m.content)), sentMessages.map(m => m.content.slice(0, 20)));
+ok('cron sends daily report via OpenWA', sentMessages.some(m => /daily report/i.test(m.text)), sentMessages.map(m => (m.text || '').slice(0, 20)));
 ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { method: 'POST' })).status === 401);
 
 // scoped per-bot rule + weekly/monthly reports (force)
@@ -129,7 +129,7 @@ ok('buildMonthlyPdf produces a valid %PDF', Buffer.from(pdfB64, 'base64').slice(
 r = await call(alerts, { method: 'GET', headers: authH });
 const pending = r.body.alerts.find(al => !al.ackedAt);
 ok('cron recorded an acknowledgeable alert', !!pending && !!pending.code, r.body.alerts.slice(0,2));
-r = await call(webhook, { method: 'POST', query: {}, body: { from: '33600000000@c.us', body: `ACK ${pending.code}` } });
+r = await call(webhook, { method: 'POST', query: {}, body: { event: 'message.received', data: { from: '33600000000@c.us', body: `ACK ${pending.code}` } } });
 ok('WhatsApp "ACK <code>" reply acknowledges via webhook', r.body.acked === pending.code, r.body);
 r = await call(alerts, { method: 'GET', headers: authH });
 ok('alert now shows acknowledged', !!r.body.alerts.find(al => al.code === pending.code && al.ackedAt), r.body.alerts.find(al=>al.code===pending.code));
