@@ -41,21 +41,21 @@ let r = await call(init, { method: 'POST' });
 ok('init creates + seeds', r.status === 200 && r.body.seeded === true, r.body);
 
 // 2. login admin/admin
-r = await call(auth, { method: 'POST', body: { action: 'login', username: 'admin', password: 'admin' } });
+r = await call(auth, { method: 'POST', body: { action: 'login', email: 'admin@lno.company', password: 'admin' } });
 const token = r.body?.token;
 ok('login admin/admin returns JWT + user', r.status === 200 && !!token && r.body.user.role === 'admin', r.body);
 ok('login response contains NO password field', !('password' in (r.body?.user || {})) && !('password_hash' in (r.body?.user || {})));
 const authH = { authorization: 'Bearer ' + token };
 
 // 3. wrong password rejected
-r = await call(auth, { method: 'POST', body: { action: 'login', username: 'admin', password: 'wrong' } });
+r = await call(auth, { method: 'POST', body: { action: 'login', email: 'admin@lno.company', password: 'wrong' } });
 ok('wrong password -> 401', r.status === 401, r.body);
 
 // 4. me requires auth
 r = await call(auth, { method: 'GET', headers: {} });
 ok('GET me without token -> 401', r.status === 401);
 r = await call(auth, { method: 'GET', headers: authH });
-ok('GET me with token -> admin', r.status === 200 && r.body.user.username === 'admin', r.body);
+ok('GET me with token -> admin', r.status === 200 && r.body.user.email === 'admin@lno.company' && r.body.user.role === 'admin', r.body);
 
 // 5. DB stores bcrypt hash, NOT plaintext
 let q = await db.query("SELECT password_hash FROM users WHERE username='admin'");
@@ -64,13 +64,13 @@ ok('password stored as bcrypt hash (starts $2)', /^\$2[aby]\$/.test(hash), { has
 ok('plaintext "admin" NOT in password_hash', !hash.includes('admin'));
 
 // 6. admin-only gating: create user without token forbidden
-r = await call(users, { method: 'POST', body: { username: 'x', email: 'x@lno.company' } });
+r = await call(users, { method: 'POST', body: { email: 'x@lno.company' } });
 ok('create user without token -> 401', r.status === 401);
 
-// 7. create user (admin)
-r = await call(users, { method: 'POST', headers: authH, body: { username: 'nina.test', email: 'nina.test@lno.company', role: 'operator' } });
-ok('admin creates user', r.status === 201 && r.body.user.username === 'nina.test', r.body);
-r = await call(users, { method: 'POST', headers: authH, body: { username: 'bad', email: 'bad@gmail.com' } });
+// 7. create user (admin) — email is the identity, no username
+r = await call(users, { method: 'POST', headers: authH, body: { email: 'nina.test@lno.company', role: 'operator' } });
+ok('admin creates user', r.status === 201 && r.body.user.email === 'nina.test@lno.company' && r.body.user.role === 'operator', r.body);
+r = await call(users, { method: 'POST', headers: authH, body: { email: 'bad@gmail.com' } });
 ok('create user with non-@lno.company email rejected', r.status === 400, r.body);
 
 // 8. OpenWA config: set apiUrl + apiKey, ensure key is encrypted in DB + masked in response
@@ -100,7 +100,7 @@ await call(profile, { method: 'PATCH', headers: authH, body: { phone: '+33611111
 
 // login-failure alert: 3 wrong attempts triggers a WhatsApp to admins
 sentMessages.length = 0;
-for (let i = 0; i < 3; i++) await call(auth, { method: 'POST', body: { action: 'login', username: 'admin', password: 'nope' } });
+for (let i = 0; i < 3; i++) await call(auth, { method: 'POST', body: { action: 'login', email: 'admin@lno.company', password: 'nope' } });
 ok('3 failed logins -> WhatsApp alert sent', sentMessages.some(m => /failed login/i.test(m.content)), sentMessages);
 
 // daily cron: computes metrics + sends report (admin-triggered)
@@ -149,23 +149,23 @@ ok('archived report downloads as a valid %PDF', r.status === 200 && Buffer.from(
 r = await call(snapshots, { method: 'GET', query: { reports: 'list' } });
 ok('report archive requires auth -> 401', r.status === 401, r.status);
 
-// shareholder role — admin-created, EXTERNAL email, policy-checked password
-r = await call(users, { method: 'POST', headers: authH, body: { username: 'invest.or', email: 'investor@example.com', role: 'shareholder', password: 'Str0ng#Passw0rd!' } });
+// shareholder role — admin-created, EXTERNAL email, policy-checked password (no username)
+r = await call(users, { method: 'POST', headers: authH, body: { email: 'investor@example.com', role: 'shareholder', password: 'Str0ng#Passw0rd!' } });
 ok('shareholder created with external email + password (auth_provider=password)',
   r.status === 201 && r.body.user.authProvider === 'password' && r.body.user.email === 'investor@example.com', r.body.user);
 ok('shareholder role grants exactly [view_activity, view_reports]',
   r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_reports']), r.body.user && r.body.user.permissions);
-// the shareholder can sign in with username + that password
-r = await call(auth, { method: 'POST', body: { action: 'login', username: 'invest.or', password: 'Str0ng#Passw0rd!' } });
-ok('shareholder signs in with username + password', r.status === 200 && !!r.body.token, r.status);
+// the shareholder signs in with their EMAIL + password
+r = await call(auth, { method: 'POST', body: { action: 'login', email: 'investor@example.com', password: 'Str0ng#Passw0rd!' } });
+ok('shareholder signs in with email + password', r.status === 200 && !!r.body.token, r.status);
 // weak password is rejected by the policy
-r = await call(users, { method: 'POST', headers: authH, body: { username: 'weak.holder', email: 'weak@example.com', role: 'shareholder', password: 'short' } });
+r = await call(users, { method: 'POST', headers: authH, body: { email: 'weak@example.com', role: 'shareholder', password: 'short' } });
 ok('weak shareholder password rejected -> 400', r.status === 400 && /Password needs/.test(r.body.error || ''), r.body);
 // internal roles still must use an @lno.company email (Google)
-r = await call(users, { method: 'POST', headers: authH, body: { username: 'ext.viewer', email: 'someone@gmail.com', role: 'viewer' } });
+r = await call(users, { method: 'POST', headers: authH, body: { email: 'someone@gmail.com', role: 'viewer' } });
 ok('non-shareholder external email rejected -> 400', r.status === 400 && /@lno\.company/.test(r.body.error || ''), r.body);
 // non-admin (operator) can read the archive but cannot generate a report
-r = await call(auth, { method: 'POST', body: { action: 'login', username: 'sophie.ops', password: 'admin' } });
+r = await call(auth, { method: 'POST', body: { action: 'login', email: 'sophie.ops@lno.company', password: 'admin' } });
 const opH = { authorization: 'Bearer ' + r.body.token };
 r = await call(snapshots, { method: 'POST', headers: opH, body: { action: 'generateReport' } });
 ok('non-admin cannot generate a report -> 403', r.status === 403, r.status);
@@ -173,13 +173,13 @@ r = await call(snapshots, { method: 'GET', headers: opH, query: { reports: 'list
 ok('any authenticated user can list the report archive', r.status === 200 && Array.isArray(r.body.reports), r.status);
 
 // login audit: IP + last-login recorded, heartbeat updates last-seen, history endpoint
-r = await call(auth, { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }, body: { action: 'login', username: 'admin', password: 'admin' } });
+r = await call(auth, { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }, body: { action: 'login', email: 'admin@lno.company', password: 'admin' } });
 ok('login records client IP + last-login on the user', r.status === 200 && r.body.user.lastIp === '203.0.113.7' && !!r.body.user.lastLoginAt, r.body.user);
 const hbH = { authorization: 'Bearer ' + r.body.token };
 r = await call(auth, { method: 'POST', headers: { ...hbH, 'x-forwarded-for': '198.51.100.4' }, body: { action: 'heartbeat' } });
 ok('presence heartbeat -> 200', r.status === 200 && r.body.ok === true, r.body);
 r = await call(users, { method: 'GET', headers: authH });
-const adminRow = r.body.users.find(u => u.username === 'admin');
+const adminRow = r.body.users.find(u => u.email === 'admin@lno.company');
 r = await call(users, { method: 'GET', headers: authH, query: { logins: adminRow.id } });
 ok('per-user sign-in history lists the recorded IP + method', r.status === 200 && r.body.logins.some(l => l.ip === '203.0.113.7' && l.method === 'password'), r.body.logins);
 
@@ -187,8 +187,8 @@ ok('per-user sign-in history lists the recorded IP + method', r.status === 200 &
 globalThis.__GOOGLE_VERIFY__ = async (cred) => JSON.parse(Buffer.from(cred, 'base64').toString());
 const gcred = (o) => Buffer.from(JSON.stringify(o)).toString('base64');
 r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'alice.new@lno.company', email_verified: true, hd: 'lno.company', given_name: 'Alice', family_name: 'New' }) } });
-ok('Google sign-in auto-creates an @lno.company user (viewer, username=local part, names saved)',
-  r.status === 200 && r.body.user.username === 'alice.new' && r.body.user.role === 'viewer' && r.body.user.firstName === 'Alice' && r.body.user.lastName === 'New' && r.body.user.authProvider === 'google' && !!r.body.token, r.body);
+ok('Google sign-in auto-creates an @lno.company user (viewer, names saved)',
+  r.status === 200 && r.body.user.email === 'alice.new@lno.company' && r.body.user.role === 'viewer' && r.body.user.firstName === 'Alice' && r.body.user.lastName === 'New' && r.body.user.authProvider === 'google' && !!r.body.token, r.body);
 r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'mallory@evil.com', email_verified: true, given_name: 'M', family_name: 'X' }) } });
 ok('Google sign-in rejects a non-@lno.company domain -> 403', r.status === 403, r.status);
 r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'bob@lno.company', email_verified: false, hd: 'lno.company' }) } });
@@ -196,9 +196,9 @@ ok('Google sign-in rejects an unverified email -> 403', r.status === 403, r.stat
 r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'alice.new@lno.company', email_verified: true, hd: 'lno.company', given_name: 'Alice', family_name: 'Renamed' }) } });
 ok('repeat Google sign-in updates names, keeps same account', r.status === 200 && r.body.user.lastName === 'Renamed', r.body.user);
 r = await call(users, { method: 'GET', headers: authH });
-ok('no duplicate account for repeat Google sign-in', r.body.users.filter(x => x.username === 'alice.new').length === 1, r.body.users.filter(x => x.username === 'alice.new').length);
+ok('no duplicate account for repeat Google sign-in', r.body.users.filter(x => x.email === 'alice.new@lno.company').length === 1, r.body.users.filter(x => x.email === 'alice.new@lno.company').length);
 r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'admin@lno.company', email_verified: true, hd: 'lno.company', given_name: 'Admin', family_name: 'User' }) } });
-ok('Google sign-in links an existing account by email (keeps admin role)', r.status === 200 && r.body.user.username === 'admin' && r.body.user.role === 'admin', r.body.user);
+ok('Google sign-in links an existing account by email (keeps admin role)', r.status === 200 && r.body.user.email === 'admin@lno.company' && r.body.user.role === 'admin', r.body.user);
 delete globalThis.__GOOGLE_VERIFY__;
 
 console.log(`\n${pass} passed, ${fail} failed`);

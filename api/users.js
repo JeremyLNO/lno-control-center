@@ -20,28 +20,29 @@ export default async function handler(req, res) {
     const body = req.body || {};
 
     if (req.method === 'POST') {
-      const { username, email, firstName = '', lastName = '', role = 'viewer', password } = body;
-      if (!username || !String(username).trim()) return res.status(400).json({ error: 'Username is required' });
+      // the email IS the identity (no username concept)
+      const email = String(body.email || '').trim();
+      const { firstName = '', lastName = '', role = 'viewer', password } = body;
       const isShareholder = role === 'shareholder';
       if (isShareholder) {
         // external emails are allowed for shareholders; a valid password is required
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || ''))) return res.status(400).json({ error: 'A valid email is required' });
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'A valid email is required' });
         const issues = passwordIssues(password);
         if (issues.length) return res.status(400).json({ error: 'Password needs ' + issues.join(', ') });
       } else {
-        if (!String(email || '').endsWith('@lno.company')) return res.status(400).json({ error: 'Email must end with @lno.company' });
+        if (!email.endsWith('@lno.company')) return res.status(400).json({ error: 'Email must end with @lno.company' });
       }
-      const exists = await query('SELECT 1 FROM users WHERE username=$1', [String(username).trim()]);
-      if (exists.rows[0]) return res.status(409).json({ error: 'Username must be unique' });
+      const exists = await query('SELECT 1 FROM users WHERE lower(email)=lower($1)', [email]);
+      if (exists.rows[0]) return res.status(409).json({ error: 'An account with this email already exists' });
       const id = 'u' + Date.now();
       const perms = ROLE_PERMS[role] || ROLE_PERMS.viewer;
-      // shareholders sign in with email/username + password; internal roles use Google (no usable password)
+      // shareholders sign in with email + password; internal roles use Google (no usable password)
       const provider = isShareholder ? 'password' : 'google';
       const hash = isShareholder ? await hashPassword(password) : await hashPassword('google:' + id + ':' + Math.random());
       await query(
         `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,password_hash,auth_provider)
          VALUES ($1,$2,$3,$4,$5,$6,true,$7::jsonb,$8,$9)`,
-        [id, String(username).trim(), email, firstName, lastName, role, JSON.stringify(perms), hash, provider]
+        [id, email, email, firstName, lastName, role, JSON.stringify(perms), hash, provider]
       );
       const { rows } = await query('SELECT * FROM users WHERE id=$1', [id]);
       return res.status(201).json({ user: sanitizeUser(rows[0]) });
@@ -51,7 +52,7 @@ export default async function handler(req, res) {
       const { id, ...patch } = body;
       if (!id) return res.status(400).json({ error: 'id required' });
       if (patch.role) patch.permissions = ROLE_PERMS[patch.role] || ROLE_PERMS.viewer; // role change resets perms
-      const map = { username: 'username', firstName: 'first_name', lastName: 'last_name', active: 'active', role: 'role', permissions: 'permissions' };
+      const map = { firstName: 'first_name', lastName: 'last_name', active: 'active', role: 'role', permissions: 'permissions' };
       const sets = [], vals = []; let i = 1;
       for (const k of Object.keys(patch)) {
         if (!(k in map)) continue;

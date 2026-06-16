@@ -49,7 +49,7 @@ const fmtDate = (t)=> new Date(t).toLocaleDateString('en-GB',{day:'2-digit',mont
 const fmtTime = (t)=> new Date(t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
 const fmtDT = (t)=> fmtDate(t)+' '+fmtTime(t);
 const fmtDur = (mins)=>{ mins=Math.round(mins); if(mins<60)return mins+'m'; const h=Math.floor(mins/60),m=mins%60; if(h<24)return h+'h'+(m?' '+m+'m':''); const d=Math.floor(h/24),hh=h%24; return d+'d'+(hh?' '+hh+'h':''); };
-const initialsOf = (u)=>{ const a=(u.firstName||'').trim(), b=(u.lastName||'').trim(); if(a||b) return ((a[0]||'')+(b[0]||'')).toUpperCase(); return (u.username||'?').slice(0,2).toUpperCase(); };
+const initialsOf = (u)=>{ const a=(u.firstName||'').trim(), b=(u.lastName||'').trim(); if(a||b) return ((a[0]||'')+(b[0]||'')).toUpperCase(); return (u.email||'?').slice(0,2).toUpperCase(); };
 
 /* ============================================================
    SEEDED RNG + MOCK DATA
@@ -715,7 +715,7 @@ function Login(){
     try{ await login(u.trim(),p); attemptsRef.current=0; }
     catch(ex){
       attemptsRef.current+=1;
-      setErr(ex.message||'Invalid username or password.');
+      setErr(ex.message||'Invalid email or password.');
       if(attemptsRef.current>=3) setWarn(true);
     } finally{ setBusy(false); }
   }
@@ -735,13 +735,13 @@ function Login(){
         {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4 shrink-0"/>{err}</div>}
         {clientId&&!showPw&&<button onClick={()=>setShowPw(true)} className="w-full text-xs text-slate-400 hover:text-navy">Sign in with a password instead</button>}
         {showPw&&<form onSubmit={submit} className="space-y-4">
-          {clientId&&<div className="flex items-center gap-2 pt-1"><div className="flex-1 border-t border-slate-200"/><span className="text-[10px] uppercase tracking-wide text-slate-400">password sign-in</span><div className="flex-1 border-t border-slate-200"/></div>}
-          <Field label="Username"><Input value={u} onChange={e=>setU(e.target.value)} placeholder="admin" autoFocus={!clientId}/></Field>
+          {clientId&&<div className="flex items-center gap-2 pt-1"><div className="flex-1 border-t border-slate-200"/><span className="text-[10px] uppercase tracking-wide text-slate-400">email sign-in</span><div className="flex-1 border-t border-slate-200"/></div>}
+          <Field label="Email"><Input type="email" value={u} onChange={e=>setU(e.target.value)} placeholder="you@example.com" autoFocus={!clientId}/></Field>
           <Field label="Password"><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="••••••"/></Field>
           <Btn className="w-full" type="submit" disabled={busy}>{busy?'Signing in…':'Sign in'}</Btn>
         </form>}
         {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>Multiple failed attempts detected. A security alert has been dispatched to the operations team.</span></div>}
-        {!clientId&&<div className="text-[11px] text-slate-400 text-center">Default credentials: <span className="font-mono">admin / admin</span></div>}
+        {!clientId&&<div className="text-[11px] text-slate-400 text-center">Default admin: <span className="font-mono">admin@lno.company / admin</span></div>}
       </div>
     </div>
   </div>;
@@ -872,7 +872,7 @@ function Header(){
       </button>
       {menu&&<div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 p-1.5 z-40 fadein">
         <div className="px-2.5 py-2 border-b border-slate-100 mb-1">
-          <div className="text-sm font-semibold text-navy truncate">{user.firstName||user.username}</div>
+          <div className="text-sm font-semibold text-navy truncate">{user.firstName||user.email}</div>
           <div className="text-xs text-slate-400 truncate">{user.email}</div>
         </div>
         <button onClick={()=>{navigate('/profile');setMenu(false);}} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2"><Icon name="usercircle" className="w-4 h-4"/>Profile</button>
@@ -1008,6 +1008,7 @@ function ActivityPage({botId}){
   const full=portfolioSeries(data,botIds);
   const series=sliceByPeriod(full,period,custom);
   const periodPnl = series.length>1? series[series.length-1].equity-series[0].equity : 0;
+  const periodPnlPct = series.length>1? periodPnl/series[0].equity*100 : 0;
   const positive = periodPnl>=0;
   const eqNow = full[full.length-1].equity;
 
@@ -1093,7 +1094,7 @@ function ActivityPage({botId}){
     <Card className="p-5 mb-5">
       <SectionTitle right={<div className="flex items-center gap-3">
         <button onClick={()=>setShowBench(v=>!v)} className={`text-xs px-2 py-1 rounded-lg border transition ${showBench?'border-gold text-gold bg-gold/5':'border-slate-200 text-slate-500 hover:text-navy'}`}>vs BTC hold</button>
-        <span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} this period</span>
+        <span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} <span className="tnum">({fmtPct(periodPnlPct)})</span> this period</span>
       </div>}>Equity Curve</SectionTitle>
       <AreaChart data={series} positive={positive} resetKey={`${period}|${fund}|${botId||''}|${custom.start||''}`} benchmark={benchmark}/>
       <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{series.length?fmtDate(series[0].t):''}</span><span>{series.length?fmtDate(series[series.length-1].t):''}</span></div>
@@ -1602,7 +1603,7 @@ function UserLoginHistory({userId}){
 function AdminUsers(){
   const {user}=useApp();
   const [users,setUsers]=useState([]);
-  const [exp,setExp]=useState(null); const [add,setAdd]=useState(false); const [del,setDel]=useState(null); const [editName,setEditName]=useState(null); const [nameVal,setNameVal]=useState('');
+  const [exp,setExp]=useState(null); const [add,setAdd]=useState(false); const [del,setDel]=useState(null);
   const [sel,setSel]=useState(()=>new Set()); const [bulkDel,setBulkDel]=useState(false);
   // refetch periodically so the online lights + last-seen stay current
   useEffect(()=>{ if(user.role!=='admin') return; const load=()=>api('users').then(r=>setUsers(r.users||[])).catch(()=>{}); load(); const iv=setInterval(load,30000); return ()=>clearInterval(iv); },[]);
@@ -1636,8 +1637,8 @@ function AdminUsers(){
           <Select value="" onChange={v=>{ if(v) bulkPatch({role:v,permissions:ROLE_PERMS[v].slice()},{skipSelf:true,verb:'Re-roled'}); }} className="w-32" options={[{value:'',label:'Set role…'},...ROLE_OPTIONS]}/>
           <Btn size="sm" variant="danger" onClick={()=>setBulkDel(true)}><Icon name="trash" className="w-3.5 h-3.5"/>Delete</Btn>
         </>}
-        <ExportMenu filename="lno_users" size="sm" variant="outline" headers={['Username','Email','First name','Last name','Role','Active','Permissions']}
-          getRows={()=>(sel.size?users.filter(u=>sel.has(u.id)):users).map(u=>[u.username,u.email,u.firstName||'',u.lastName||'',u.role,u.active?'yes':'no',(u.role==='admin'?ALL_PERMS:u.permissions||[]).join(' ')])}/>
+        <ExportMenu filename="lno_users" size="sm" variant="outline" headers={['Email','First name','Last name','Role','Active','Permissions']}
+          getRows={()=>(sel.size?users.filter(u=>sel.has(u.id)):users).map(u=>[u.email,u.firstName||'',u.lastName||'',u.role,u.active?'yes':'no',(u.role==='admin'?ALL_PERMS:u.permissions||[]).join(' ')])}/>
       </div>
     </div>
     <div className="space-y-3">
@@ -1647,10 +1648,10 @@ function AdminUsers(){
         <button onClick={()=>setExp(exp===u.id?null:u.id)} className="flex-1 min-w-0 flex items-center gap-3 p-4 text-left hover:bg-slate-50/60">
           {u.avatar?<img src={u.avatar} className="w-10 h-10 rounded-full object-cover"/>:<span className="w-10 h-10 rounded-full bg-navy text-white grid place-items-center text-xs font-semibold shrink-0">{initialsOf(u)}</span>}
           <div className="flex-1 min-w-0">
-            <div className="font-medium text-navy flex items-center gap-2">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.username}
+            <div className="font-medium text-navy flex items-center gap-2">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.email}
               <Badge className={u.role==='admin'?'bg-gold/15 text-gold':u.role==='operator'?'bg-blue-100 text-blue-700':u.role==='shareholder'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-600'}>{u.role}</Badge>
             </div>
-            <div className="text-xs text-slate-400 truncate">@{u.username} · {u.email}</div>
+            <div className="text-xs text-slate-400 truncate">{u.email}</div>
             <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5 truncate">
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline(u)?'bg-success pulse-dot':'bg-slate-300'}`}/>
               <span className={isOnline(u)?'text-success font-medium':''}>{isOnline(u)?'Online':(u.lastLoginAt?`Last sign-in ${fmtDT(u.lastLoginAt)}`:'Never signed in')}</span>
@@ -1663,12 +1664,7 @@ function AdminUsers(){
         </div>
         {exp===u.id&&<div className="border-t border-slate-100 p-4 space-y-4 fadein">
           <div className="flex flex-wrap gap-4">
-            <div className="w-44"><Field label="Username">
-              {editName===u.id? <div className="flex gap-1">
-                <Input value={nameVal} autoFocus onChange={e=>setNameVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){up(u.id,{username:nameVal});setEditName(null);}if(e.key==='Escape')setEditName(null);}}/>
-                <Btn size="icon" variant="subtle" onClick={()=>{up(u.id,{username:nameVal});setEditName(null);}}><Icon name="check" className="w-4 h-4"/></Btn>
-              </div> : <div className="flex items-center gap-2"><span className="text-sm font-mono">@{u.username}</span><button onClick={()=>{setEditName(u.id);setNameVal(u.username);}} className="text-slate-400 hover:text-navy"><Icon name="pencil" className="w-3.5 h-3.5"/></button></div>}
-            </Field></div>
+            <div><Field label="Email"><div className="pt-1.5 text-sm font-mono text-slate-500">{u.email}</div></Field></div>
             <div className="w-44"><Field label="Role"><Select value={u.role} onChange={v=>up(u.id,{role:v,permissions:ROLE_PERMS[v].slice()})} options={ROLE_OPTIONS}/></Field></div>
             <div><Field label="Active"><div className="pt-1.5"><Toggle on={u.active} onChange={v=>up(u.id,{active:v})}/></div></Field></div>
           </div>
@@ -1692,7 +1688,7 @@ function AdminUsers(){
       </Card>)}
     </div>
     <AddUserModal open={add} onClose={()=>setAdd(false)} onCreated={u=>{setUsers(us=>[...us,u]);setAdd(false);}}/>
-    <Confirm open={!!del} title="Delete user" message={`Permanently remove ${del?.username}? This cannot be undone.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('users',{method:'DELETE',body:{id:del.id}});setUsers(us=>us.filter(u=>u.id!==del.id));toast.success('User deleted');}catch(e){toast.error(e.message);}setDel(null);setExp(null);}}/>
+    <Confirm open={!!del} title="Delete user" message={`Permanently remove ${del?.email}? This cannot be undone.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('users',{method:'DELETE',body:{id:del.id}});setUsers(us=>us.filter(u=>u.id!==del.id));toast.success('User deleted');}catch(e){toast.error(e.message);}setDel(null);setExp(null);}}/>
     <Confirm open={bulkDel} title="Delete selected users" message={`Permanently remove ${ids.filter(id=>id!==user.id).length} user(s)? Your own account is never deleted. This cannot be undone.`} confirmLabel="Delete all" onCancel={()=>setBulkDel(false)} onConfirm={bulkDelete}/>
   </div>;
 }
@@ -1715,23 +1711,21 @@ function genPassword(){
   return arr.join('');
 }
 function AddUserModal({open,onClose,onCreated}){
-  const [v,setV]=useState({username:'',email:'',firstName:'',lastName:'',role:'viewer',password:''}); const [err,setErr]=useState(''); const [busy,setBusy]=useState(false); const [showPw,setShowPw]=useState(false);
-  useEffect(()=>{ if(open){setV({username:'',email:'',firstName:'',lastName:'',role:'viewer',password:''});setErr('');setShowPw(false);} },[open]);
+  const [v,setV]=useState({email:'',firstName:'',lastName:'',role:'viewer',password:''}); const [err,setErr]=useState(''); const [busy,setBusy]=useState(false); const [showPw,setShowPw]=useState(false);
+  useEffect(()=>{ if(open){setV({email:'',firstName:'',lastName:'',role:'viewer',password:''});setErr('');setShowPw(false);} },[open]);
   const isShareholder=v.role==='shareholder';
   async function submit(){
-    if(!v.username.trim())return setErr('Username is required.');
     if(isShareholder){
       if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email))return setErr('A valid email is required.');
       if(!passwordOk(v.password))return setErr('Password does not meet all the requirements below.');
     } else if(!v.email.endsWith('@lno.company')) return setErr('Email must end with @lno.company');
     setBusy(true);
-    try{ const body={username:v.username.trim(),email:v.email,firstName:v.firstName,lastName:v.lastName,role:v.role}; if(isShareholder) body.password=v.password; const r=await api('users',{method:'POST',body}); onCreated(r.user); }
+    try{ const body={email:v.email.trim(),firstName:v.firstName,lastName:v.lastName,role:v.role}; if(isShareholder) body.password=v.password; const r=await api('users',{method:'POST',body}); onCreated(r.user); }
     catch(e){ setErr(e.message); } finally{ setBusy(false); }
   }
   return <Modal open={open} onClose={onClose} title="Add User">
     <div className="space-y-3">
       <Field label="Role"><Select value={v.role} onChange={r=>setV({...v,role:r})} options={ROLE_OPTIONS}/></Field>
-      <Field label="Username *"><Input value={v.username} onChange={e=>setV({...v,username:e.target.value})} placeholder="jane.doe"/></Field>
       <Field label="Email *" hint={isShareholder?'Any email — shareholders have external addresses':'Must end with @lno.company'}><Input value={v.email} onChange={e=>setV({...v,email:e.target.value})} placeholder={isShareholder?'investor@example.com':'jane.doe@lno.company'}/></Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="First name"><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
@@ -1751,7 +1745,7 @@ function AddUserModal({open,onClose,onCreated}){
       </Field>}
       {err&&<div className="text-sm text-danger">{err}</div>}
       <div className="text-[11px] text-slate-400">{isShareholder
-        ? 'Shareholders sign in with their username + this password (they can’t use Google — external email). Share these credentials with them securely.'
+        ? 'Shareholders sign in with their email + this password (they can’t use Google — external email). Share these credentials with them securely.'
         : <>Pre-provisions the account with a role. The user signs in with their <span className="font-mono">@lno.company</span> Google account — no password needed.</>}</div>
       <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={submit} disabled={busy}>{busy?'Creating…':'Create user'}</Btn></div>
     </div>
@@ -1997,10 +1991,9 @@ function ProfilePage(){
           <button onClick={()=>fileRef.current.click()} className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-gold text-navy grid place-items-center shadow"><Icon name="camera" className="w-4 h-4"/></button>
           <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={upload}/>
         </div>
-        <div><div className="font-semibold text-navy text-lg">{user.firstName||user.username}</div><div className="text-sm text-slate-400">@{user.username} · {user.role}</div><div className="text-[11px] text-slate-400 mt-1">PNG or JPEG · max 5 MB</div></div>
+        <div><div className="font-semibold text-navy text-lg">{user.firstName||user.email}</div><div className="text-sm text-slate-400">{user.email} · {user.role}</div><div className="text-[11px] text-slate-400 mt-1">PNG or JPEG · max 5 MB</div></div>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
-        <Field label="Username" hint="Can only be changed by an admin"><Input value={user.username} disabled className="bg-slate-50 text-slate-400"/></Field>
         <Field label="Email" hint="Contact an admin to change your email"><Input value={user.email} disabled className="bg-slate-50 text-slate-400"/></Field>
         <Field label="First name"><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
         <Field label="Last name"><Input value={v.lastName} onChange={e=>setV({...v,lastName:e.target.value})}/></Field>
@@ -2392,8 +2385,8 @@ function Root(){
   const reloadFunds=useCallback(async()=>{ const r=await api('funds'); setFunds(r.funds||[]); return r.funds; },[]);
   const saveFunds=useCallback(async(next)=>{ const r=await api('funds',{method:'PUT',body:{funds:next}}); setFunds(r.funds||[]); return r.funds; },[]);
 
-  async function login(username,password){
-    const r=await api('auth',{method:'POST',body:{action:'login',username,password}});
+  async function login(email,password){
+    const r=await api('auth',{method:'POST',body:{action:'login',email,password}});
     setToken(r.token); setUser(r.user); return r.user;
   }
   async function loginGoogle(credential){
