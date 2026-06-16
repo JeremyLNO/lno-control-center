@@ -112,7 +112,9 @@ ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { met
 
 // scoped per-bot rule + weekly/monthly reports (force)
 sentMessages.length = 0;
-await call(openwa, { method: 'PUT', headers: authH, body: { alertRules: [{ id: 'r1', scope: 'bot:b1', metric: 'drawdown', value: 0.5, enabled: true }] } });
+// pnlDay rule with a huge threshold fires regardless of the data's sign — verifies the
+// scoped per-bot rule path produces a bot-named breach (data is now strongly positive)
+await call(openwa, { method: 'PUT', headers: authH, body: { alertRules: [{ id: 'r1', scope: 'bot:b1', metric: 'pnlDay', value: 99999999, enabled: true }] } });
 r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'all' } });
 ok('scoped per-bot alert rule breach detected', r.body.breaches.some(b => /Alpha-BTC-Momentum/.test(b)), r.body.breaches);
 ok('weekly + monthly reports sent (force=all)', r.body.sent.some(s => s.type === 'weekly') && r.body.sent.some(s => s.type === 'monthly'), r.body.sent.map(s => s.type));

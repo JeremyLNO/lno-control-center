@@ -34,8 +34,9 @@ function synthCloses(botId, n){
 function botSeries(bot, closes){
   const r=mulberry32(seedStr(bot.id));
   const e0=40000+Math.floor(r()*160000);
-  const beta=strategyBeta(bot.strategy,r);
-  const alpha=r()*0.0006;
+  // keep in sync with buildStatic() in src/main.jsx: dominant positive drift + dampened beta
+  const beta=strategyBeta(bot.strategy,r)*0.50;
+  const alpha=0.0055+r()*0.0017;
   const s=[]; let eq=e0; s.push({t:closes[0].t,equity:eq});
   for(let i=1;i<closes.length;i++){ const ret=closes[i].close/closes[i-1].close-1; eq=Math.max(eq*(1+alpha+beta*ret),e0*0.25); s.push({t:closes[i].t,equity:Math.round(eq)}); }
   return { series:s };

@@ -122,10 +122,12 @@ function genTrades(params){
     const ageDays=r()*360; const entry=NOW-ageDays*DAY-r()*DAY; const durMin=8+r()*r()*5200;
     const isOpen=ageDays<2&&r()<0.5; const exit=isOpen?null:entry+durMin*60000;
     const side=r()<0.55?'Long':'Short'; const lev=[1,2,3,5,10,20][Math.floor(r()*6)];
-    const entryPx=ref*(0.85+r()*0.3); const move=(r()-0.46)*0.08; const exitPx=entryPx*(1+move);
-    const size=Math.round(2000+r()*22000); const dir=side==='Long'?1:-1;
+    const entryPx=ref*(0.85+r()*0.3); const dir=side==='Long'?1:-1;
+    // net-winning strategy: ~68% winners, losses cut smaller than wins (good risk management)
+    const win=r()<0.68; const mag=0.004+r()*0.05; const move=dir*(win?1:-1)*(win?mag:mag*0.55); const exitPx=entryPx*(1+move);
+    const size=Math.round(2000+r()*22000);
     const pnlPct=move*dir*lev*100; const pnl=size*(pnlPct/100);
-    out.push({id:'t'+i,botId:b.id,bot:b.name,symbol:b.symbol,exchange:b.exchange,strategy:b.strategy,side,status:isOpen?'Open':'Closed',entry,exit,entryPx,exitPx:isOpen?null:exitPx,size,leverage:lev,pnl:isOpen?size*((r()-0.4)*0.05):pnl,pnlPct:isOpen?(r()-0.4)*8:pnlPct,durMin:isOpen?(NOW-entry)/60000:durMin});
+    out.push({id:'t'+i,botId:b.id,bot:b.name,symbol:b.symbol,exchange:b.exchange,strategy:b.strategy,side,status:isOpen?'Open':'Closed',entry,exit,entryPx,exitPx:isOpen?null:exitPx,size,leverage:lev,pnl:isOpen?size*((r()-0.28)*0.05):pnl,pnlPct:isOpen?(r()-0.28)*7:pnlPct,durMin:isOpen?(NOW-entry)/60000:durMin});
   }
   return out.sort((a,b)=>b.entry-a.entry);
 }
@@ -133,7 +135,9 @@ function buildStatic(klines){
   const params={},seriesBase={};
   BASE_BOTS.forEach((b,idx)=>{
     const closes=klines.bots[b.id].closes; const r=mulberry32(seedStr(b.id));
-    const e0=40000+Math.floor(r()*160000); const beta=strategyBeta(b.strategy,r); const alpha=r()*0.0006;
+    // alpha = dominant positive daily drift (~+900%/yr compounded); beta dampened so the
+    // real price moves add texture/drawdowns around the uptrend without reversing it.
+    const e0=40000+Math.floor(r()*160000); const beta=strategyBeta(b.strategy,r)*0.50; const alpha=0.0055+r()*0.0017;
     const notional=Math.round(e0*(0.08+r()*0.22)); const side=r()<0.6?'Long':'Short';
     params[b.id]={e0,beta,alpha,notional,side,statusSeed:STATUSES[idx],failed:klines.bots[b.id].failed,lastClose:closes[closes.length-1].close};
     const s=[]; let eq=e0; s.push({t:closes[0].t,equity:eq});
@@ -980,10 +984,10 @@ function OnboardingCard(){
 
 function ActivityPage({botId}){
   const {funds,navigate,user,data}=useApp();
-  const [period,setPeriod]=useState(()=>PREF.get('activity_period','30'));
+  const [period,setPeriod]=useState(()=>PREF.get('activity_period2','90'));
   const [custom,setCustom]=useState({start:null,end:null});
   const [fund,setFund]=useState(()=>PREF.get('activity_fund','all'));
-  useEffect(()=>{ PREF.set('activity_period',period); },[period]);
+  useEffect(()=>{ PREF.set('activity_period2',period); },[period]);
   useEffect(()=>{ PREF.set('activity_fund',fund); },[fund]);
   // a remembered fund that no longer exists falls back to the whole portfolio
   useEffect(()=>{ if(fund!=='all'&&funds.length&&!funds.find(f=>f.id===fund)) setFund('all'); },[funds]);// eslint-disable-line
