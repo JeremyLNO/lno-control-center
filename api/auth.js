@@ -39,7 +39,7 @@ export default async function handler(req, res) {
             const up = await query('UPDATE users SET failed_attempts=failed_attempts+1 WHERE id=$1 RETURNING failed_attempts', [u.id]);
             // alert admins on the 3rd consecutive failure (spec: after 3 failed attempts)
             if (up.rows[0]?.failed_attempts === 3) {
-              await notify(`⚠️ LNO Control Center — 3 failed login attempts for "${u.email}".`, { adminsOnly: true });
+              await notify(`⚠️ LNO Control Center — 3 failed login attempts for "${u.email}".`, { type: 'login' });
             }
           }
           return res.status(401).json({ error: 'Invalid email or password' });

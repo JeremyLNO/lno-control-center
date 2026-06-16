@@ -34,6 +34,16 @@ const ROLE_OPTIONS = [
   {value:'shareholder',label:'Shareholder'},
   {value:'viewer',label:'Viewer'},
 ];
+// WhatsApp notification matrix — message types (rows) × roles (columns)
+const WA_MSG_TYPES = [
+  {key:'login',label:'Login-failure alerts'},
+  {key:'breach',label:'Threshold breaches'},
+  {key:'daily',label:'Daily report'},
+  {key:'weekly',label:'Weekly report'},
+  {key:'monthly',label:'Monthly report'},
+  {key:'new_report',label:'New report available'},
+];
+const WA_ROLE_COLS = [['admin','Admin'],['operator','Operator'],['viewer','Viewer'],['shareholder','Shareholder']];
 
 /* ============================================================
    FORMATTERS
@@ -960,7 +970,7 @@ function OnboardingCard(){
   const {user,navigate}=useApp();
   const [dismissed,setDismissed]=useState(()=>PREF.get('onboarding_dismissed',false));
   const [openwaOk,setOpenwaOk]=useState(null);
-  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>setOpenwaOk(!!(r.config&&r.config.enabled&&r.config.hasApiKey))).catch(()=>{}); },[]);
+  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>setOpenwaOk(!!(r.config&&r.config.enabled))).catch(()=>{}); },[]);
   if(user.role!=='admin'||dismissed) return null;
   const steps=[
     {label:'Change the default admin password', done:false, to:'/profile'},
@@ -1816,15 +1826,15 @@ function ExchangeModal({modal,onClose,onSave}){
    ADMIN — WHATSAPP
    ============================================================ */
 function AdminOpenWA(){
-  const {user,funds}=useApp();
+  const {user,funds,navigate}=useApp();
   const [cfg,setCfg]=useState(null);
-  const [apiKey,setApiKey]=useState(''); const [defaultSender,setDefaultSender]=useState(''); const [enabled,setEnabled]=useState(false);
+  const [enabled,setEnabled]=useState(false); const [matrix,setMatrix]=useState({});
   const [ddPct,setDdPct]=useState(10); const [pnlThr,setPnlThr]=useState(-5000); const [dailyReport,setDailyReport]=useState(true);
   const [rules,setRules]=useState([]);
   const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
   const [log,setLog]=useState(null); const [logQ,setLogQ]=useState(''); const [logStatus,setLogStatus]=useState('all');
   const loadLog=()=>api('openwa?log=1').then(r=>setLog(r.log||[])).catch(()=>setLog([]));
-  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); loadLog(); },[]);
+  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setEnabled(c.enabled); setMatrix(c.notifMatrix||{}); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); loadLog(); },[]);
   if(user.role!=='admin') return <Denied/>;
   const scopeOpts=[{value:'portfolio',label:'Portfolio'},...funds.map(f=>({value:'fund:'+f.id,label:'Fund · '+f.name})),...BASE_BOTS.map(b=>({value:'bot:'+b.id,label:'Bot · '+b.name}))];
   const metricOpts=[{value:'drawdown',label:'Max drawdown (%)'},{value:'pnlDay',label:'Daily PnL ($)'}];
@@ -1836,29 +1846,33 @@ function AdminOpenWA(){
   });
   const updateRule=(i,patch)=>setRules(rs=>rs.map((r,j)=>j===i?{...r,...patch}:r));
   const addRule=()=>setRules(rs=>[...rs,{id:'r'+Date.now(),scope:'portfolio',metric:'drawdown',value:10,enabled:true}]);
-  async function save(){ setBusy(true); try{ const body={defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
+  const toggleMatrix=(type,role)=>setMatrix(m=>{ const cur=new Set(m[type]||[]); cur.has(role)?cur.delete(role):cur.add(role); return {...m,[type]:[...cur]}; });
+  async function save(){ setBusy(true); try{ const body={enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)})),notifMatrix:matrix}; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setMatrix(r.config.notifMatrix||{}); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
   async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } loadLog(); }
   async function runReport(){ setReport({state:'sending'}); try{ const r=await api('cron/daily',{method:'POST'}); const n=(r.sent||[]).reduce((a,s)=>a+(s.sent||0),0); setReport({state:'ok',msg:`Ran ✓ — ${n} message(s) delivered`}); }catch(e){ setReport({state:'err',msg:e.message}); } loadLog(); }
   return <div className="max-w-2xl">
     <PageHead title="WhatsApp Alerts" subtitle="Send alerts to WhatsApp via CallMeBot — no server to host"/>
     <Card className="p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <div><div className="font-medium text-navy">Enable notifications</div><div className="text-xs text-slate-400">Master toggle for all WhatsApp alerts</div></div>
+        <div><div className="font-medium text-navy">Enable WhatsApp notifications</div><div className="text-xs text-slate-400">Master switch — if off, nobody receives anything</div></div>
         <Toggle on={enabled} onChange={setEnabled}/>
       </div>
-      <div className="border-t border-slate-100 pt-4 space-y-3">
-        <div className="text-xs bg-navy/5 border border-slate-200 rounded-lg p-3 text-slate-600 space-y-1">
-          <div className="font-medium text-navy">Activate alerts for the recipient below (once):</div>
-          <div><span className="font-semibold">1.</span> Add <span className="font-mono">+34 611 021 695</span> to the phone's contacts (name it however you like).</div>
-          <div><span className="font-semibold">2.</span> On WhatsApp, send <span className="font-mono bg-white px-1 rounded border border-slate-200">I allow callmebot to send me messages</span> to that contact.</div>
-          <div><span className="font-semibold">3.</span> Enter the number + the API key it replies with below, then Save. <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" rel="noopener" className="text-gold hover:underline">More →</a></div>
-        </div>
-        <Field label="Your WhatsApp number" hint="The number that receives alerts (international format)"><Input value={defaultSender} onChange={e=>setDefaultSender(e.target.value)} placeholder="+33 6 12 34 56 78"/></Field>
-        <Field label="CallMeBot API key" hint={cfg&&cfg.hasApiKey? `Encrypted in DB (${cfg.apiKeyMasked}). Leave blank to keep.` : 'Stored encrypted in the database — never shown again'}><Input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={cfg&&cfg.hasApiKey?'•••••• (unchanged)':'e.g. 1234567'}/></Field>
+      <div className="border-t border-slate-100 pt-4">
+        <SectionTitle>Who gets notified</SectionTitle>
+        <p className="text-xs text-slate-400 mb-3">Recipients are users who turned on WhatsApp in their <button onClick={()=>navigate('/profile')} className="text-gold hover:underline">profile</button>. Choose which role receives each message type.</p>
+        <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead><tr className="text-xs text-slate-500"><th className="text-left font-medium py-2 pr-3">Message type</th>{WA_ROLE_COLS.map(([k,l])=><th key={k} className="font-medium py-2 px-2 text-center w-20">{l}</th>)}</tr></thead>
+          <tbody>
+            {WA_MSG_TYPES.map(t=><tr key={t.key} className="border-t border-slate-50">
+              <td className="py-2 pr-3 text-navy">{t.label}</td>
+              {WA_ROLE_COLS.map(([role])=><td key={role} className="py-2 px-2 text-center"><input type="checkbox" checked={(matrix[t.key]||[]).includes(role)} onChange={()=>toggleMatrix(t.key,role)} className="accent-navy w-4 h-4"/></td>)}
+            </tr>)}
+          </tbody>
+        </table></div>
       </div>
       <div className="flex items-center gap-3 pt-1 flex-wrap">
         <Btn onClick={save} disabled={busy}>{busy?'Saving…':'Save settings'}</Btn>
-        <Btn variant="outline" onClick={sendTest} disabled={!cfg||(!cfg.hasApiKey&&!apiKey)}><Icon name="msg" className="w-4 h-4"/>Send test message</Btn>
+        <Btn variant="outline" onClick={sendTest} disabled={!cfg}><Icon name="msg" className="w-4 h-4"/>Send test to me</Btn>
         {saved&&<span className="text-sm text-success flex items-center gap-1 fadein"><Icon name="check" className="w-4 h-4"/>Saved</span>}
         {test&&<span className={`text-sm flex items-center gap-1 ${test.state==='ok'?'text-success':test.state==='err'?'text-danger':'text-slate-400'}`}>{test.state==='sending'?'Sending…':test.msg}</span>}
       </div>
@@ -1896,7 +1910,7 @@ function AdminOpenWA(){
 
     <Card className="p-5 mt-4">
       <SectionTitle>How it works</SectionTitle>
-      <p className="text-sm text-slate-600 mb-4"><span className="font-mono text-xs bg-slate-100 px-1 rounded">CallMeBot</span> is a free hosted WhatsApp relay — <span className="font-medium">no server to run</span>. Each recipient opts in once and gets a personal API key; the Control Center backend sends a simple HTTPS request. Keys are <span className="font-medium">encrypted at rest</span> and never exposed to the browser. Alerts route to the recipient above plus every user who added their own number + key in their profile. <span className="text-slate-400">(Send-only: acknowledge alerts from the bell; the monthly PDF stays downloadable under Reports.)</span></p>
+      <p className="text-sm text-slate-600 mb-4"><span className="font-mono text-xs bg-slate-100 px-1 rounded">CallMeBot</span> is a free hosted WhatsApp relay — <span className="font-medium">no server to run</span>. Each user opts in from their own profile (number + personal API key, <span className="font-medium">encrypted at rest</span>); the backend sends a simple HTTPS request. The matrix above decides which role gets each message type — there is no shared/default recipient. <span className="text-slate-400">(Send-only: acknowledge alerts from the bell; the monthly PDF stays downloadable under Reports.)</span></p>
       <SectionTitle>Active alerts</SectionTitle>
       <ul className="text-sm text-slate-600 space-y-2">
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Login-failure alerts to admins (after 3 failed attempts)</li>

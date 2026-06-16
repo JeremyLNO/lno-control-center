@@ -5,6 +5,7 @@
 // Limitations: send-only (no inbound/ACK replies) and text-only (no file attachments).
 import { query } from './db.js';
 import { decrypt } from './crypto.js';
+import { DEFAULT_MATRIX, WA_ROLES } from './constants.js';
 
 const CALLMEBOT_URL = 'https://api.callmebot.com/whatsapp.php';
 
@@ -44,33 +45,38 @@ export async function sendCallMeBot(phone, apikey, message) {
 // monthly PDF stays downloadable from the Reports page.
 export async function sendFile() { return { ok: false, skipped: 'callmebot-no-files' }; }
 
-// Recipients = the default recipient (config phone + key) + every active user who opted
-// in (notify=true) AND saved a phone + their own CallMeBot key. Returns {phone, apikey} pairs.
-export async function getRecipients({ adminsOnly = false, role = null, includeDefault = true } = {}) {
+// Which roles receive a given message type (admin-configurable matrix; falls back to defaults).
+export async function rolesForType(cfg, type) {
+  const matrix = (cfg && cfg.notifMatrix && typeof cfg.notifMatrix === 'object') ? cfg.notifMatrix : DEFAULT_MATRIX;
+  const roles = Array.isArray(matrix[type]) ? matrix[type] : [];
+  return roles.filter(r => WA_ROLES.includes(r));
+}
+
+// Recipients for a message type = active opted-in users (phone + own CallMeBot key) whose
+// role is enabled for that type in the matrix. Returns {phone, apikey} pairs.
+export async function getRecipientsForType(cfg, type) {
+  const roles = await rolesForType(cfg, type);
+  if (!roles.length) return [];
+  const ph = roles.map((_, i) => `$${i + 1}`).join(',');
+  const { rows } = await query(
+    `SELECT phone, wa_apikey FROM users WHERE active=true AND notify=true AND phone IS NOT NULL AND phone <> ''
+       AND wa_apikey IS NOT NULL AND wa_apikey <> '' AND role IN (${ph})`, roles);
   const out = []; const seen = new Set();
-  const add = (phone, apikey) => {
-    const k = String(phone || '').replace(/[^0-9]/g, '');
-    if (k && apikey && !seen.has(k)) { seen.add(k); out.push({ phone, apikey }); }
-  };
-  const cfg = await getOpenWAConfig();
-  if (includeDefault && cfg.defaultSender && cfg.apiKeyEnc) { try { add(cfg.defaultSender, decrypt(cfg.apiKeyEnc)); } catch (e) {} }
-  // Role routing: shareholders are reports-only — excluded from operational alerts by
-  // default, and targeted explicitly with role:'shareholder' for "new report" notices.
-  let roleClause = " AND role <> 'shareholder'";
-  if (adminsOnly) roleClause = " AND role='admin'";
-  else if (role && /^[a-z]+$/.test(role)) roleClause = ` AND role='${role}'`;
-  const sql = `SELECT phone, wa_apikey FROM users WHERE active=true AND notify=true AND phone IS NOT NULL AND phone <> '' AND wa_apikey IS NOT NULL AND wa_apikey <> ''` + roleClause;
-  const { rows } = await query(sql);
-  for (const r of rows) { try { add(r.phone, decrypt(r.wa_apikey)); } catch (e) {} }
+  for (const r of rows) {
+    const k = String(r.phone || '').replace(/[^0-9]/g, '');
+    if (!k || seen.has(k)) continue;
+    try { const ak = decrypt(r.wa_apikey); if (ak) { seen.add(k); out.push({ phone: r.phone, apikey: ak }); } } catch (e) {}
+  }
   return out;
 }
 
-// Send one message to every routed recipient. Never throws.
-export async function notify(message, opts = {}) {
+// Send a message of `type` to every role enabled for it in the matrix. Never throws.
+export async function notify(message, { type } = {}) {
   try {
     const cfg = await getOpenWAConfig();
     if (!cfg.enabled) return { sent: 0, skipped: 'disabled' };
-    const tos = await getRecipients(opts);
+    if (!type) return { sent: 0, skipped: 'no-type' };
+    const tos = await getRecipientsForType(cfg, type);
     let sent = 0;
     for (const t of tos) { const r = await sendCallMeBot(t.phone, t.apikey, message); if (r.ok) sent++; }
     return { sent, total: tos.length };

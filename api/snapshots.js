@@ -46,7 +46,7 @@ export default async function handler(req, res) {
         const b64 = await buildMonthlyPdf({ equity: m.totalEquity, pnl30, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, best: p.best, worst: p.worst, byExchange: p.byExchange, dateLabel: label });
         const { rows } = await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at',
           ['monthly', label, Math.round(m.totalEquity), Math.round(pnl30), b64]);
-        await notify(REPORT_AVAILABLE, { role: 'shareholder', includeDefault: false });
+        await notify(REPORT_AVAILABLE, { type: 'new_report' });
         return res.status(200).json({ ok: true, report: { id: Number(rows[0].id), kind: 'monthly', periodLabel: label, equity: Math.round(m.totalEquity), pnl: Math.round(pnl30), createdAt: rows[0].created_at } });
       }
       return res.status(400).json({ error: 'unknown action' });

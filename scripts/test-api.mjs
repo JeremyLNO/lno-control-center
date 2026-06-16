@@ -73,18 +73,11 @@ ok('admin creates user', r.status === 201 && r.body.user.email === 'nina.test@ln
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'bad@gmail.com' } });
 ok('create user with non-@lno.company email rejected', r.status === 400, r.body);
 
-// 8. OpenWA config: set apiUrl + apiKey, ensure key is encrypted in DB + masked in response
-r = await call(openwa, { method: 'PUT', headers: authH, body: { apiUrl: 'https://wa.example.com', apiKey: 'super-secret-openwa-key-123', defaultSender: '+33612345678', enabled: true } });
-ok('openwa PUT ok, returns masked key (not raw)', r.status === 200 && r.body.config.hasApiKey && !JSON.stringify(r.body.config).includes('super-secret-openwa-key-123'), r.body);
-q = await db.query("SELECT value FROM app_config WHERE key='openwa'");
-const stored = JSON.stringify(q.rows[0].value);
-ok('OpenWA api key encrypted in DB (no plaintext)', !stored.includes('super-secret-openwa-key-123') && q.rows[0].value.apiKeyEnc.startsWith('v1:'), { stored });
+// 8. WhatsApp config: enable + a default notification matrix is returned (no default recipient)
+r = await call(openwa, { method: 'PUT', headers: authH, body: { enabled: true } });
+ok('openwa config has a notification matrix + no default recipient', r.status === 200 && r.body.config.notifMatrix && Array.isArray(r.body.config.notifMatrix.login) && !('defaultSender' in r.body.config), r.body.config);
 
-// 9. GET openwa never leaks the key
-r = await call(openwa, { method: 'GET', headers: authH });
-ok('GET openwa returns masked key only', r.status === 200 && r.body.config.hasApiKey && !JSON.stringify(r.body.config).includes('super-secret-openwa-key-123'));
-
-// ── Alerts: mock exchange klines + OpenWA sendText so the suite stays offline ──
+// ── Alerts: mock exchange klines + CallMeBot sends so the suite stays offline ──
 const sentMessages = [];
 globalThis.fetch = async (url, opts) => {
   const u = String(url);
@@ -94,8 +87,8 @@ globalThis.fetch = async (url, opts) => {
   const data = []; let t = 300 * 86400000, p = 600; for (let i = 0; i < 300; i++) { p *= 1 + Math.sin(i / 5) * 0.011; data.push([String(t), '0', '0', '0', String(p)]); t -= 86400000; } return { ok: true, json: async () => ({ data }) };
 };
 
-// configure WhatsApp (CallMeBot, enabled) + give admin a phone, key & notify so alerts route
-await call(openwa, { method: 'PUT', headers: authH, body: { apiKey: 'cmb-key-123', enabled: true, defaultSender: '+33600000000', drawdownPct: 1, pnlDayThreshold: 99999999 } });
+// configure WhatsApp (enabled) + give admin a phone, key & notify so type:'login'/'daily' route to admins
+await call(openwa, { method: 'PUT', headers: authH, body: { enabled: true, drawdownPct: 1, pnlDayThreshold: 99999999 } });
 r = await call(profile, { method: 'PATCH', headers: authH, body: { firstName: 'Admin', lastName: 'User', phone: '+33611111111', waApikey: 'cmb-user-key' } });
 ok('saving a CallMeBot key (encrypted) auto-enables notifications', r.status === 200 && r.body.user.hasWaApikey === true && r.body.user.notify === true, r.body.user);
 q = await db.query("SELECT wa_apikey FROM users WHERE email='admin@lno.company'");
@@ -172,6 +165,12 @@ await call(profile, { method: 'PATCH', headers: shH, body: { phone: '+3365555555
 sentMessages.length = 0;
 await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
 ok('shareholder gets a "new report available" WhatsApp on report generation', sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
+// per-type/per-role matrix: disabling new_report stops the notice (no shareholder gets it)
+await call(openwa, { method: 'PUT', headers: authH, body: { notifMatrix: { new_report: [] } } });
+sentMessages.length = 0;
+await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
+ok('disabling a type in the matrix stops that notification', !sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
+await call(openwa, { method: 'PUT', headers: authH, body: { notifMatrix: { new_report: ['shareholder'] } } }); // restore
 // weak password is rejected by the policy
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'weak@example.com', role: 'shareholder', password: 'short' } });
 ok('weak shareholder password rejected -> 400', r.status === 400 && /Password needs/.test(r.body.error || ''), r.body);

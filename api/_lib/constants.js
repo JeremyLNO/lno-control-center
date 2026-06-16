@@ -30,7 +30,18 @@ export const DEFAULT_EXCHANGES = [
 ];
 // OpenWA (open-wa.org) integration config. apiKey is stored encrypted, never returned in clear.
 // drawdownPct / pnlDayThreshold drive automated alerts; dailyReport toggles the daily summary.
-export const DEFAULT_OPENWA = { defaultSender:'', enabled:false, drawdownPct:10, pnlDayThreshold:-5000, dailyReport:true };
+// WhatsApp notification routing: which roles receive each message type.
+export const WA_ROLES = ['admin','operator','viewer','shareholder'];
+export const WA_MSG_TYPES = ['login','breach','daily','weekly','monthly','new_report'];
+export const DEFAULT_MATRIX = {
+  login:      ['admin'],
+  breach:     ['admin','operator'],
+  daily:      ['admin','operator'],
+  weekly:     ['admin','operator'],
+  monthly:    ['admin','operator'],
+  new_report: ['shareholder'],
+};
+export const DEFAULT_OPENWA = { enabled:false, drawdownPct:10, pnlDayThreshold:-5000, dailyReport:true, notifMatrix: DEFAULT_MATRIX };
 
 // Bots traded by the firm (static; mirrors the frontend). Used by the alert cron to
 // recompute portfolio metrics server-side from real exchange klines.

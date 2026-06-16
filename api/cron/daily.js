@@ -66,12 +66,12 @@ export default async function handler(req, res) {
       const code = Math.random().toString(36).slice(2, 6).toUpperCase();
       await query('INSERT INTO alerts (code,summary) VALUES ($1,$2)', [code, breaches.join(' · ')]);
       const msg = `🚨 LNO ALERT\n${breaches.join('\n')}\nEquity ${fUSD(m.totalEquity)} · PnL day ${fmt(m.pnlDay)}\n\nReply *ACK ${code}* to acknowledge.`;
-      sent.push({ type: 'alert', code, ...(await notify(msg)) });
+      sent.push({ type: 'alert', code, ...(await notify(msg, { type: 'breach' })) });
     }
     if ((cfg.dailyReport ?? true) && cfg.enabled) {
       const exp = Object.entries(p.byExchange).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${fUSD(v)}`).join(' · ');
       const msg = `📊 LNO daily report\nEquity ${fUSD(m.totalEquity)}\nPnL day ${fmt(m.pnlDay)} · week ${fmt(m.pnlWeek)}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% (${m.ddDurationDays}d)\nSharpe ${m.sharpe.toFixed(2)} · Sortino ${m.sortino.toFixed(2)}\nBest ${p.best.name} ${fmt(p.best.pnl)} · Worst ${p.worst.name} ${fmt(p.worst.pnl)}\nExposure: ${exp}`;
-      sent.push({ type: 'report', ...(await notify(msg)) });
+      sent.push({ type: 'report', ...(await notify(msg, { type: 'daily' })) });
     }
     // weekly (Mondays) + monthly (1st) — folded into the daily cron; ?force=weekly|monthly|all to test
     const force = req.query?.force;
@@ -79,18 +79,18 @@ export default async function handler(req, res) {
     const eq = p.series.map(x => x.equity);
     const pnlOver = (days) => eq[eq.length - 1] - eq[Math.max(0, eq.length - 1 - days)];
     if (cfg.enabled && (dt.getUTCDay() === 1 || force === 'weekly' || force === 'all')) {
-      sent.push({ type: 'weekly', ...(await notify(`📅 LNO weekly report\nEquity ${fUSD(m.totalEquity)}\nPnL 7d ${fmt(pnlOver(7))}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% · Sharpe ${m.sharpe.toFixed(2)}`)) });
+      sent.push({ type: 'weekly', ...(await notify(`📅 LNO weekly report\nEquity ${fUSD(m.totalEquity)}\nPnL 7d ${fmt(pnlOver(7))}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% · Sharpe ${m.sharpe.toFixed(2)}`, { type: 'weekly' })) });
     }
     if (cfg.enabled && (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all')) {
       const pnl30 = pnlOver(30);
-      sent.push({ type: 'monthly', ...(await notify(`🗓️ LNO monthly report\nEquity ${fUSD(m.totalEquity)}\nPnL 30d ${fmt(pnl30)}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% (${m.ddDurationDays}d) · Sharpe ${m.sharpe.toFixed(2)} · Sortino ${m.sortino.toFixed(2)}\nFull PDF: Control Center ▸ Reports`)) });
+      sent.push({ type: 'monthly', ...(await notify(`🗓️ LNO monthly report\nEquity ${fUSD(m.totalEquity)}\nPnL 30d ${fmt(pnl30)}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% (${m.ddDurationDays}d) · Sharpe ${m.sharpe.toFixed(2)} · Sortino ${m.sortino.toFixed(2)}\nFull PDF: Control Center ▸ Reports`, { type: 'monthly' })) });
       try {
         const label = new Date(dt).toISOString().slice(0, 10);
         const b64 = await buildMonthlyPdf({ equity: m.totalEquity, pnl30, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, best: p.best, worst: p.worst, byExchange: p.byExchange, dateLabel: label });
         // archive it so it can be re-downloaded from the Reports page
         try { await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5)', ['monthly', label, Math.round(m.totalEquity), Math.round(pnl30), b64]); } catch (e) {}
         // CallMeBot can't attach files — notify opted-in shareholders that a new report is available
-        const shr = await notify(REPORT_AVAILABLE, { role: 'shareholder', includeDefault: false });
+        const shr = await notify(REPORT_AVAILABLE, { type: 'new_report' });
         sent.push({ type: 'monthly-pdf', archived: true, bytes: b64.length, shareholdersNotified: shr.sent || 0 });
       } catch (e) { sent.push({ type: 'monthly-pdf', error: String(e.message || e) }); }
     }
