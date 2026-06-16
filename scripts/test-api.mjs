@@ -96,7 +96,7 @@ globalThis.fetch = async (url, opts) => {
 
 // configure WhatsApp (CallMeBot, enabled) + give admin a phone, key & notify so alerts route
 await call(openwa, { method: 'PUT', headers: authH, body: { apiKey: 'cmb-key-123', enabled: true, defaultSender: '+33600000000', drawdownPct: 1, pnlDayThreshold: 99999999 } });
-r = await call(profile, { method: 'PATCH', headers: authH, body: { phone: '+33611111111', waApikey: 'cmb-user-key' } });
+r = await call(profile, { method: 'PATCH', headers: authH, body: { firstName: 'Admin', lastName: 'User', phone: '+33611111111', waApikey: 'cmb-user-key' } });
 ok('saving a CallMeBot key (encrypted) auto-enables notifications', r.status === 200 && r.body.user.hasWaApikey === true && r.body.user.notify === true, r.body.user);
 q = await db.query("SELECT wa_apikey FROM users WHERE email='admin@lno.company'");
 ok('per-user CallMeBot key encrypted in DB (no plaintext)', !String(q.rows[0].wa_apikey || '').includes('cmb-user-key') && String(q.rows[0].wa_apikey).startsWith('v1:'), { v: q.rows[0].wa_apikey });
@@ -116,6 +116,7 @@ ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { met
 // every WhatsApp send is recorded in the admin-only message log
 r = await call(openwa, { method: 'GET', headers: authH, query: { log: '1' } });
 ok('admin WhatsApp log records sent messages', r.status === 200 && Array.isArray(r.body.log) && r.body.log.length >= 1 && typeof r.body.log[0].message === 'string', r.body.log && r.body.log.length);
+ok('WhatsApp log resolves the recipient name from the phone', r.body.log.some(l => l.recipientName === 'Admin User'), r.body.log.map(l => l.recipientName));
 
 // scoped per-bot rule + weekly/monthly reports (force)
 sentMessages.length = 0;

@@ -31,8 +31,18 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       if (req.query?.log) {
-        const { rows } = await query('SELECT id,phone,message,ok,status,response,created_at FROM wa_log ORDER BY created_at DESC LIMIT 100');
-        return res.status(200).json({ log: rows.map(r => ({ id: Number(r.id), phone: r.phone, message: r.message, ok: r.ok, status: r.status, response: r.response, createdAt: r.created_at })) });
+        // resolve the recipient's name from their phone (digits-only match); newest first
+        const { rows } = await query(`
+          SELECT w.id, w.phone, w.message, w.ok, w.status, w.response, w.created_at,
+            (SELECT NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), '')
+               FROM users u
+               WHERE u.phone <> '' AND regexp_replace(u.phone,'[^0-9]','','g') = regexp_replace(w.phone,'[^0-9]','','g')
+               LIMIT 1) AS recipient_name
+          FROM wa_log w ORDER BY w.created_at DESC LIMIT 100`);
+        return res.status(200).json({ log: rows.map(r => ({
+          id: Number(r.id), recipientName: r.recipient_name || null, phone: r.phone,
+          message: r.message, ok: r.ok, status: r.status, response: r.response, createdAt: r.created_at,
+        })) });
       }
       return res.status(200).json({ config: pub(await getCfg()) });
     }

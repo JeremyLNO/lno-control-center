@@ -1822,12 +1822,18 @@ function AdminOpenWA(){
   const [ddPct,setDdPct]=useState(10); const [pnlThr,setPnlThr]=useState(-5000); const [dailyReport,setDailyReport]=useState(true);
   const [rules,setRules]=useState([]);
   const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
-  const [log,setLog]=useState(null);
+  const [log,setLog]=useState(null); const [logQ,setLogQ]=useState(''); const [logStatus,setLogStatus]=useState('all');
   const loadLog=()=>api('openwa?log=1').then(r=>setLog(r.log||[])).catch(()=>setLog([]));
   useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); loadLog(); },[]);
   if(user.role!=='admin') return <Denied/>;
   const scopeOpts=[{value:'portfolio',label:'Portfolio'},...funds.map(f=>({value:'fund:'+f.id,label:'Fund · '+f.name})),...BASE_BOTS.map(b=>({value:'bot:'+b.id,label:'Bot · '+b.name}))];
   const metricOpts=[{value:'drawdown',label:'Max drawdown (%)'},{value:'pnlDay',label:'Daily PnL ($)'}];
+  const filteredLog=(log||[]).filter(l=>{
+    if(logStatus==='ok'&&!l.ok) return false;
+    if(logStatus==='fail'&&l.ok) return false;
+    if(logQ){ const q=logQ.toLowerCase(); if(!((l.recipientName||'').toLowerCase().includes(q)||(l.phone||'').toLowerCase().includes(q)||(l.message||'').toLowerCase().includes(q))) return false; }
+    return true;
+  });
   const updateRule=(i,patch)=>setRules(rs=>rs.map((r,j)=>j===i?{...r,...patch}:r));
   const addRule=()=>setRules(rs=>[...rs,{id:'r'+Date.now(),scope:'portfolio',metric:'drawdown',value:10,enabled:true}]);
   async function save(){ setBusy(true); try{ const body={defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
@@ -1901,18 +1907,28 @@ function AdminOpenWA(){
 
     <Card className="p-5 mt-4">
       <SectionTitle right={<button onClick={loadLog} className="text-xs text-slate-400 hover:text-navy flex items-center gap-1"><Icon name="refresh" className="w-3.5 h-3.5"/>Refresh</button>}>Sent messages</SectionTitle>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="relative flex-1 min-w-[200px]"><Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={logQ} onChange={e=>setLogQ(e.target.value)} placeholder="Filter by name, number or message…" className="w-full bg-slate-100 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"/></div>
+        <Select value={logStatus} onChange={setLogStatus} className="w-32" options={[{value:'all',label:'All'},{value:'ok',label:'Sent'},{value:'fail',label:'Failed'}]}/>
+      </div>
       {log===null? <div className="text-sm text-slate-400">Loading…</div>
-        : log.length===0? <div className="text-sm text-slate-400">No WhatsApp messages sent yet.</div>
-        : <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-            {log.map(l=><div key={l.id} className="flex items-start gap-2.5 border-b border-slate-50 pb-2 last:border-0">
-              <span className={`mt-1 w-2 h-2 rounded-full shrink-0 ${l.ok?'bg-success':'bg-danger'}`} title={l.ok?'Sent':'Failed'}/>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-navy whitespace-pre-wrap break-words line-clamp-2">{l.message}</div>
-                <div className="text-[11px] text-slate-400 mt-0.5"><span className="font-mono">{l.phone}</span> · {fmtDT(l.createdAt)}{l.ok?'':' · failed'}</div>
-                {!l.ok&&l.response&&<div className="text-[11px] text-danger mt-0.5 truncate" title={l.response}>{l.response}</div>}
-              </div>
-            </div>)}
-          </div>}
+        : filteredLog.length===0? <div className="text-sm text-slate-400 py-3">{log.length===0?'No WhatsApp messages sent yet.':'No messages match the filter.'}</div>
+        : <div className="overflow-x-auto"><table className="w-full text-sm">
+            <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500 text-left">
+              <th className="px-3 py-2 font-medium">Recipient</th>
+              <th className="px-3 py-2 font-medium">Number</th>
+              <th className="px-3 py-2 font-medium whitespace-nowrap">Sent at</th>
+              <th className="px-3 py-2 font-medium">Message</th>
+            </tr></thead>
+            <tbody>
+              {filteredLog.map(l=><tr key={l.id} className="border-b border-slate-50 align-top">
+                <td className="px-3 py-2 whitespace-nowrap"><span className="inline-flex items-center gap-2"><span className={`w-2 h-2 rounded-full shrink-0 ${l.ok?'bg-success':'bg-danger'}`} title={l.ok?'Sent':'Failed'}/>{l.recipientName||<span className="text-slate-400">—</span>}</span></td>
+                <td className="px-3 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{l.phone}</td>
+                <td className="px-3 py-2 text-slate-500 whitespace-nowrap text-xs">{fmtDT(l.createdAt)}</td>
+                <td className="px-3 py-2"><div className="text-navy line-clamp-2 max-w-md break-words">{l.message}</div>{!l.ok&&l.response&&<div className="text-[11px] text-danger truncate max-w-md" title={l.response}>{l.response}</div>}</td>
+              </tr>)}
+            </tbody>
+          </table></div>}
     </Card>
   </div>;
 }
