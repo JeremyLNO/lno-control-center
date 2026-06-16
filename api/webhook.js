@@ -1,7 +1,7 @@
-// OpenWA inbound webhook: a WhatsApp reply containing "ACK [code]" acknowledges an alert.
-// Configure OpenWA to POST message events to  /api/webhook?key=<WEBHOOK_SECRET>.
+// Inbound webhook: a WhatsApp reply containing "ACK [code]" acknowledges an alert.
+// NOTE: CallMeBot is send-only (no inbound), so this is currently unused — alerts are
+// acknowledged from the UI (the header bell). Kept for a future inbound-capable provider.
 import { query } from './_lib/db.js';
-import { getOpenWAConfig, sendOpenWA } from './_lib/notify.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
@@ -24,7 +24,6 @@ export default async function handler(req, res) {
         WHERE id=(SELECT id FROM alerts WHERE acked_at IS NULL ORDER BY created_at DESC LIMIT 1) RETURNING code`, [from || 'whatsapp'])).rows[0];
     }
     if (row) {
-      try { const cfg = await getOpenWAConfig(); if (from) await sendOpenWA(cfg, from, `✅ Alert ${row.code} acknowledged. Thank you.`); } catch {}
       return res.status(200).json({ ok: true, acked: row.code });
     }
     return res.status(200).json({ ok: true, ignored: 'no pending alert' });

@@ -1,11 +1,12 @@
-// OpenWA (open-wa.org) integration + alert rules (admin only).
+// WhatsApp alerts (CallMeBot) config + alert rules (admin only).
 //   GET  -> config (NEVER the raw api key: only masked + hasApiKey)
-//   PUT  -> update apiUrl / defaultSender / enabled / apiKey + alert rules
-//   POST -> {action:'send'|'test', to?, message?}  send a WhatsApp message
+//   PUT  -> update default recipient phone / api key / enabled + thresholds + alert rules
+//   POST -> {action:'test', message?}  send a test WhatsApp message to the default recipient
+// (config key stays 'openwa' for continuity; the provider is now CallMeBot)
 import { query } from './_lib/db.js';
 import { requireAdmin } from './_lib/auth.js';
 import { encrypt, decrypt, mask } from './_lib/crypto.js';
-import { sendOpenWA } from './_lib/notify.js';
+import { sendCallMeBot } from './_lib/notify.js';
 
 async function getCfg() {
   const { rows } = await query(`SELECT value FROM app_config WHERE key='openwa'`);
@@ -17,7 +18,7 @@ async function setCfg(v) {
 }
 function pub(cfg) {
   return {
-    apiUrl: cfg.apiUrl || '', sessionId: cfg.sessionId || '', defaultSender: cfg.defaultSender || '', enabled: !!cfg.enabled,
+    defaultSender: cfg.defaultSender || '', enabled: !!cfg.enabled,
     hasApiKey: !!cfg.apiKeyEnc, apiKeyMasked: cfg.apiKeyEnc ? mask(decrypt(cfg.apiKeyEnc)) : '',
     drawdownPct: cfg.drawdownPct ?? 10, pnlDayThreshold: cfg.pnlDayThreshold ?? -5000,
     dailyReport: cfg.dailyReport ?? true,
@@ -35,8 +36,6 @@ export default async function handler(req, res) {
       const cfg = await getCfg();
       const next = {
         ...cfg,
-        apiUrl: body.apiUrl ?? cfg.apiUrl ?? '',
-        sessionId: body.sessionId ?? cfg.sessionId ?? '',
         defaultSender: body.defaultSender ?? cfg.defaultSender ?? '',
         enabled: body.enabled ?? cfg.enabled ?? false,
         drawdownPct: body.drawdownPct ?? cfg.drawdownPct ?? 10,
@@ -52,13 +51,11 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const body = req.body || {};
       const cfg = await getCfg();
-      if (!cfg.enabled) return res.status(400).json({ error: 'OpenWA is disabled' });
-      if (!cfg.apiUrl) return res.status(400).json({ error: 'OpenWA API URL is not configured' });
-      if (!cfg.sessionId) return res.status(400).json({ error: 'OpenWA Session ID is not configured' });
-      const to = body.to || cfg.defaultSender;
-      if (!to) return res.status(400).json({ error: 'No recipient phone number' });
-      const message = body.message || 'LNO Control Center — OpenWA test message ✅';
-      const r = await sendOpenWA(cfg, to, message);
+      if (!cfg.enabled) return res.status(400).json({ error: 'WhatsApp alerts are disabled' });
+      if (!cfg.defaultSender) return res.status(400).json({ error: 'No recipient phone number configured' });
+      if (!cfg.apiKeyEnc) return res.status(400).json({ error: 'No CallMeBot API key configured' });
+      const message = body.message || 'LNO Control Center — WhatsApp test message ✅';
+      const r = await sendCallMeBot(cfg.defaultSender, decrypt(cfg.apiKeyEnc), message);
       return res.status(r.ok ? 200 : 502).json(r);
     }
     res.status(405).json({ error: 'method not allowed' });

@@ -766,7 +766,7 @@ const TOOLS_NAV=[
 const ADMIN_NAV=[
   ['users','Users','/admin/users'],
   ['link','Exchanges','/admin/exchanges'],
-  ['msg','OpenWA','/admin/openwa'],
+  ['msg','WhatsApp','/admin/openwa'],
   ['layers','Funds','/admin/funds'],
 ];
 const ACCT_NAV=[
@@ -965,7 +965,7 @@ function OnboardingCard(){
   const steps=[
     {label:'Change the default admin password', done:false, to:'/profile'},
     {label:'Connect your exchange API keys', done:false, to:'/admin/exchanges'},
-    {label:'Set up WhatsApp alerts (OpenWA)', done:!!openwaOk, to:'/admin/openwa'},
+    {label:'Set up WhatsApp alerts (CallMeBot)', done:!!openwaOk, to:'/admin/openwa'},
   ];
   const left=steps.filter(s=>!s.done).length;
   return <Card className="p-4 mb-5 border border-gold/30 bg-gold/5">
@@ -1818,31 +1818,32 @@ function ExchangeModal({modal,onClose,onSave}){
 function AdminOpenWA(){
   const {user,funds}=useApp();
   const [cfg,setCfg]=useState(null);
-  const [apiUrl,setApiUrl]=useState(''); const [sessionId,setSessionId]=useState(''); const [apiKey,setApiKey]=useState(''); const [defaultSender,setDefaultSender]=useState(''); const [enabled,setEnabled]=useState(false);
+  const [apiKey,setApiKey]=useState(''); const [defaultSender,setDefaultSender]=useState(''); const [enabled,setEnabled]=useState(false);
   const [ddPct,setDdPct]=useState(10); const [pnlThr,setPnlThr]=useState(-5000); const [dailyReport,setDailyReport]=useState(true);
   const [rules,setRules]=useState([]);
   const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
-  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setApiUrl(c.apiUrl); setSessionId(c.sessionId||''); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); },[]);
+  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setDefaultSender(c.defaultSender); setEnabled(c.enabled); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); },[]);
   if(user.role!=='admin') return <Denied/>;
   const scopeOpts=[{value:'portfolio',label:'Portfolio'},...funds.map(f=>({value:'fund:'+f.id,label:'Fund · '+f.name})),...BASE_BOTS.map(b=>({value:'bot:'+b.id,label:'Bot · '+b.name}))];
   const metricOpts=[{value:'drawdown',label:'Max drawdown (%)'},{value:'pnlDay',label:'Daily PnL ($)'}];
   const updateRule=(i,patch)=>setRules(rs=>rs.map((r,j)=>j===i?{...r,...patch}:r));
   const addRule=()=>setRules(rs=>[...rs,{id:'r'+Date.now(),scope:'portfolio',metric:'drawdown',value:10,enabled:true}]);
-  async function save(){ setBusy(true); try{ const body={apiUrl,sessionId,defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
+  async function save(){ setBusy(true); try{ const body={defaultSender,enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)}))}; if(apiKey) body.apiKey=apiKey; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
   async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } }
   async function runReport(){ setReport({state:'sending'}); try{ const r=await api('cron/daily',{method:'POST'}); const n=(r.sent||[]).reduce((a,s)=>a+(s.sent||0),0); setReport({state:'ok',msg:`Ran ✓ — ${n} message(s) delivered`}); }catch(e){ setReport({state:'err',msg:e.message}); } }
   return <div className="max-w-2xl">
-    <PageHead title="OpenWA" subtitle="Self-hosted WhatsApp gateway (rmyndharis/OpenWA) for system alerts"/>
+    <PageHead title="WhatsApp Alerts" subtitle="Send alerts to WhatsApp via CallMeBot — no server to host"/>
     <Card className="p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <div><div className="font-medium text-navy">Enable notifications</div><div className="text-xs text-slate-400">Master toggle for all OpenWA alerts</div></div>
+        <div><div className="font-medium text-navy">Enable notifications</div><div className="text-xs text-slate-400">Master toggle for all WhatsApp alerts</div></div>
         <Toggle on={enabled} onChange={setEnabled}/>
       </div>
       <div className="border-t border-slate-100 pt-4 space-y-3">
-        <Field label="OpenWA API URL" hint="Your always-on OpenWA gateway base URL (rmyndharis/OpenWA, default port 2785)"><Input value={apiUrl} onChange={e=>setApiUrl(e.target.value)} placeholder="https://wa.yourhost.com:2785"/></Field>
-        <Field label="Session ID" hint="The WhatsApp session you created & linked in the OpenWA dashboard"><Input value={sessionId} onChange={e=>setSessionId(e.target.value)} placeholder="sess_abc123"/></Field>
-        <Field label="API Key (X-API-Key)" hint={cfg&&cfg.hasApiKey? `Encrypted in DB (${cfg.apiKeyMasked}). Leave blank to keep.` : 'Stored encrypted in the database — never shown again'}><Input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={cfg&&cfg.hasApiKey?'•••••• (unchanged)':'OpenWA API key'}/></Field>
-        <Field label="Default Recipient" hint="Default phone number for alerts (international format)"><Input value={defaultSender} onChange={e=>setDefaultSender(e.target.value)} placeholder="+33 6 12 34 56 78"/></Field>
+        <div className="text-xs bg-navy/5 border border-slate-200 rounded-lg p-3 text-slate-600 leading-relaxed">
+          <span className="font-medium text-navy">Get your key once:</span> from the phone that should receive alerts, send the WhatsApp message <span className="font-mono bg-white px-1 rounded border border-slate-200">I allow callmebot to send me messages to this number</span> to <span className="font-mono">+34 644 51 95 23</span>. CallMeBot replies with your personal <span className="font-mono">apikey</span>. Enter your number + that key below. <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" rel="noopener" className="text-gold hover:underline">Instructions →</a>
+        </div>
+        <Field label="Your WhatsApp number" hint="The number that receives alerts (international format)"><Input value={defaultSender} onChange={e=>setDefaultSender(e.target.value)} placeholder="+33 6 12 34 56 78"/></Field>
+        <Field label="CallMeBot API key" hint={cfg&&cfg.hasApiKey? `Encrypted in DB (${cfg.apiKeyMasked}). Leave blank to keep.` : 'Stored encrypted in the database — never shown again'}><Input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={cfg&&cfg.hasApiKey?'•••••• (unchanged)':'e.g. 1234567'}/></Field>
       </div>
       <div className="flex items-center gap-3 pt-1 flex-wrap">
         <Btn onClick={save} disabled={busy}>{busy?'Saving…':'Save settings'}</Btn>
@@ -1884,7 +1885,7 @@ function AdminOpenWA(){
 
     <Card className="p-5 mt-4">
       <SectionTitle>How it works</SectionTitle>
-      <p className="text-sm text-slate-600 mb-4">OpenWA (<span className="font-mono text-xs bg-slate-100 px-1 rounded">@open-wa/wa-automate</span>) runs on your own always-on host and drives a real WhatsApp session. The Control Center backend calls its API to send alerts — the API key is <span className="font-medium">encrypted at rest</span> and never exposed to the browser. Alerts route to the default recipient plus every user who enabled WhatsApp notifications in their profile.</p>
+      <p className="text-sm text-slate-600 mb-4"><span className="font-mono text-xs bg-slate-100 px-1 rounded">CallMeBot</span> is a free hosted WhatsApp relay — <span className="font-medium">no server to run</span>. Each recipient opts in once and gets a personal API key; the Control Center backend sends a simple HTTPS request. Keys are <span className="font-medium">encrypted at rest</span> and never exposed to the browser. Alerts route to the recipient above plus every user who added their own number + key in their profile. <span className="text-slate-400">(Send-only: acknowledge alerts from the bell; the monthly PDF stays downloadable under Reports.)</span></p>
       <SectionTitle>Active alerts</SectionTitle>
       <ul className="text-sm text-slate-600 space-y-2">
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Login-failure alerts to admins (after 3 failed attempts)</li>
@@ -1978,7 +1979,7 @@ function ProfilePage(){
   const {user,setUser}=useApp();
   const [v,setV]=useState({firstName:user.firstName,lastName:user.lastName}); const [saved,setSaved]=useState(false);
   const [pw,setPw]=useState({cur:'',n1:'',n2:''}); const [pwMsg,setPwMsg]=useState(null);
-  const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||'');
+  const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||''); const [waKey,setWaKey]=useState('');
   const fileRef=useRef();
   async function patchSelf(patch){ try{ const r=await api('profile',{method:'PATCH',body:patch}); setUser(r.user); return true; }catch(e){ toast.error(e.message); return false; } }
   async function saveInfo(){ if(await patchSelf({firstName:v.firstName,lastName:v.lastName})){ setSaved(true); setTimeout(()=>setSaved(false),1800); } }
@@ -2025,10 +2026,14 @@ function ProfilePage(){
     <Card className="p-5">
       <SectionTitle>WhatsApp Notifications</SectionTitle>
       <div className="flex items-center justify-between mb-3">
-        <div><div className="text-sm font-medium text-navy">Receive notifications</div><div className="text-xs text-slate-400">The admin WhatsApp config must also be enabled to deliver</div></div>
+        <div><div className="text-sm font-medium text-navy">Receive notifications</div><div className="text-xs text-slate-400">WhatsApp alerts must also be enabled by an admin to deliver</div></div>
         <Toggle on={notify} onChange={x=>{setNotify(x);patchSelf({notify:x});}}/>
       </div>
-      <Field label="Your phone number"><Input value={phone} onChange={e=>setPhone(e.target.value)} onBlur={()=>patchSelf({phone})} placeholder="+33 6 12 34 56 78"/></Field>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Your phone number"><Input value={phone} onChange={e=>setPhone(e.target.value)} onBlur={()=>patchSelf({phone})} placeholder="+33 6 12 34 56 78"/></Field>
+        <Field label="Your CallMeBot API key" hint={user.hasWaApikey?'Saved (encrypted). Leave blank to keep.':'Get it once via WhatsApp — see below'}><Input type="password" value={waKey} onChange={e=>setWaKey(e.target.value)} onBlur={()=>{ if(waKey){ patchSelf({waApikey:waKey}); setWaKey(''); } }} placeholder={user.hasWaApikey?'•••••• (unchanged)':'e.g. 1234567'}/></Field>
+      </div>
+      <div className="text-[11px] text-slate-400 mt-2">To get your key once: from this phone, send the WhatsApp message <span className="font-mono">I allow callmebot to send me messages to this number</span> to <span className="font-mono">+34 644 51 95 23</span> — CallMeBot replies with your <span className="font-mono">apikey</span>.</div>
     </Card>
   </div>;
 }
@@ -2080,7 +2085,7 @@ function StatusPage(){
     {label:'Database', state:dbOk?'ok':'down', sub:dbOk?(lastSnap?`Last snapshot ${lastSnap.day}`:'Connected'):'Unreachable'},
     {label:'Exchange APIs', state:exDown.length?'down':exDegraded.length?'warn':'ok', sub:exDown.length?`${exDown.map(s=>s.ex).join(', ')} down`:exDegraded.length?`${exDegraded.length} degraded`:'Binance · Bybit · OKX OK'},
     {label:'Alerting', state:alerts==null?'neutral':'ok', sub:alerts==null?'Checking…':`${unacked.length} pending acknowledgement`},
-    ...(user.role==='admin'?[{label:'WhatsApp (OpenWA)', state:openwa==null?'neutral':openwa.enabled?(openwa.hasApiKey?'ok':'warn'):'neutral', sub:openwa===undefined?'Checking…':openwa===null?'—':openwa.enabled?(openwa.hasApiKey?'Enabled & configured':'Enabled · no API key'):'Disabled (optional)'}]:[]),
+    ...(user.role==='admin'?[{label:'WhatsApp (CallMeBot)', state:openwa==null?'neutral':openwa.enabled?(openwa.hasApiKey?'ok':'warn'):'neutral', sub:openwa===undefined?'Checking…':openwa===null?'—':openwa.enabled?(openwa.hasApiKey?'Enabled & configured':'Enabled · no API key'):'Disabled (optional)'}]:[]),
   ];
   const anyDown=checks.some(c=>c.state==='down'); const anyWarn=checks.some(c=>c.state==='warn');
   const overall=anyDown?['Degraded','bg-danger','text-danger']:anyWarn?['Partial outage','bg-amber-500','text-amber-600']:['All systems operational','bg-success','text-success'];
@@ -2298,7 +2303,7 @@ function ShortcutsModal({open,onClose,isAdmin}){
   const rows=[
     ['g a','Activity Dashboard'],['g r','Real-Time'],['g p','Prices'],['g t','Trades'],['g l','Activity Log'],
     ['g s','System Status'],['g i','Timeline'],
-    ...(isAdmin?[['g u','Admin · Users'],['g e','Admin · Exchanges'],['g w','Admin · OpenWA'],['g f','Admin · Funds']]:[]),
+    ...(isAdmin?[['g u','Admin · Users'],['g e','Admin · Exchanges'],['g w','Admin · WhatsApp'],['g f','Admin · Funds']]:[]),
     ['/','Focus search'],['?','Toggle this help'],['Esc','Close / blur field'],
   ];
   return <Modal open={open} onClose={onClose} title="Keyboard shortcuts">

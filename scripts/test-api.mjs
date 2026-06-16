@@ -88,15 +88,18 @@ ok('GET openwa returns masked key only', r.status === 200 && r.body.config.hasAp
 const sentMessages = [];
 globalThis.fetch = async (url, opts) => {
   const u = String(url);
-  if (u.includes('/messages/send-text') || u.includes('/messages/send-document')) { sentMessages.push(JSON.parse(opts.body)); return { ok: true, status: 200, json: async () => ({ messageId: 'm1', status: 'sent' }) }; }
+  if (u.includes('callmebot.com')) { sentMessages.push({ text: new URL(u).searchParams.get('text') || '' }); return { ok: true, status: 200, text: async () => 'Message queued.' }; }
   if (u.includes('binance.com')) { const a = []; let t = 1, p = 60000; for (let i = 0; i < 365; i++) { p *= 1 + Math.sin(i / 9) * 0.012; a.push([t, '0', '0', '0', String(p), '0']); t += 86400000; } return { ok: true, json: async () => a }; }
   if (u.includes('bybit.com')) { const list = []; let t = 365 * 86400000, p = 100; for (let i = 0; i < 365; i++) { p *= 1 + Math.cos(i / 7) * 0.01; list.push([String(t), '0', '0', '0', String(p)]); t -= 86400000; } return { ok: true, json: async () => ({ result: { list } }) }; }
   const data = []; let t = 300 * 86400000, p = 600; for (let i = 0; i < 300; i++) { p *= 1 + Math.sin(i / 5) * 0.011; data.push([String(t), '0', '0', '0', String(p)]); t -= 86400000; } return { ok: true, json: async () => ({ data }) };
 };
 
-// configure OpenWA (enabled) + give admin a phone & notify so alerts route
-await call(openwa, { method: 'PUT', headers: authH, body: { apiUrl: 'https://wa.test', sessionId: 'sess_test', apiKey: 'k', enabled: true, defaultSender: '+33600000000', drawdownPct: 1, pnlDayThreshold: 99999999 } });
-await call(profile, { method: 'PATCH', headers: authH, body: { phone: '+33611111111', notify: true } });
+// configure WhatsApp (CallMeBot, enabled) + give admin a phone, key & notify so alerts route
+await call(openwa, { method: 'PUT', headers: authH, body: { apiKey: 'cmb-key-123', enabled: true, defaultSender: '+33600000000', drawdownPct: 1, pnlDayThreshold: 99999999 } });
+r = await call(profile, { method: 'PATCH', headers: authH, body: { phone: '+33611111111', notify: true, waApikey: 'cmb-user-key' } });
+ok('user can save a personal CallMeBot key (encrypted)', r.status === 200 && r.body.user.hasWaApikey === true, r.body.user);
+q = await db.query("SELECT wa_apikey FROM users WHERE email='admin@lno.company'");
+ok('per-user CallMeBot key encrypted in DB (no plaintext)', !String(q.rows[0].wa_apikey || '').includes('cmb-user-key') && String(q.rows[0].wa_apikey).startsWith('v1:'), { v: q.rows[0].wa_apikey });
 
 // login-failure alert: 3 wrong attempts triggers a WhatsApp to admins
 sentMessages.length = 0;
@@ -118,9 +121,9 @@ await call(openwa, { method: 'PUT', headers: authH, body: { alertRules: [{ id: '
 r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'all' } });
 ok('scoped per-bot alert rule breach detected', r.body.breaches.some(b => /Alpha-BTC-Momentum/.test(b)), r.body.breaches);
 ok('weekly + monthly reports sent (force=all)', r.body.sent.some(s => s.type === 'weekly') && r.body.sent.some(s => s.type === 'monthly'), r.body.sent.map(s => s.type));
-// monthly PDF document sent + the PDF builder produces a valid PDF
+// monthly PDF is built + archived (CallMeBot can't attach files, so it's not WhatsApp-sent)
 const pdfPart = r.body.sent.find(s => s.type === 'monthly-pdf');
-ok('monthly PDF document sent via OpenWA', !!pdfPart && !pdfPart.error && pdfPart.sent >= 1, pdfPart);
+ok('monthly PDF built + archived (not WhatsApp-attached with CallMeBot)', !!pdfPart && !pdfPart.error && pdfPart.bytes > 0, pdfPart);
 const { buildMonthlyPdf } = await import('../api/_lib/report.js');
 const pdfB64 = await buildMonthlyPdf({ equity: 1e6, pnl30: 5000, maxDrawdownPct: -8, ddDurationDays: 12, sharpe: 1.2, sortino: 1.5, best: { name: 'X', pnl: 1000 }, worst: { name: 'Y', pnl: -500 }, byExchange: { Binance: 5e5, Bybit: 3e5 }, dateLabel: '2026-06-15' });
 ok('buildMonthlyPdf produces a valid %PDF', Buffer.from(pdfB64, 'base64').slice(0, 5).toString() === '%PDF-', pdfB64.slice(0, 8));

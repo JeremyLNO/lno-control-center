@@ -27,6 +27,8 @@ export async function migrate() {
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
+  // per-user CallMeBot api key (encrypted) — for personal WhatsApp alerts
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wa_apikey TEXT`);
   await query(`CREATE TABLE IF NOT EXISTS funds (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

@@ -2,6 +2,7 @@
 // editable here (username is admin-only; email is read-only).
 import { query } from './_lib/db.js';
 import { requireAuth, sanitizeUser } from './_lib/auth.js';
+import { encrypt } from './_lib/crypto.js';
 
 export default async function handler(req, res) {
   const a = requireAuth(req, res); if (!a) return;
@@ -13,6 +14,8 @@ export default async function handler(req, res) {
     for (const k of Object.keys(map)) {
       if (k in body) { sets.push(`${map[k]}=$${i}`); vals.push(body[k]); i++; }
     }
+    // personal CallMeBot key — stored encrypted; blank means "keep unchanged"
+    if (typeof body.waApikey === 'string' && body.waApikey !== '') { sets.push(`wa_apikey=$${i}`); vals.push(encrypt(body.waApikey)); i++; }
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     vals.push(a.id);
     await query(`UPDATE users SET ${sets.join(',')} WHERE id=$${i}`, vals);

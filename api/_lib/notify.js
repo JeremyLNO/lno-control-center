@@ -1,70 +1,51 @@
-// OpenWA send + recipient routing. Used by login-failure alerts, the alert cron,
-// and the manual test button. The api key is decrypted only here, server-side.
-//
-// Targets the OpenWA gateway at github.com/rmyndharis/OpenWA (NestJS, whatsapp-web.js):
-// session-scoped REST API, `X-API-Key` auth, JSON bodies.
-//   text:     POST {apiUrl}/api/sessions/{sessionId}/messages/send-text     { chatId, text }
-//   document: POST {apiUrl}/api/sessions/{sessionId}/messages/send-document { chatId, document:{base64}, filename, caption }
+// WhatsApp alerts via CallMeBot (https://www.callmebot.com/blog/free-api-whatsapp-messages/).
+// No server to host: each recipient opts in once and gets their own personal api key,
+// then we send a plain HTTPS GET. The api key is decrypted only here, server-side.
+//   GET https://api.callmebot.com/whatsapp.php?phone=<intl-no-plus>&text=<urlenc>&apikey=<key>
+// Limitations: send-only (no inbound/ACK replies) and text-only (no file attachments).
 import { query } from './db.js';
 import { decrypt } from './crypto.js';
+
+const CALLMEBOT_URL = 'https://api.callmebot.com/whatsapp.php';
 
 export async function getOpenWAConfig() {
   const { rows } = await query("SELECT value FROM app_config WHERE key='openwa'");
   return rows[0] ? rows[0].value : {};
 }
 
-function sessionUrl(cfg, path) {
-  return cfg.apiUrl.replace(/\/$/, '') + '/api/sessions/' + encodeURIComponent(cfg.sessionId) + path;
-}
-function authHeaders(cfg) {
-  const key = cfg.apiKeyEnc ? decrypt(cfg.apiKeyEnc) : '';
-  return { 'Content-Type': 'application/json', ...(key ? { 'X-API-Key': key } : {}) };
-}
-
-export async function sendOpenWA(cfg, to, message) {
-  if (!cfg || !cfg.enabled) return { ok: false, skipped: 'disabled' };
-  if (!cfg.apiUrl) return { ok: false, skipped: 'no-url' };
-  if (!cfg.sessionId) return { ok: false, skipped: 'no-session' };
-  const num = String(to || '').replace(/[^0-9]/g, '');
-  if (!num) return { ok: false, skipped: 'no-recipient' };
+// Low-level send to one recipient (phone + that recipient's CallMeBot api key).
+export async function sendCallMeBot(phone, apikey, message) {
+  const num = String(phone || '').replace(/[^0-9]/g, '');
+  if (!num) return { ok: false, skipped: 'no-phone' };
+  if (!apikey) return { ok: false, skipped: 'no-apikey' };
   try {
-    const r = await fetch(sessionUrl(cfg, '/messages/send-text'), {
-      method: 'POST',
-      headers: authHeaders(cfg),
-      body: JSON.stringify({ chatId: num + '@c.us', text: message }),
-    });
+    const url = `${CALLMEBOT_URL}?phone=${num}&text=${encodeURIComponent(message)}&apikey=${encodeURIComponent(apikey)}`;
+    const r = await fetch(url);
     return { ok: r.ok, status: r.status };
   } catch (e) {
     return { ok: false, error: String(e.message || e) };
   }
 }
 
-// Send a file (e.g. PDF report) as a WhatsApp document.
-export async function sendFile(cfg, to, base64, filename, caption) {
-  if (!cfg || !cfg.enabled || !cfg.apiUrl || !cfg.sessionId) return { ok: false, skipped: 'disabled' };
-  const num = String(to || '').replace(/[^0-9]/g, '');
-  if (!num) return { ok: false, skipped: 'no-recipient' };
-  try {
-    const r = await fetch(sessionUrl(cfg, '/messages/send-document'), {
-      method: 'POST',
-      headers: authHeaders(cfg),
-      body: JSON.stringify({ chatId: num + '@c.us', document: { base64: 'data:application/pdf;base64,' + base64 }, filename, caption: caption || '' }),
-    });
-    return { ok: r.ok, status: r.status };
-  } catch (e) { return { ok: false, error: String(e.message || e) }; }
-}
+// CallMeBot is text-only — no document attachment. Kept so callers don't break; the
+// monthly PDF stays downloadable from the Reports page.
+export async function sendFile() { return { ok: false, skipped: 'callmebot-no-files' }; }
 
-// Recipients = default recipient + active users who opted in (notify=true with a phone).
-// adminsOnly restricts the per-user set to admins (used for security alerts).
+// Recipients = the default recipient (config phone + key) + every active user who opted
+// in (notify=true) AND saved a phone + their own CallMeBot key. Returns {phone, apikey} pairs.
 export async function getRecipients({ adminsOnly = false, includeDefault = true } = {}) {
-  const out = new Set();
+  const out = []; const seen = new Set();
+  const add = (phone, apikey) => {
+    const k = String(phone || '').replace(/[^0-9]/g, '');
+    if (k && apikey && !seen.has(k)) { seen.add(k); out.push({ phone, apikey }); }
+  };
   const cfg = await getOpenWAConfig();
-  if (includeDefault && cfg.defaultSender) out.add(cfg.defaultSender);
-  const sql = `SELECT phone FROM users WHERE active=true AND notify=true AND phone IS NOT NULL AND phone <> ''`
+  if (includeDefault && cfg.defaultSender && cfg.apiKeyEnc) { try { add(cfg.defaultSender, decrypt(cfg.apiKeyEnc)); } catch (e) {} }
+  const sql = `SELECT phone, wa_apikey FROM users WHERE active=true AND notify=true AND phone IS NOT NULL AND phone <> '' AND wa_apikey IS NOT NULL AND wa_apikey <> ''`
     + (adminsOnly ? " AND role='admin'" : '');
   const { rows } = await query(sql);
-  rows.forEach(r => { if (r.phone) out.add(r.phone); });
-  return [...out];
+  for (const r of rows) { try { add(r.phone, decrypt(r.wa_apikey)); } catch (e) {} }
+  return out;
 }
 
 // Send one message to every routed recipient. Never throws.
@@ -74,7 +55,7 @@ export async function notify(message, opts = {}) {
     if (!cfg.enabled) return { sent: 0, skipped: 'disabled' };
     const tos = await getRecipients(opts);
     let sent = 0;
-    for (const to of tos) { const r = await sendOpenWA(cfg, to, message); if (r.ok) sent++; }
+    for (const t of tos) { const r = await sendCallMeBot(t.phone, t.apikey, message); if (r.ok) sent++; }
     return { sent, total: tos.length };
   } catch (e) {
     return { sent: 0, error: String(e.message || e) };
