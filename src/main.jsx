@@ -1839,8 +1839,11 @@ function AdminOpenWA(){
         <Toggle on={enabled} onChange={setEnabled}/>
       </div>
       <div className="border-t border-slate-100 pt-4 space-y-3">
-        <div className="text-xs bg-navy/5 border border-slate-200 rounded-lg p-3 text-slate-600 leading-relaxed">
-          <span className="font-medium text-navy">Get your key once:</span> from the phone that should receive alerts, send the WhatsApp message <span className="font-mono bg-white px-1 rounded border border-slate-200">I allow callmebot to send me messages to this number</span> to <span className="font-mono">+34 644 51 95 23</span>. CallMeBot replies with your personal <span className="font-mono">apikey</span>. Enter your number + that key below. <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" rel="noopener" className="text-gold hover:underline">Instructions →</a>
+        <div className="text-xs bg-navy/5 border border-slate-200 rounded-lg p-3 text-slate-600 space-y-1">
+          <div className="font-medium text-navy">Activate alerts for the recipient below (once):</div>
+          <div><span className="font-semibold">1.</span> Add <span className="font-mono">+34 611 021 695</span> to the phone's contacts (name it however you like).</div>
+          <div><span className="font-semibold">2.</span> On WhatsApp, send <span className="font-mono bg-white px-1 rounded border border-slate-200">I allow callmebot to send me messages</span> to that contact.</div>
+          <div><span className="font-semibold">3.</span> Enter the number + the API key it replies with below, then Save. <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" rel="noopener" className="text-gold hover:underline">More →</a></div>
         </div>
         <Field label="Your WhatsApp number" hint="The number that receives alerts (international format)"><Input value={defaultSender} onChange={e=>setDefaultSender(e.target.value)} placeholder="+33 6 12 34 56 78"/></Field>
         <Field label="CallMeBot API key" hint={cfg&&cfg.hasApiKey? `Encrypted in DB (${cfg.apiKeyMasked}). Leave blank to keep.` : 'Stored encrypted in the database — never shown again'}><Input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={cfg&&cfg.hasApiKey?'•••••• (unchanged)':'e.g. 1234567'}/></Field>
@@ -2033,7 +2036,12 @@ function ProfilePage(){
         <Field label="Your phone number"><Input value={phone} onChange={e=>setPhone(e.target.value)} onBlur={()=>patchSelf({phone})} placeholder="+33 6 12 34 56 78"/></Field>
         <Field label="Your CallMeBot API key" hint={user.hasWaApikey?'Saved (encrypted). Leave blank to keep.':'Get it once via WhatsApp — see below'}><Input type="password" value={waKey} onChange={e=>setWaKey(e.target.value)} onBlur={()=>{ if(waKey){ patchSelf({waApikey:waKey}); setWaKey(''); } }} placeholder={user.hasWaApikey?'•••••• (unchanged)':'e.g. 1234567'}/></Field>
       </div>
-      <div className="text-[11px] text-slate-400 mt-2">To get your key once: from this phone, send the WhatsApp message <span className="font-mono">I allow callmebot to send me messages to this number</span> to <span className="font-mono">+34 644 51 95 23</span> — CallMeBot replies with your <span className="font-mono">apikey</span>.</div>
+      <div className="text-[11px] text-slate-500 mt-2 space-y-1 bg-navy/5 border border-slate-200 rounded-lg p-3">
+        <div className="font-medium text-slate-600">Activate your WhatsApp alerts (once):</div>
+        <div><span className="font-semibold">1.</span> Add <span className="font-mono">+34 611 021 695</span> to your phone contacts (name it however you like).</div>
+        <div><span className="font-semibold">2.</span> On WhatsApp, send <span className="font-mono bg-white px-1 rounded border border-slate-200">I allow callmebot to send me messages</span> to that contact.</div>
+        <div><span className="font-semibold">3.</span> Paste the API key it replies with into the field above — you'll then get a welcome message confirming it works.</div>
+      </div>
     </Card>
   </div>;
 }

@@ -54,7 +54,7 @@ export default async function handler(req, res) {
       if (!cfg.enabled) return res.status(400).json({ error: 'WhatsApp alerts are disabled' });
       if (!cfg.defaultSender) return res.status(400).json({ error: 'No recipient phone number configured' });
       if (!cfg.apiKeyEnc) return res.status(400).json({ error: 'No CallMeBot API key configured' });
-      const message = body.message || 'LNO Control Center — WhatsApp test message ✅';
+      const message = body.message || '🎉 Congratulations! You are now set up to receive LNO Control Center alerts on WhatsApp. ✅';
       const r = await sendCallMeBot(cfg.defaultSender, decrypt(cfg.apiKeyEnc), message);
       return res.status(r.ok ? 200 : 502).json(r);
     }

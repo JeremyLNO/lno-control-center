@@ -100,6 +100,7 @@ r = await call(profile, { method: 'PATCH', headers: authH, body: { phone: '+3361
 ok('user can save a personal CallMeBot key (encrypted)', r.status === 200 && r.body.user.hasWaApikey === true, r.body.user);
 q = await db.query("SELECT wa_apikey FROM users WHERE email='admin@lno.company'");
 ok('per-user CallMeBot key encrypted in DB (no plaintext)', !String(q.rows[0].wa_apikey || '').includes('cmb-user-key') && String(q.rows[0].wa_apikey).startsWith('v1:'), { v: q.rows[0].wa_apikey });
+ok('user gets a welcome WhatsApp when they save their key', sentMessages.some(m => /Welcome to LNO Control Center/i.test(m.text)), sentMessages.map(m => m.text));
 
 // login-failure alert: 3 wrong attempts triggers a WhatsApp to admins
 sentMessages.length = 0;
