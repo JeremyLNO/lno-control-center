@@ -1585,13 +1585,29 @@ function LogsPage(){
 /* ============================================================
    ADMIN — USERS
    ============================================================ */
+// Recent sign-in audit for one user (timestamp · method · IP), loaded on expand.
+function UserLoginHistory({userId}){
+  const [rows,setRows]=useState(null);
+  useEffect(()=>{ let alive=true; api('users?logins='+encodeURIComponent(userId)).then(r=>{ if(alive)setRows(r.logins||[]); }).catch(()=>{ if(alive)setRows([]); }); return ()=>{alive=false;}; },[userId]);
+  if(rows===null) return <div className="text-xs text-slate-400">Loading…</div>;
+  if(!rows.length) return <div className="text-xs text-slate-400">No sign-ins recorded yet.</div>;
+  return <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
+    {rows.map((l,i)=><div key={i} className="flex items-center justify-between gap-3 text-xs">
+      <span className="text-slate-500 whitespace-nowrap">{fmtDT(l.createdAt)}</span>
+      <span className="text-[10px] uppercase tracking-wide text-slate-400">{l.method}</span>
+      <span className="font-mono text-slate-400 truncate">{l.ip||'—'}</span>
+    </div>)}
+  </div>;
+}
 function AdminUsers(){
   const {user}=useApp();
   const [users,setUsers]=useState([]);
   const [exp,setExp]=useState(null); const [add,setAdd]=useState(false); const [del,setDel]=useState(null); const [editName,setEditName]=useState(null); const [nameVal,setNameVal]=useState('');
   const [sel,setSel]=useState(()=>new Set()); const [bulkDel,setBulkDel]=useState(false);
-  useEffect(()=>{ if(user.role==='admin') api('users').then(r=>setUsers(r.users||[])).catch(()=>{}); },[]);
+  // refetch periodically so the online lights + last-seen stay current
+  useEffect(()=>{ if(user.role!=='admin') return; const load=()=>api('users').then(r=>setUsers(r.users||[])).catch(()=>{}); load(); const iv=setInterval(load,30000); return ()=>clearInterval(iv); },[]);
   if(user.role!=='admin') return <Denied/>;
+  const isOnline=(u)=> u.lastSeenAt && (Date.now()-new Date(u.lastSeenAt).getTime() < 150000); // active within 2.5 min
   const up=async(id,patch)=>{ try{ const r=await api('users',{method:'PATCH',body:{id,...patch}}); setUsers(us=>us.map(u=>u.id===id?r.user:u)); }catch(e){ toast.error(e.message); } };
   const toggleSel=(id)=>setSel(s=>{ const n=new Set(s); n.has(id)?n.delete(id):n.add(id); return n; });
   const ids=[...sel];
@@ -1635,6 +1651,11 @@ function AdminUsers(){
               <Badge className={u.role==='admin'?'bg-gold/15 text-gold':u.role==='operator'?'bg-blue-100 text-blue-700':u.role==='shareholder'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-600'}>{u.role}</Badge>
             </div>
             <div className="text-xs text-slate-400 truncate">@{u.username} · {u.email}</div>
+            <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5 truncate">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline(u)?'bg-success pulse-dot':'bg-slate-300'}`}/>
+              <span className={isOnline(u)?'text-success font-medium':''}>{isOnline(u)?'Online':(u.lastLoginAt?`Last sign-in ${fmtDT(u.lastLoginAt)}`:'Never signed in')}</span>
+              {u.lastIp&&<span className="font-mono text-slate-400">· {u.lastIp}</span>}
+            </div>
           </div>
           <StatusPill status={u.active?'active':'inactive'}/>
           <Icon name="chevdown" className={`w-4 h-4 text-slate-400 transition ${exp===u.id?'rotate-180':''}`}/>
@@ -1658,6 +1679,11 @@ function AdminUsers(){
                 <input type="checkbox" disabled={u.role==='admin'} checked={u.role==='admin'||u.permissions.includes(p)} onChange={e=>up(u.id,{permissions:e.target.checked?[...u.permissions,p]:u.permissions.filter(x=>x!==p)})} className="accent-navy w-4 h-4"/>{l}
               </label>)}
             </div>
+          </div>
+          <div>
+            <div className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-2">Recent sign-ins
+              {u.lastIp&&<span className="text-[11px] text-slate-400 font-normal">· last from <span className="font-mono">{u.lastIp}</span></span>}</div>
+            <UserLoginHistory userId={u.id}/>
           </div>
           <div className="flex justify-end pt-1">
             <Btn variant="danger" size="sm" disabled={u.id===user.id} onClick={()=>setDel(u)}><Icon name="trash" className="w-3.5 h-3.5"/>Delete user</Btn>
@@ -2347,6 +2373,14 @@ function Root(){
     window.addEventListener('lno:unauthorized', onUnauth);
     return ()=>window.removeEventListener('lno:unauthorized', onUnauth);
   },[]);
+
+  // presence heartbeat: keep last-seen fresh so the admin Users page shows who's online
+  useEffect(()=>{
+    if(!user) return;
+    const ping=()=>api('auth',{method:'POST',body:{action:'heartbeat'}}).catch(()=>{});
+    const iv=setInterval(ping,60000);
+    return ()=>clearInterval(iv);
+  },[user]);
 
   // funds are read by many pages (Activity/Realtime) — load once authed
   useEffect(()=>{

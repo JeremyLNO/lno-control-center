@@ -23,6 +23,10 @@ export async function migrate() {
   )`);
   // how each account authenticates ('password' | 'google'); added idempotently for existing DBs
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'password'`);
+  // login audit: last sign-in time + IP, last-seen (for the online indicator)
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
   await query(`CREATE TABLE IF NOT EXISTS funds (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -60,6 +64,15 @@ export async function migrate() {
     created_at TIMESTAMPTZ DEFAULT now(),
     acked_at TIMESTAMPTZ,
     acked_by TEXT
+  )`);
+  // sign-in audit trail (one row per successful login, with IP + method)
+  await query(`CREATE TABLE IF NOT EXISTS login_events (
+    id BIGSERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    ip TEXT,
+    method TEXT NOT NULL DEFAULT 'password',
+    created_at TIMESTAMPTZ DEFAULT now()
   )`);
   // generated report archive (PDF kept as base64 so it can be re-downloaded)
   await query(`CREATE TABLE IF NOT EXISTS reports (

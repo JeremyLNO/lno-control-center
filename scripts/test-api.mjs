@@ -172,6 +172,17 @@ ok('non-admin cannot generate a report -> 403', r.status === 403, r.status);
 r = await call(snapshots, { method: 'GET', headers: opH, query: { reports: 'list' } });
 ok('any authenticated user can list the report archive', r.status === 200 && Array.isArray(r.body.reports), r.status);
 
+// login audit: IP + last-login recorded, heartbeat updates last-seen, history endpoint
+r = await call(auth, { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }, body: { action: 'login', username: 'admin', password: 'admin' } });
+ok('login records client IP + last-login on the user', r.status === 200 && r.body.user.lastIp === '203.0.113.7' && !!r.body.user.lastLoginAt, r.body.user);
+const hbH = { authorization: 'Bearer ' + r.body.token };
+r = await call(auth, { method: 'POST', headers: { ...hbH, 'x-forwarded-for': '198.51.100.4' }, body: { action: 'heartbeat' } });
+ok('presence heartbeat -> 200', r.status === 200 && r.body.ok === true, r.body);
+r = await call(users, { method: 'GET', headers: authH });
+const adminRow = r.body.users.find(u => u.username === 'admin');
+r = await call(users, { method: 'GET', headers: authH, query: { logins: adminRow.id } });
+ok('per-user sign-in history lists the recorded IP + method', r.status === 200 && r.body.logins.some(l => l.ip === '203.0.113.7' && l.method === 'password'), r.body.logins);
+
 // Sign in with Google — verification stubbed (real flow verifies the Google JWKS signature).
 globalThis.__GOOGLE_VERIFY__ = async (cred) => JSON.parse(Buffer.from(cred, 'base64').toString());
 const gcred = (o) => Buffer.from(JSON.stringify(o)).toString('base64');

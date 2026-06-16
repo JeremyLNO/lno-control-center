@@ -9,6 +9,11 @@ export default async function handler(req, res) {
   const a = requireAdmin(req, res); if (!a) return;
   try {
     if (req.method === 'GET') {
+      if (req.query?.logins) {
+        let rows = [];
+        try { rows = (await query('SELECT username,ip,method,created_at FROM login_events WHERE user_id=$1 ORDER BY created_at DESC LIMIT 12', [req.query.logins])).rows; } catch (e) {}
+        return res.status(200).json({ logins: rows.map(r => ({ ip: r.ip, method: r.method, createdAt: r.created_at })) });
+      }
       const { rows } = await query('SELECT * FROM users ORDER BY created_at ASC');
       return res.status(200).json({ users: rows.map(sanitizeUser) });
     }

@@ -51,6 +51,13 @@ export function requireAdmin(req, res) {
   return a;
 }
 
+// Best-effort client IP (Vercel sets x-forwarded-for; falls back to the socket).
+export function clientIp(req) {
+  const xff = req.headers?.['x-forwarded-for'] || req.headers?.['X-Forwarded-For'];
+  if (xff) return String(xff).split(',')[0].trim();
+  return req.headers?.['x-real-ip'] || (req.socket && req.socket.remoteAddress) || null;
+}
+
 // Strip sensitive fields before sending a user to the client.
 export function sanitizeUser(row) {
   if (!row) return null;
@@ -61,5 +68,6 @@ export function sanitizeUser(row) {
     permissions: row.permissions || [],
     avatar: row.avatar || null, phone: row.phone || '', notify: !!row.notify,
     authProvider: row.auth_provider || 'password',
+    lastLoginAt: row.last_login_at || null, lastIp: row.last_ip || null, lastSeenAt: row.last_seen_at || null,
   };
 }
