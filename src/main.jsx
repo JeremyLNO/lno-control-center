@@ -1101,8 +1101,9 @@ function ActivityPage({botId}){
     </Card>
 
     {/* Period summary */}
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
-      <Card className="p-4"><div className="text-xs text-slate-500">Period PnL</div><div className={`text-xl font-bold mt-1 ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)}</div><div className="mt-1"><TrendBadge pct={series.length>1?periodPnl/series[0].equity*100:0}/></div></Card>
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <Card className="p-4"><div className="text-xs text-slate-500">Period PnL</div><div className={`text-xl font-bold mt-1 tnum ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)}</div></Card>
+      <Card className="p-4"><div className="text-xs text-slate-500">Period PnL %</div><div className={`text-xl font-bold mt-1 tnum ${clsPnl(periodPnl)}`}>{fmtPct(periodPnlPct)}</div></Card>
       <Card className="p-4"><div className="text-xs text-slate-500">Win Rate</div><div className="text-xl font-bold mt-1 text-navy">{closedRange.length?fmtPctPlain(winRate):'—'}</div><div className="text-xs text-slate-400 mt-1">prev: {prevClosed.length?fmtPctPlain(prevWin):'—'}</div></Card>
       <Card className="p-4"><div className="text-xs text-slate-500">Total Trades</div><div className="text-xl font-bold mt-1 text-navy">{rangeTrades.length}</div><div className="text-xs text-slate-400 mt-1">prev: {prevTrades.length}</div></Card>
     </div>
