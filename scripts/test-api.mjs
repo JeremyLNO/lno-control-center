@@ -149,10 +149,21 @@ ok('archived report downloads as a valid %PDF', r.status === 200 && Buffer.from(
 r = await call(snapshots, { method: 'GET', query: { reports: 'list' } });
 ok('report archive requires auth -> 401', r.status === 401, r.status);
 
-// shareholder role — dashboard + read-only reports, nothing else
-r = await call(users, { method: 'POST', headers: authH, body: { username: 'invest.or', email: 'invest.or@lno.company', role: 'shareholder' } });
+// shareholder role — admin-created, EXTERNAL email, policy-checked password
+r = await call(users, { method: 'POST', headers: authH, body: { username: 'invest.or', email: 'investor@example.com', role: 'shareholder', password: 'Str0ng#Passw0rd!' } });
+ok('shareholder created with external email + password (auth_provider=password)',
+  r.status === 201 && r.body.user.authProvider === 'password' && r.body.user.email === 'investor@example.com', r.body.user);
 ok('shareholder role grants exactly [view_activity, view_reports]',
   r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_reports']), r.body.user && r.body.user.permissions);
+// the shareholder can sign in with username + that password
+r = await call(auth, { method: 'POST', body: { action: 'login', username: 'invest.or', password: 'Str0ng#Passw0rd!' } });
+ok('shareholder signs in with username + password', r.status === 200 && !!r.body.token, r.status);
+// weak password is rejected by the policy
+r = await call(users, { method: 'POST', headers: authH, body: { username: 'weak.holder', email: 'weak@example.com', role: 'shareholder', password: 'short' } });
+ok('weak shareholder password rejected -> 400', r.status === 400 && /Password needs/.test(r.body.error || ''), r.body);
+// internal roles still must use an @lno.company email (Google)
+r = await call(users, { method: 'POST', headers: authH, body: { username: 'ext.viewer', email: 'someone@gmail.com', role: 'viewer' } });
+ok('non-shareholder external email rejected -> 400', r.status === 400 && /@lno\.company/.test(r.body.error || ''), r.body);
 // non-admin (operator) can read the archive but cannot generate a report
 r = await call(auth, { method: 'POST', body: { action: 'login', username: 'sophie.ops', password: 'admin' } });
 const opH = { authorization: 'Bearer ' + r.body.token };

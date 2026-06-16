@@ -1,6 +1,6 @@
 // Auth: GET = current user (me); POST {action:login|google|logout|changePassword}.
 import { query } from './_lib/db.js';
-import { verifyPassword, signToken, hashPassword, requireAuth, sanitizeUser } from './_lib/auth.js';
+import { verifyPassword, signToken, hashPassword, requireAuth, sanitizeUser, passwordIssues } from './_lib/auth.js';
 import { verifyGoogleToken, ALLOWED_DOMAIN } from './_lib/google.js';
 import { ROLE_PERMS } from './_lib/constants.js';
 import { notify } from './_lib/notify.js';
@@ -72,7 +72,8 @@ export default async function handler(req, res) {
 
       if (action === 'changePassword') {
         const a = requireAuth(req, res); if (!a) return;
-        if (!body.next) return res.status(400).json({ error: 'New password must not be empty' });
+        const pwIssues = passwordIssues(body.next);
+        if (pwIssues.length) return res.status(400).json({ error: 'Password needs ' + pwIssues.join(', ') });
         const { rows } = await query('SELECT * FROM users WHERE id=$1', [a.id]);
         const u = rows[0];
         if (!u || !await verifyPassword(body.current, u.password_hash))

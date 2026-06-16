@@ -1,7 +1,8 @@
-// User administration (admin only). Passwords are never accepted/returned here —
-// new users get a bcrypt-hashed default password server-side.
+// User administration (admin only). Internal roles sign in with Google (@lno.company,
+// no usable password). Shareholders have EXTERNAL emails so an admin creates them with a
+// policy-checked password (they can't use Google sign-in).
 import { query } from './_lib/db.js';
-import { requireAdmin, hashPassword, sanitizeUser } from './_lib/auth.js';
+import { requireAdmin, hashPassword, sanitizeUser, passwordIssues } from './_lib/auth.js';
 import { ROLE_PERMS } from './_lib/constants.js';
 
 export default async function handler(req, res) {
@@ -14,19 +15,28 @@ export default async function handler(req, res) {
     const body = req.body || {};
 
     if (req.method === 'POST') {
-      const { username, email, firstName = '', lastName = '', role = 'viewer' } = body;
+      const { username, email, firstName = '', lastName = '', role = 'viewer', password } = body;
       if (!username || !String(username).trim()) return res.status(400).json({ error: 'Username is required' });
-      if (!String(email || '').endsWith('@lno.company')) return res.status(400).json({ error: 'Email must end with @lno.company' });
+      const isShareholder = role === 'shareholder';
+      if (isShareholder) {
+        // external emails are allowed for shareholders; a valid password is required
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || ''))) return res.status(400).json({ error: 'A valid email is required' });
+        const issues = passwordIssues(password);
+        if (issues.length) return res.status(400).json({ error: 'Password needs ' + issues.join(', ') });
+      } else {
+        if (!String(email || '').endsWith('@lno.company')) return res.status(400).json({ error: 'Email must end with @lno.company' });
+      }
       const exists = await query('SELECT 1 FROM users WHERE username=$1', [String(username).trim()]);
       if (exists.rows[0]) return res.status(409).json({ error: 'Username must be unique' });
       const id = 'u' + Date.now();
       const perms = ROLE_PERMS[role] || ROLE_PERMS.viewer;
-      // pre-provisioned accounts sign in with Google (@lno.company) — no usable password
-      const unusable = await hashPassword('google:' + id + ':' + Math.random());
+      // shareholders sign in with email/username + password; internal roles use Google (no usable password)
+      const provider = isShareholder ? 'password' : 'google';
+      const hash = isShareholder ? await hashPassword(password) : await hashPassword('google:' + id + ':' + Math.random());
       await query(
         `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,password_hash,auth_provider)
-         VALUES ($1,$2,$3,$4,$5,$6,true,$7::jsonb,$8,'google')`,
-        [id, String(username).trim(), email, firstName, lastName, role, JSON.stringify(perms), unusable]
+         VALUES ($1,$2,$3,$4,$5,$6,true,$7::jsonb,$8,$9)`,
+        [id, String(username).trim(), email, firstName, lastName, role, JSON.stringify(perms), hash, provider]
       );
       const { rows } = await query('SELECT * FROM users WHERE id=$1', [id]);
       return res.status(201).json({ user: sanitizeUser(rows[0]) });

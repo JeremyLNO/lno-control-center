@@ -1670,27 +1670,63 @@ function AdminUsers(){
     <Confirm open={bulkDel} title="Delete selected users" message={`Permanently remove ${ids.filter(id=>id!==user.id).length} user(s)? Your own account is never deleted. This cannot be undone.`} confirmLabel="Delete all" onCancel={()=>setBulkDel(false)} onConfirm={bulkDelete}/>
   </div>;
 }
+// Password policy for shareholder accounts — mirrors api/_lib/auth.js passwordIssues().
+const PW_RULES=[
+  ['At least 12 characters', pw=>pw.length>=12],
+  ['An uppercase letter', pw=>/[A-Z]/.test(pw)],
+  ['A lowercase letter', pw=>/[a-z]/.test(pw)],
+  ['A number', pw=>/[0-9]/.test(pw)],
+  ['A special character', pw=>/[^A-Za-z0-9]/.test(pw)],
+];
+const passwordOk=(pw)=>PW_RULES.every(([,fn])=>fn(pw||''));
+function genPassword(){
+  const U='ABCDEFGHJKLMNPQRSTUVWXYZ',L='abcdefghijkmnopqrstuvwxyz',D='23456789',S='!@#$%^&*?-_',all=U+L+D+S;
+  const rnd=(n)=>{ try{ const a=new Uint32Array(1); crypto.getRandomValues(a); return a[0]%n; }catch(e){ return Math.floor(Math.random()*n); } };
+  const pick=s=>s[rnd(s.length)];
+  const arr=[pick(U),pick(L),pick(D),pick(S)];
+  while(arr.length<16) arr.push(pick(all));
+  for(let i=arr.length-1;i>0;i--){ const j=rnd(i+1); [arr[i],arr[j]]=[arr[j],arr[i]]; }
+  return arr.join('');
+}
 function AddUserModal({open,onClose,onCreated}){
-  const [v,setV]=useState({username:'',email:'',firstName:'',lastName:'',role:'viewer'}); const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
-  useEffect(()=>{ if(open){setV({username:'',email:'',firstName:'',lastName:'',role:'viewer'});setErr('');} },[open]);
+  const [v,setV]=useState({username:'',email:'',firstName:'',lastName:'',role:'viewer',password:''}); const [err,setErr]=useState(''); const [busy,setBusy]=useState(false); const [showPw,setShowPw]=useState(false);
+  useEffect(()=>{ if(open){setV({username:'',email:'',firstName:'',lastName:'',role:'viewer',password:''});setErr('');setShowPw(false);} },[open]);
+  const isShareholder=v.role==='shareholder';
   async function submit(){
     if(!v.username.trim())return setErr('Username is required.');
-    if(!v.email.endsWith('@lno.company'))return setErr('Email must end with @lno.company');
+    if(isShareholder){
+      if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email))return setErr('A valid email is required.');
+      if(!passwordOk(v.password))return setErr('Password does not meet all the requirements below.');
+    } else if(!v.email.endsWith('@lno.company')) return setErr('Email must end with @lno.company');
     setBusy(true);
-    try{ const r=await api('users',{method:'POST',body:{username:v.username.trim(),email:v.email,firstName:v.firstName,lastName:v.lastName,role:v.role}}); onCreated(r.user); }
+    try{ const body={username:v.username.trim(),email:v.email,firstName:v.firstName,lastName:v.lastName,role:v.role}; if(isShareholder) body.password=v.password; const r=await api('users',{method:'POST',body}); onCreated(r.user); }
     catch(e){ setErr(e.message); } finally{ setBusy(false); }
   }
   return <Modal open={open} onClose={onClose} title="Add User">
     <div className="space-y-3">
+      <Field label="Role"><Select value={v.role} onChange={r=>setV({...v,role:r})} options={ROLE_OPTIONS}/></Field>
       <Field label="Username *"><Input value={v.username} onChange={e=>setV({...v,username:e.target.value})} placeholder="jane.doe"/></Field>
-      <Field label="Email *" hint="Must end with @lno.company"><Input value={v.email} onChange={e=>setV({...v,email:e.target.value})} placeholder="jane.doe@lno.company"/></Field>
+      <Field label="Email *" hint={isShareholder?'Any email — shareholders have external addresses':'Must end with @lno.company'}><Input value={v.email} onChange={e=>setV({...v,email:e.target.value})} placeholder={isShareholder?'investor@example.com':'jane.doe@lno.company'}/></Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="First name"><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
         <Field label="Last name"><Input value={v.lastName} onChange={e=>setV({...v,lastName:e.target.value})}/></Field>
       </div>
-      <Field label="Role"><Select value={v.role} onChange={r=>setV({...v,role:r})} options={ROLE_OPTIONS}/></Field>
+      {isShareholder&&<Field label="Password *">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Input type={showPw?'text':'password'} value={v.password} onChange={e=>setV({...v,password:e.target.value})} placeholder="Set a strong password" className="pr-9 font-mono"/>
+            <button type="button" onClick={()=>setShowPw(s=>!s)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-navy"><Icon name={showPw?'eyeoff':'eye'} className="w-4 h-4"/></button>
+          </div>
+          <Btn type="button" variant="outline" size="sm" onClick={()=>{setV(x=>({...x,password:genPassword()}));setShowPw(true);}}><Icon name="refresh" className="w-3.5 h-3.5"/>Generate</Btn>
+        </div>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2">
+          {PW_RULES.map(([label,fn])=>{ const ok=fn(v.password||''); return <div key={label} className={`flex items-center gap-1.5 text-[11px] ${ok?'text-success':'text-slate-400'}`}><Icon name={ok?'check':'x'} className="w-3 h-3 shrink-0"/>{label}</div>; })}
+        </div>
+      </Field>}
       {err&&<div className="text-sm text-danger">{err}</div>}
-      <div className="text-[11px] text-slate-400">Pre-provisions the account with a role. The user signs in with their <span className="font-mono">@lno.company</span> Google account — no password needed.</div>
+      <div className="text-[11px] text-slate-400">{isShareholder
+        ? 'Shareholders sign in with their username + this password (they can’t use Google — external email). Share these credentials with them securely.'
+        : <>Pre-provisions the account with a role. The user signs in with their <span className="font-mono">@lno.company</span> Google account — no password needed.</>}</div>
       <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={submit} disabled={busy}>{busy?'Creating…':'Create user'}</Btn></div>
     </div>
   </Modal>;
@@ -1924,7 +1960,7 @@ function ProfilePage(){
   const fileRef=useRef();
   async function patchSelf(patch){ try{ const r=await api('profile',{method:'PATCH',body:patch}); setUser(r.user); return true; }catch(e){ toast.error(e.message); return false; } }
   async function saveInfo(){ if(await patchSelf({firstName:v.firstName,lastName:v.lastName})){ setSaved(true); setTimeout(()=>setSaved(false),1800); } }
-  async function changePw(){ if(!pw.n1)return setPwMsg({err:'New password must not be empty'}); if(pw.n1!==pw.n2)return setPwMsg({err:'Confirmation must match'}); try{ await api('auth',{method:'POST',body:{action:'changePassword',current:pw.cur,next:pw.n1}}); setPw({cur:'',n1:'',n2:''}); setPwMsg({ok:'Password updated'}); }catch(e){ setPwMsg({err:e.message||'Could not update password'}); } }
+  async function changePw(){ if(!passwordOk(pw.n1))return setPwMsg({err:'New password does not meet all the requirements.'}); if(pw.n1!==pw.n2)return setPwMsg({err:'Confirmation must match'}); try{ await api('auth',{method:'POST',body:{action:'changePassword',current:pw.cur,next:pw.n1}}); setPw({cur:'',n1:'',n2:''}); setPwMsg({ok:'Password updated'}); }catch(e){ setPwMsg({err:e.message||'Could not update password'}); } }
   function upload(e){ const file=e.target.files[0]; if(!file)return; if(!['image/png','image/jpeg'].includes(file.type))return toast.error('Accepted formats: PNG, JPEG'); if(file.size>5*1024*1024)return toast.error('Maximum file size is 5 MB'); const r=new FileReader(); r.onload=()=>patchSelf({avatar:r.result}); r.readAsDataURL(file); }
   return <div className="max-w-2xl">
     <PageHead title="Profile & Settings" subtitle="Manage your personal account details"/>
@@ -1958,6 +1994,9 @@ function ProfilePage(){
             <Field label="New password"><Input type="password" value={pw.n1} onChange={e=>setPw({...pw,n1:e.target.value})}/></Field>
             <Field label="Confirm new"><Input type="password" value={pw.n2} onChange={e=>setPw({...pw,n2:e.target.value})}/></Field>
           </div>
+          {pw.n1&&<div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 mt-2">
+            {PW_RULES.map(([label,fn])=>{ const ok=fn(pw.n1); return <div key={label} className={`flex items-center gap-1.5 text-[11px] ${ok?'text-success':'text-slate-400'}`}><Icon name={ok?'check':'x'} className="w-3 h-3 shrink-0"/>{label}</div>; })}
+          </div>}
           <div className="flex items-center gap-3 mt-4"><Btn onClick={changePw}>Update password</Btn>
             {pwMsg?.err&&<span className="text-sm text-danger">{pwMsg.err}</span>}{pwMsg?.ok&&<span className="text-sm text-success flex items-center gap-1"><Icon name="check" className="w-4 h-4"/>{pwMsg.ok}</span>}</div>
         </Card>}

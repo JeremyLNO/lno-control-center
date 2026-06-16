@@ -8,6 +8,19 @@ function jwtSecret() {
   return s;
 }
 
+// Password policy (shareholder accounts created by an admin). Returns the list of
+// unmet requirements — empty array means the password is valid.
+export function passwordIssues(pw) {
+  pw = String(pw || '');
+  const issues = [];
+  if (pw.length < 12) issues.push('at least 12 characters');
+  if (!/[A-Z]/.test(pw)) issues.push('an uppercase letter');
+  if (!/[a-z]/.test(pw)) issues.push('a lowercase letter');
+  if (!/[0-9]/.test(pw)) issues.push('a number');
+  if (!/[^A-Za-z0-9]/.test(pw)) issues.push('a special character');
+  return issues;
+}
+
 export async function hashPassword(pw) { return bcrypt.hash(String(pw), 10); }
 export async function verifyPassword(pw, hash) {
   if (!hash) return false;
