@@ -147,6 +147,18 @@ ok('archived report downloads as a valid %PDF', r.status === 200 && Buffer.from(
 r = await call(snapshots, { method: 'GET', query: { reports: 'list' } });
 ok('report archive requires auth -> 401', r.status === 401, r.status);
 
+// shareholder role — dashboard + read-only reports, nothing else
+r = await call(users, { method: 'POST', headers: authH, body: { username: 'invest.or', email: 'invest.or@lno.company', role: 'shareholder' } });
+ok('shareholder role grants exactly [view_activity, view_reports]',
+  r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_reports']), r.body.user && r.body.user.permissions);
+// non-admin (operator) can read the archive but cannot generate a report
+r = await call(auth, { method: 'POST', body: { action: 'login', username: 'sophie.ops', password: 'admin' } });
+const opH = { authorization: 'Bearer ' + r.body.token };
+r = await call(snapshots, { method: 'POST', headers: opH, body: { action: 'generateReport' } });
+ok('non-admin cannot generate a report -> 403', r.status === 403, r.status);
+r = await call(snapshots, { method: 'GET', headers: opH, query: { reports: 'list' } });
+ok('any authenticated user can list the report archive', r.status === 200 && Array.isArray(r.body.reports), r.status);
+
 // Sign in with Google — verification stubbed (real flow verifies the Google JWKS signature).
 globalThis.__GOOGLE_VERIFY__ = async (cred) => JSON.parse(Buffer.from(cred, 'base64').toString());
 const gcred = (o) => Buffer.from(JSON.stringify(o)).toString('base64');

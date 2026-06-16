@@ -13,6 +13,7 @@ const PERMISSIONS = [
   ['view_realtime','View Real-Time'],
   ['view_trades','View Trades'],
   ['view_logs','View Logs'],
+  ['view_reports','View reports'],
   ['export_data','Export data'],
   ['manage_users','Manage users'],
   ['manage_exchanges','Manage exchanges'],
@@ -24,7 +25,15 @@ const ROLE_PERMS = {
   admin: ALL_PERMS.slice(),
   operator: ['view_activity','view_realtime','view_trades','view_logs','export_data'],
   viewer: ['view_activity','view_realtime','view_trades','view_logs'],
+  // shareholder: dashboard + prices + system status (via view_activity) and read-only reports
+  shareholder: ['view_activity','view_reports'],
 };
+const ROLE_OPTIONS = [
+  {value:'admin',label:'Admin'},
+  {value:'operator',label:'Operator'},
+  {value:'shareholder',label:'Shareholder'},
+  {value:'viewer',label:'Viewer'},
+];
 
 /* ============================================================
    FORMATTERS
@@ -737,23 +746,24 @@ function Login(){
 /* ============================================================
    LAYOUT — SIDEBAR / HEADER
    ============================================================ */
+// Nav entries: [icon, label, path, shortLabel, perm]. perm gates visibility (admins have all).
 const MAIN_NAV=[
-  ['activity','Activity Dashboard','/activity','Activity'],
-  ['radio','Real-Time','/realtime','Live'],
-  ['dollar','Prices','/prices','Prices'],
-  ['briefcase','Trades','/trades','Trades'],
-  ['list','Activity Log','/logs','Logs'],
+  ['activity','Activity Dashboard','/activity','Activity','view_activity'],
+  ['radio','Real-Time','/realtime','Live','view_realtime'],
+  ['dollar','Prices','/prices','Prices','view_activity'],
+  ['briefcase','Trades','/trades','Trades','view_trades'],
+  ['list','Activity Log','/logs','Logs','view_logs'],
 ];
 const TOOLS_NAV=[
-  ['clock','Timeline','/timeline'],
-  ['database','System Status','/status'],
+  ['clock','Timeline','/timeline','Timeline','view_trades'],
+  ['database','System Status','/status','Status','view_activity'],
+  ['filetext','Reports','/admin/reports','Reports','view_reports'],
 ];
 const ADMIN_NAV=[
   ['users','Users','/admin/users'],
   ['link','Exchanges','/admin/exchanges'],
   ['msg','OpenWA','/admin/openwa'],
   ['layers','Funds','/admin/funds'],
-  ['filetext','Reports','/admin/reports'],
 ];
 const ACCT_NAV=[
   ['usercircle','Profile','/profile'],
@@ -776,9 +786,9 @@ function Sidebar(){
     </div>
     <nav className="flex-1 overflow-y-auto px-3 space-y-1">
       <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-2 pb-1">Main</div>
-      {MAIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+      {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
       <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Tools</div>
-      {TOOLS_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+      {TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
       {user.role==='admin'&&<>
         <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Administration</div>
         {ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
@@ -875,11 +885,11 @@ function MobileNav(){
   const [more,setMore]=useState(false);
   return <>
     <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex z-30">
-      {MAIN_NAV.map(([i,l,p,s])=><button key={p} onClick={()=>navigate(p)} className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] ${cur===p||cur.startsWith(p+'/')?'text-gold':'text-slate-500'}`}><Icon name={i} className="w-5 h-5"/>{s||l.split(' ')[0]}</button>)}
+      {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p,s])=><button key={p} onClick={()=>navigate(p)} className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] ${cur===p||cur.startsWith(p+'/')?'text-gold':'text-slate-500'}`}><Icon name={i} className="w-5 h-5"/>{s||l.split(' ')[0]}</button>)}
       <button onClick={()=>setMore(!more)} className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] text-slate-500"><Icon name="menu" className="w-5 h-5"/>More</button>
     </nav>
     {more&&<div className="lg:hidden fixed inset-0 z-40" onClick={()=>setMore(false)}><div className="absolute bottom-14 inset-x-3 bg-white rounded-xl shadow-xl border border-slate-200 p-2" onClick={e=>e.stopPropagation()}>
-      {[...TOOLS_NAV,...(user.role==='admin'?ADMIN_NAV:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{l}</button>)}
+      {[...TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)),...(user.role==='admin'?ADMIN_NAV:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{l}</button>)}
     </div></div>}
   </>;
 }
@@ -1603,7 +1613,7 @@ function AdminUsers(){
         {sel.size>0&&<>
           <Btn size="sm" variant="outline" onClick={()=>bulkPatch({active:true},{verb:'Activated'})}><Icon name="power" className="w-3.5 h-3.5"/>Activate</Btn>
           <Btn size="sm" variant="outline" onClick={()=>bulkPatch({active:false},{skipSelf:true,verb:'Deactivated'})}>Deactivate</Btn>
-          <Select value="" onChange={v=>{ if(v) bulkPatch({role:v,permissions:ROLE_PERMS[v].slice()},{skipSelf:true,verb:'Re-roled'}); }} className="w-32" options={[{value:'',label:'Set role…'},{value:'admin',label:'Admin'},{value:'operator',label:'Operator'},{value:'viewer',label:'Viewer'}]}/>
+          <Select value="" onChange={v=>{ if(v) bulkPatch({role:v,permissions:ROLE_PERMS[v].slice()},{skipSelf:true,verb:'Re-roled'}); }} className="w-32" options={[{value:'',label:'Set role…'},...ROLE_OPTIONS]}/>
           <Btn size="sm" variant="danger" onClick={()=>setBulkDel(true)}><Icon name="trash" className="w-3.5 h-3.5"/>Delete</Btn>
         </>}
         <ExportMenu filename="lno_users" size="sm" variant="outline" headers={['Username','Email','First name','Last name','Role','Active','Permissions']}
@@ -1618,7 +1628,7 @@ function AdminUsers(){
           {u.avatar?<img src={u.avatar} className="w-10 h-10 rounded-full object-cover"/>:<span className="w-10 h-10 rounded-full bg-navy text-white grid place-items-center text-xs font-semibold shrink-0">{initialsOf(u)}</span>}
           <div className="flex-1 min-w-0">
             <div className="font-medium text-navy flex items-center gap-2">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.username}
-              <Badge className={u.role==='admin'?'bg-gold/15 text-gold':u.role==='operator'?'bg-blue-100 text-blue-700':'bg-slate-100 text-slate-600'}>{u.role}</Badge>
+              <Badge className={u.role==='admin'?'bg-gold/15 text-gold':u.role==='operator'?'bg-blue-100 text-blue-700':u.role==='shareholder'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-600'}>{u.role}</Badge>
             </div>
             <div className="text-xs text-slate-400 truncate">@{u.username} · {u.email}</div>
           </div>
@@ -1634,7 +1644,7 @@ function AdminUsers(){
                 <Btn size="icon" variant="subtle" onClick={()=>{up(u.id,{username:nameVal});setEditName(null);}}><Icon name="check" className="w-4 h-4"/></Btn>
               </div> : <div className="flex items-center gap-2"><span className="text-sm font-mono">@{u.username}</span><button onClick={()=>{setEditName(u.id);setNameVal(u.username);}} className="text-slate-400 hover:text-navy"><Icon name="pencil" className="w-3.5 h-3.5"/></button></div>}
             </Field></div>
-            <div className="w-44"><Field label="Role"><Select value={u.role} onChange={v=>up(u.id,{role:v,permissions:ROLE_PERMS[v].slice()})} options={[{value:'admin',label:'Admin'},{value:'operator',label:'Operator'},{value:'viewer',label:'Viewer'}]}/></Field></div>
+            <div className="w-44"><Field label="Role"><Select value={u.role} onChange={v=>up(u.id,{role:v,permissions:ROLE_PERMS[v].slice()})} options={ROLE_OPTIONS}/></Field></div>
             <div><Field label="Active"><div className="pt-1.5"><Toggle on={u.active} onChange={v=>up(u.id,{active:v})}/></div></Field></div>
           </div>
           <div>
@@ -1674,7 +1684,7 @@ function AddUserModal({open,onClose,onCreated}){
         <Field label="First name"><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
         <Field label="Last name"><Input value={v.lastName} onChange={e=>setV({...v,lastName:e.target.value})}/></Field>
       </div>
-      <Field label="Role"><Select value={v.role} onChange={r=>setV({...v,role:r})} options={[{value:'admin',label:'Admin'},{value:'operator',label:'Operator'},{value:'viewer',label:'Viewer'}]}/></Field>
+      <Field label="Role"><Select value={v.role} onChange={r=>setV({...v,role:r})} options={ROLE_OPTIONS}/></Field>
       {err&&<div className="text-sm text-danger">{err}</div>}
       <div className="text-[11px] text-slate-400">Pre-provisions the account with a role. The user signs in with their <span className="font-mono">@lno.company</span> Google account — no password needed.</div>
       <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={submit} disabled={busy}>{busy?'Creating…':'Create user'}</Btn></div>
@@ -2071,7 +2081,7 @@ function TimelinePage(){
     alerts.forEach(a=>ev.push({t:new Date(a.createdAt).getTime(),kind:'alert',icon:'bell',color:'text-danger',dot:'bg-danger',title:a.summary,sub:`Alert ${a.code}${a.ackedAt?' · acknowledged':' · pending'}`}));
     return ev.sort((x,y)=>y.t-x.t);
   },[data,alerts]);
-  if(!hasPerm(user,'view_activity')) return <Denied/>;
+  if(!hasPerm(user,'view_trades')) return <Denied/>;
 
   const filtered=kind==='all'?events:events.filter(e=>e.kind===kind);
   const shown=filtered.slice(0,limit);
@@ -2109,17 +2119,18 @@ function TimelinePage(){
    ============================================================ */
 function AdminReports(){
   const {user}=useApp();
+  const isAdmin=user.role==='admin';
   const [reports,setReports]=useState(null); const [busy,setBusy]=useState(false); const [dl,setDl]=useState(null);
   const load=()=>api('snapshots?reports=list').then(r=>setReports(r.reports||[])).catch(()=>setReports([]));
-  useEffect(()=>{ if(user.role==='admin') load(); },[]);
-  if(user.role!=='admin') return <Denied/>;
+  useEffect(()=>{ if(hasPerm(user,'view_reports')) load(); },[]);
+  if(!hasPerm(user,'view_reports')) return <Denied/>;
   async function generate(){ setBusy(true); try{ await api('snapshots',{method:'POST',body:{action:'generateReport'}}); toast.success('Report generated & archived'); load(); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
   async function download(rep){ setDl(rep.id); try{ const r=await api('snapshots?report='+rep.id); downloadBlob(b64ToBlob(r.pdfBase64), r.filename||('lno-report-'+rep.periodLabel+'.pdf')); toast.success('Report downloaded'); }catch(e){ toast.error(e.message); } finally{ setDl(null); } }
   return <div>
-    <PageHead title="Reports" subtitle="Archive of generated portfolio reports — re-download any as PDF"
-      actions={<Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?'Generating…':'Generate report now'}</Btn>}/>
+    <PageHead title="Reports" subtitle={isAdmin?'Archive of generated portfolio reports — re-download any as PDF':'Download past portfolio reports'}
+      actions={isAdmin&&<Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?'Generating…':'Generate report now'}</Btn>}/>
     {reports==null? <Card className="p-10 text-center text-slate-400 text-sm">Loading…</Card>
-    : reports.length===0? <Card className="p-10 text-center text-slate-400 text-sm"><Icon name="filetext" className="w-10 h-10 mx-auto text-slate-200 mb-2"/>No reports yet. Generate one now, or wait for the monthly cron (1st of each month).</Card>
+    : reports.length===0? <Card className="p-10 text-center text-slate-400 text-sm"><Icon name="filetext" className="w-10 h-10 mx-auto text-slate-200 mb-2"/>{isAdmin?'No reports yet. Generate one now, or wait for the monthly cron (1st of each month).':'No reports available yet.'}</Card>
     : <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
         <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
           <th className="px-4 py-2.5 text-left font-medium">Kind</th>
