@@ -95,6 +95,12 @@ q = await db.query("SELECT wa_apikey FROM users WHERE email='admin@lno.company'"
 ok('per-user CallMeBot key encrypted in DB (no plaintext)', !String(q.rows[0].wa_apikey || '').includes('cmb-user-key') && String(q.rows[0].wa_apikey).startsWith('v1:'), { v: q.rows[0].wa_apikey });
 ok('user gets a welcome WhatsApp when they save their key', sentMessages.some(m => /Welcome to LNO Control Center/i.test(m.text)), sentMessages.map(m => m.text));
 
+// turning notifications OFF must not send a welcome; turning them back ON (key already saved) must
+await call(profile, { method: 'PATCH', headers: authH, body: { notify: false } });
+sentMessages.length = 0;
+r = await call(profile, { method: 'PATCH', headers: authH, body: { notify: true } });
+ok('turning notifications ON (off -> on) sends a welcome without re-entering the key', r.body.user.notify === true && sentMessages.some(m => /Welcome to LNO Control Center/i.test(m.text)), sentMessages.map(m => m.text));
+
 // login-failure alert: 3 wrong attempts triggers a WhatsApp to admins
 sentMessages.length = 0;
 for (let i = 0; i < 3; i++) await call(auth, { method: 'POST', body: { action: 'login', email: 'admin@lno.company', password: 'nope' } });

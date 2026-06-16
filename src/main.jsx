@@ -444,7 +444,7 @@ function Select({value,onChange,options,className=''}){
     <Icon name="chevdown" className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"/>
   </div>;
 }
-function Field({label,children,hint}){ return <label className="block"><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>{children}{hint&&<span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}</label>; }
+function Field({label,children,hint,className=''}){ return <label className={`block ${className}`}><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>{children}{hint&&<span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}</label>; }
 function Input(p){ return <input {...p} className={'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40 '+(p.className||'')}/>; }
 
 // Export-as menu (CSV / Excel). getRows() returns array-of-arrays aligned to headers,
@@ -2048,9 +2048,9 @@ function ProfilePage(){
         <div><div className="font-semibold text-navy text-lg">{user.firstName||user.email}</div><div className="text-sm text-slate-400">{user.email} · {user.role}</div><div className="text-[11px] text-slate-400 mt-1">PNG or JPEG · max 5 MB</div></div>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
-        <Field label="Email" hint="Contact an admin to change your email"><Input value={user.email} disabled className="bg-slate-50 text-slate-400"/></Field>
         <Field label="First name"><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
         <Field label="Last name"><Input value={v.lastName} onChange={e=>setV({...v,lastName:e.target.value})}/></Field>
+        <Field label="Email" hint="Contact an admin to change your email" className="sm:col-span-2"><Input value={user.email} disabled className="bg-slate-50 text-slate-400"/></Field>
       </div>
       <div className="flex items-center gap-3 mt-4"><Btn onClick={saveInfo}>Save changes</Btn>{saved&&<span className="text-sm text-success flex items-center gap-1 fadein"><Icon name="check" className="w-4 h-4"/>Changes saved</span>}</div>
     </Card>
@@ -2078,7 +2078,7 @@ function ProfilePage(){
       <SectionTitle>WhatsApp Notifications</SectionTitle>
       <div className="flex items-center justify-between mb-3">
         <div><div className="text-sm font-medium text-navy">Receive notifications</div><div className="text-xs text-slate-400">{user.role==='shareholder'?'Get a WhatsApp when a new report is available':'WhatsApp alerts must also be enabled by an admin to deliver'}</div></div>
-        <Toggle on={notify} onChange={x=>{setNotify(x);patchSelf({notify:x});}}/>
+        <Toggle on={notify} onChange={async x=>{setNotify(x);if(await patchSelf({notify:x})&&x&&user.hasWaApikey&&phone)toast.success('WhatsApp notifications on — welcome message sent');}}/>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Your phone number"><Input value={phone} onChange={e=>setPhone(e.target.value)} onBlur={()=>patchSelf({phone})} placeholder="+33 6 12 34 56 78"/></Field>
