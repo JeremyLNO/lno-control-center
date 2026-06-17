@@ -49,7 +49,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PATCH') {
-      const { id, ...patch } = body;
+      const { id, password, ...patch } = body;
       if (!id) return res.status(400).json({ error: 'id required' });
       if (patch.role) patch.permissions = ROLE_PERMS[patch.role] || ROLE_PERMS.viewer; // role change resets perms
       const map = { firstName: 'first_name', lastName: 'last_name', active: 'active', role: 'role', permissions: 'permissions' };
@@ -59,6 +59,15 @@ export default async function handler(req, res) {
         if (k === 'permissions') { sets.push(`permissions=$${i}::jsonb`); vals.push(JSON.stringify(patch[k])); }
         else { sets.push(`${map[k]}=$${i}`); vals.push(patch[k]); }
         i++;
+      }
+      // admin-set a new password — only for password (non-Google) accounts, policy-checked
+      if (typeof password === 'string' && password !== '') {
+        const tgt = (await query('SELECT auth_provider FROM users WHERE id=$1', [id])).rows[0];
+        if (!tgt) return res.status(404).json({ error: 'user not found' });
+        if ((tgt.auth_provider || 'password') === 'google') return res.status(400).json({ error: 'This user signs in with Google — there is no password to set' });
+        const issues = passwordIssues(password);
+        if (issues.length) return res.status(400).json({ error: 'Password needs ' + issues.join(', ') });
+        sets.push(`password_hash=$${i}`); vals.push(await hashPassword(password)); i++;
       }
       if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
       vals.push(id);

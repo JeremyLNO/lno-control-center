@@ -1688,6 +1688,12 @@ function AdminUsers(){
             </div>
           </div>
           <div>
+            <div className="text-xs font-medium text-slate-500 mb-2">Sign-in &amp; password</div>
+            {u.authProvider==='google'
+              ? <div className="text-sm text-slate-500 flex items-center gap-2"><Icon name="shield" className="w-4 h-4 text-slate-400 shrink-0"/>Signs in with Google (<span className="font-mono">{u.email}</span>) — no password to set.</div>
+              : <AdminSetPassword user={u}/>}
+          </div>
+          <div>
             <div className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-2">Recent sign-ins
               {u.lastIp&&<span className="text-[11px] text-slate-400 font-normal">· last from <span className="font-mono">{u.lastIp}</span></span>}</div>
             <UserLoginHistory userId={u.id}/>
@@ -1712,6 +1718,33 @@ const PW_RULES=[
   ['A special character', pw=>/[^A-Za-z0-9]/.test(pw)],
 ];
 const passwordOk=(pw)=>PW_RULES.every(([,fn])=>fn(pw||''));
+// Admin sets a new password for a password (non-Google) account.
+function AdminSetPassword({user}){
+  const [pw,setPw]=useState(''); const [show,setShow]=useState(false); const [busy,setBusy]=useState(false); const [msg,setMsg]=useState(null);
+  async function save(){
+    if(!passwordOk(pw)) return setMsg({err:'Password does not meet all the requirements below.'});
+    setBusy(true);
+    try{ await api('users',{method:'PATCH',body:{id:user.id,password:pw}}); setPw(''); setMsg({ok:'Password updated'}); toast.success(`New password set for ${user.email}`); }
+    catch(e){ setMsg({err:e.message||'Could not set password'}); }
+    finally{ setBusy(false); }
+  }
+  return <div>
+    <div className="flex flex-wrap gap-2 items-start">
+      <div className="relative flex-1 min-w-[220px] max-w-xs">
+        <Input type={show?'text':'password'} value={pw} onChange={e=>{setPw(e.target.value);setMsg(null);}} placeholder="New password" className="pr-9 font-mono"/>
+        <button type="button" onClick={()=>setShow(s=>!s)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-navy"><Icon name={show?'eyeoff':'eye'} className="w-4 h-4"/></button>
+      </div>
+      <Btn type="button" variant="outline" size="sm" onClick={()=>{setPw(genPassword());setShow(true);setMsg(null);}}><Icon name="refresh" className="w-3.5 h-3.5"/>Generate</Btn>
+      <Btn size="sm" onClick={save} disabled={busy||!pw}>{busy?'Setting…':'Set password'}</Btn>
+      {msg?.ok&&<span className="text-sm text-success flex items-center gap-1 pt-1.5"><Icon name="check" className="w-4 h-4"/>{msg.ok}</span>}
+      {msg?.err&&<span className="text-sm text-danger pt-1.5">{msg.err}</span>}
+    </div>
+    {pw&&<div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 mt-2">
+      {PW_RULES.map(([label,fn])=>{ const ok=fn(pw); return <div key={label} className={`flex items-center gap-1.5 text-[11px] ${ok?'text-success':'text-slate-400'}`}><Icon name={ok?'check':'x'} className="w-3 h-3 shrink-0"/>{label}</div>; })}
+    </div>}
+    <div className="text-[11px] text-slate-400 mt-2">Share the new password with the user securely — they sign in with their email + this password.</div>
+  </div>;
+}
 function genPassword(){
   const U='ABCDEFGHJKLMNPQRSTUVWXYZ',L='abcdefghijkmnopqrstuvwxyz',D='23456789',S='!@#$%^&*?-_',all=U+L+D+S;
   const rnd=(n)=>{ try{ const a=new Uint32Array(1); crypto.getRandomValues(a); return a[0]%n; }catch(e){ return Math.floor(Math.random()*n); } };

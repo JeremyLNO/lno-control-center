@@ -182,6 +182,22 @@ sentMessages.length = 0;
 await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
 ok('disabling a type in the matrix stops that notification', !sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
 await call(openwa, { method: 'PUT', headers: authH, body: { notifMatrix: { new_report: ['shareholder'] } } }); // restore
+
+// admin sets a NEW password for a password (non-Google) account; Google accounts are refused
+const allUsers = (await call(users, { method: 'GET', headers: authH })).body.users;
+const shUser = allUsers.find(u => u.email === 'investor@example.com');
+const googleUser = allUsers.find(u => u.email === 'nina.test@lno.company');
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: shUser.id, password: 'N3w#Strong#Pass!' } });
+ok('admin sets a new password for a non-Google user', r.status === 200, r.body);
+r = await call(auth, { method: 'POST', body: { action: 'login', email: 'investor@example.com', password: 'N3w#Strong#Pass!' } });
+ok('user can sign in with the admin-set password', r.status === 200 && !!r.body.token, r.status);
+r = await call(auth, { method: 'POST', body: { action: 'login', email: 'investor@example.com', password: 'Str0ng#Passw0rd!' } });
+ok('the previous password no longer works', r.status === 401, r.status);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: shUser.id, password: 'weak' } });
+ok('admin-set weak password rejected by policy -> 400', r.status === 400, r.body);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: googleUser.id, password: 'N3w#Strong#Pass!' } });
+ok('admin cannot set a password on a Google account -> 400', r.status === 400, r.body);
+
 // weak password is rejected by the policy
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'weak@example.com', role: 'shareholder', password: 'short' } });
 ok('weak shareholder password rejected -> 400', r.status === 400 && /Password needs/.test(r.body.error || ''), r.body);
