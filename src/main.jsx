@@ -1939,7 +1939,7 @@ function AdminOpenWA(){
                 <td className="px-3 py-2 whitespace-nowrap"><span className="inline-flex items-center gap-2"><span className={`w-2 h-2 rounded-full shrink-0 ${l.ok?'bg-success':'bg-danger'}`} title={l.ok?'Sent':'Failed'}/>{l.recipientName||<span className="text-slate-400">—</span>}</span></td>
                 <td className="px-3 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{l.phone}</td>
                 <td className="px-3 py-2 text-slate-500 whitespace-nowrap text-xs">{fmtDT(l.createdAt)}</td>
-                <td className="px-3 py-2"><div className="text-navy line-clamp-2 max-w-md break-words">{l.message}</div>{!l.ok&&l.response&&<div className="text-[11px] text-danger truncate max-w-md" title={l.response}>{l.response}</div>}</td>
+                <td className="px-3 py-2"><div className="text-navy whitespace-pre-wrap break-words max-w-md leading-snug">{l.message}</div>{!l.ok&&l.response&&<div className="text-[11px] text-danger break-words max-w-md mt-1" title={l.response}>{l.response}</div>}</td>
               </tr>)}
             </tbody>
           </table></div>}
