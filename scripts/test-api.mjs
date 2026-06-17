@@ -111,6 +111,11 @@ sentMessages.length = 0;
 r = await call(cronDaily, { method: 'POST', headers: authH });
 ok('cron computes risk metrics (sharpe/sortino/drawdown)', r.status === 200 && typeof r.body.metrics.sharpe === 'number' && typeof r.body.metrics.sortino === 'number' && typeof r.body.metrics.maxDrawdownPct === 'number', r.body && r.body.metrics);
 ok('cron sends daily report via OpenWA', sentMessages.some(m => /daily report/i.test(m.text)), sentMessages.map(m => (m.text || '').slice(0, 20)));
+// report format: bold title, global section, then one bold section per fund (Equity + PnL in USDT • %)
+const daily = sentMessages.find(m => /DAILY REPORT/i.test(m.text))?.text || '';
+ok('daily report uses the new format (bold title, USDT, PnL day • %, per-fund sections)',
+  daily.startsWith('*📊 LNO DAILY REPORT*') && /Equity [\d ]+ USDT/.test(daily) && /PnL day [+-][\d ]+ USDT • [+-][\d.]+%/.test(daily) && (daily.match(/\*/g) || []).length >= 4,
+  daily.slice(0, 120));
 ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { method: 'POST' })).status === 401);
 // every WhatsApp send is recorded in the admin-only message log
 r = await call(openwa, { method: 'GET', headers: authH, query: { log: '1' } });

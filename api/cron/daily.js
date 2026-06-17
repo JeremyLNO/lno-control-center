@@ -16,8 +16,10 @@ function authorized(req) {
   return false;
 }
 
-const fmt  = (n) => (n >= 0 ? '+' : '-') + '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
-const fUSD = (n) => '$' + Math.round(n).toLocaleString('en-US');
+const grp  = (n) => Math.round(Math.abs(n)).toLocaleString('en-US').replace(/,/g, ' '); // 1 000
+const fmt  = (n) => (n >= 0 ? '+' : '-') + grp(n) + ' USDT';   // signed amount in USDT
+const fUSD = (n) => grp(n) + ' USDT';                          // unsigned amount in USDT
+const fPct = (n) => (n >= 0 ? '+' : '-') + Math.abs(n).toFixed(1) + '%';
 
 export default async function handler(req, res) {
   if (!authorized(req)) return res.status(401).json({ error: 'unauthorized' });
@@ -53,6 +55,25 @@ export default async function handler(req, res) {
     const scopeLabel = (scope) => scope === 'portfolio' ? 'Portfolio'
       : scope.startsWith('fund:') ? (funds.find(x => x.id === scope.slice(5))?.name || 'Fund')
       : (BASE_BOTS.find(b => b.id === scope.slice(4))?.name || 'Bot');
+
+    // ── report formatting: a global section then one section per fund ──
+    // each section = Equity + period PnL (amount in USDT • % over the period)
+    const reportBlock = (series, days, label) => {
+      const eq = series.map(s => s.equity);
+      const last = eq[eq.length - 1];
+      const base = eq[Math.max(0, eq.length - 1 - days)];
+      const pnl = last - base;
+      const pct = base ? (pnl / base) * 100 : 0;
+      return `Equity ${fUSD(last)}\nPnL ${label} ${fmt(pnl)} • ${fPct(pct)}`;
+    };
+    const buildReport = (title, days, label) => {
+      let out = `*${title}*\n\n${reportBlock(p.series, days, label)}`;
+      for (const f of funds) {
+        const s = scopeSeries(`fund:${f.id}`);
+        if (s && s.length >= 2) out += `\n\n*${f.name}*\n${reportBlock(s, days, label)}`;
+      }
+      return out;
+    };
     for (const rule of (cfg.alertRules || []).filter(r => r && r.enabled)) {
       const s = scopeSeries(rule.scope); if (!s || s.length < 2) continue;
       const rm = riskMetrics(s); const val = Number(rule.value); let breach = null;
@@ -69,9 +90,7 @@ export default async function handler(req, res) {
       sent.push({ type: 'alert', code, ...(await notify(msg, { type: 'breach' })) });
     }
     if ((cfg.dailyReport ?? true) && cfg.enabled) {
-      const exp = Object.entries(p.byExchange).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${fUSD(v)}`).join(' · ');
-      const msg = `📊 LNO daily report\nEquity ${fUSD(m.totalEquity)}\nPnL day ${fmt(m.pnlDay)} · week ${fmt(m.pnlWeek)}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% (${m.ddDurationDays}d)\nSharpe ${m.sharpe.toFixed(2)} · Sortino ${m.sortino.toFixed(2)}\nBest ${p.best.name} ${fmt(p.best.pnl)} · Worst ${p.worst.name} ${fmt(p.worst.pnl)}\nExposure: ${exp}`;
-      sent.push({ type: 'report', ...(await notify(msg, { type: 'daily' })) });
+      sent.push({ type: 'report', ...(await notify(buildReport('📊 LNO DAILY REPORT', 1, 'day'), { type: 'daily' })) });
     }
     // weekly (Mondays) + monthly (1st) — folded into the daily cron; ?force=weekly|monthly|all to test
     const force = req.query?.force;
@@ -79,11 +98,11 @@ export default async function handler(req, res) {
     const eq = p.series.map(x => x.equity);
     const pnlOver = (days) => eq[eq.length - 1] - eq[Math.max(0, eq.length - 1 - days)];
     if (cfg.enabled && (dt.getUTCDay() === 1 || force === 'weekly' || force === 'all')) {
-      sent.push({ type: 'weekly', ...(await notify(`📅 LNO weekly report\nEquity ${fUSD(m.totalEquity)}\nPnL 7d ${fmt(pnlOver(7))}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% · Sharpe ${m.sharpe.toFixed(2)}`, { type: 'weekly' })) });
+      sent.push({ type: 'weekly', ...(await notify(buildReport('📅 LNO WEEKLY REPORT', 7, '7d'), { type: 'weekly' })) });
     }
     if (cfg.enabled && (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all')) {
       const pnl30 = pnlOver(30);
-      sent.push({ type: 'monthly', ...(await notify(`🗓️ LNO monthly report\nEquity ${fUSD(m.totalEquity)}\nPnL 30d ${fmt(pnl30)}\nMax DD ${m.maxDrawdownPct.toFixed(1)}% (${m.ddDurationDays}d) · Sharpe ${m.sharpe.toFixed(2)} · Sortino ${m.sortino.toFixed(2)}\nFull PDF: Control Center ▸ Reports`, { type: 'monthly' })) });
+      sent.push({ type: 'monthly', ...(await notify(buildReport('🗓️ LNO MONTHLY REPORT', 30, '30d') + '\n\nFull PDF: Control Center ▸ Reports', { type: 'monthly' })) });
       try {
         const label = new Date(dt).toISOString().slice(0, 10);
         const b64 = await buildMonthlyPdf({ equity: m.totalEquity, pnl30, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, best: p.best, worst: p.worst, byExchange: p.byExchange, dateLabel: label });
