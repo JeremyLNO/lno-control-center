@@ -114,10 +114,17 @@ async function exportRows({filename,headers,rows,format}){
   const ws=XLSX.utils.aoa_to_sheet([headers,...rows]); const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Data'); XLSX.writeFile(wb,filename+'.xlsx');
 }
-async function api(path,{method='GET',body}={}){
+async function api(path,{method='GET',body,timeoutMs=35000}={}){
   const headers={}; const tok=getToken(); if(tok) headers['Authorization']='Bearer '+tok;
   if(body!==undefined) headers['Content-Type']='application/json';
-  const r=await fetch('/api/'+path,{method,headers,body:body!==undefined?JSON.stringify(body):undefined});
+  // client-side timeout so a hung request (function timeout / network stall) never leaves a
+  // button stuck "…ing" — it fails cleanly and the action can be re-run manually.
+  const ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
+  const timer=ctrl?setTimeout(()=>ctrl.abort(),timeoutMs):null;
+  let r;
+  try{ r=await fetch('/api/'+path,{method,headers,body:body!==undefined?JSON.stringify(body):undefined,signal:ctrl?ctrl.signal:undefined}); }
+  catch(e){ if(ctrl&&ctrl.signal.aborted){ const t=new Error('Request timed out — please try again.'); t.status=0; t.timeout=true; throw t; } throw e; }
+  finally{ if(timer) clearTimeout(timer); }
   let data=null; try{ data=await r.json(); }catch(e){}
   if(!r.ok){
     // a 401 while holding a token = expired/invalid session -> let the app sign out gracefully
