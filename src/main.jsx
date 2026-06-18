@@ -48,183 +48,27 @@ const WA_ROLE_COLS = [['admin','Admin'],['operator','Operator'],['viewer','Viewe
 /* ============================================================
    FORMATTERS
    ============================================================ */
-const fmtUSD = (n,d=0)=> (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-const fmtSigned = (n,d=0)=> (n>=0?'+':'-')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtUSD = (n,d=0)=> (n<0?'-':'')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+' USDT';
+const fmtSigned = (n,d=0)=> (n>=0?'+':'-')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+' USDT';
 const fmtNum = (n,d=0)=> Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtPct = (n,d=1)=> (n>=0?'+':'')+n.toFixed(d)+'%';
 const fmtPctPlain = (n,d=1)=> n.toFixed(d)+'%';
 const clsPnl = (n)=> n>0?'text-success':n<0?'text-danger':'text-slate-500';
-const fmtPrice = (p)=>{ if(p==null||!isFinite(p))return '—'; const d=p>=1000?2:p>=1?3:p>=0.01?5:8; return '$'+p.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}); };
+const fmtPrice = (p)=>{ if(p==null||!isFinite(p))return '—'; const d=p>=1000?2:p>=1?3:p>=0.01?5:8; return p.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+' USDT'; };
 const fmtDate = (t)=> new Date(t).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
+const fmtAgo = (t)=>{ if(t==null)return '—'; const min=Math.round((Date.now()-new Date(t).getTime())/60000); if(min<1)return 'just now'; if(min<60)return min+'m ago'; const h=Math.floor(min/60); if(h<24)return h+'h ago'; return Math.floor(h/24)+'d ago'; };
 const fmtTime = (t)=> new Date(t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
 const fmtDT = (t)=> fmtDate(t)+' '+fmtTime(t);
 const fmtDur = (mins)=>{ mins=Math.round(mins); if(mins<60)return mins+'m'; const h=Math.floor(mins/60),m=mins%60; if(h<24)return h+'h'+(m?' '+m+'m':''); const d=Math.floor(h/24),hh=h%24; return d+'d'+(hh?' '+hh+'h':''); };
 const initialsOf = (u)=>{ const a=(u.firstName||'').trim(), b=(u.lastName||'').trim(); if(a||b) return ((a[0]||'')+(b[0]||'')).toUpperCase(); return (u.email||'?').slice(0,2).toUpperCase(); };
 
 /* ============================================================
-   SEEDED RNG + MOCK DATA
+   TIME CONSTANTS + SYMBOL HELPERS
    ============================================================ */
-function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
-function seedStr(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
-
 const DAY = 86400000;
 const NOW = Date.now();
-const FALLBACK_PRICE = {BTCUSDT:67000,ETHUSDT:3500,AVAXUSDT:38,SOLUSDT:165,BNBUSDT:600,MATICUSDT:0.72,ADAUSDT:0.45,XRPUSDT:0.62};
-
-const BASE_BOTS = [
-  {id:'b1',name:'Alpha-BTC-Momentum',exchange:'Binance',symbol:'BTCUSDT',strategy:'Momentum'},
-  {id:'b2',name:'Beta-ETH-Grid',exchange:'Binance',symbol:'ETHUSDT',strategy:'Grid'},
-  {id:'b3',name:'Eta-AVAX-Breakout',exchange:'Bybit',symbol:'AVAXUSDT',strategy:'Breakout'},
-  {id:'b4',name:'Gamma-SOL-Mean',exchange:'Bybit',symbol:'SOLUSDT',strategy:'Mean Reversion'},
-  {id:'b5',name:'Delta-BNB-Arb',exchange:'OKX',symbol:'BNBUSDT',strategy:'Arbitrage'},
-  {id:'b6',name:'Theta-MATIC-Grid',exchange:'OKX',symbol:'MATICUSDT',strategy:'Grid'},
-  {id:'b7',name:'Epsilon-ADA-Trend',exchange:'Binance',symbol:'ADAUSDT',strategy:'Trend'},
-  {id:'b8',name:'Zeta-XRP-Scalp',exchange:'Bybit',symbol:'XRPUSDT',strategy:'Scalping'},
-];
-const STATUSES = ['active','active','active','active','active','paused','error','inactive'];
-
-/* ----- Exchange API client (Binance / Bybit / OKX public market data) ----- */
-const EX = {
-  parse(sym){ const quote = sym.endsWith('USDT')?'USDT':(sym.endsWith('USDC')?'USDC':'USD'); let base=sym.slice(0,sym.length-quote.length); const apiBase = base==='MATIC'?'POL':base; return {base,quote,apiBase}; },
-  bn(sym){ const {apiBase,quote}=EX.parse(sym); return apiBase+quote; },
-  okx(sym){ const {apiBase,quote}=EX.parse(sym); return apiBase+'-'+quote; },
-  async json(url){ const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error('http '+r.status); return r.json(); },
-};
-async function fetchTickers(exchange, syms){
-  const out={};
-  if(exchange==='Binance'){
-    const arr='['+syms.map(s=>'"'+EX.bn(s)+'"').join(',')+']';
-    const j=await EX.json('https://api.binance.com/api/v3/ticker/24hr?symbols='+encodeURIComponent(arr));
-    const by={}; j.forEach(x=>by[x.symbol]={price:+x.lastPrice,changePct:+x.priceChangePercent});
-    syms.forEach(s=>{ const it=by[EX.bn(s)]; if(it) out[s]=it; });
-  } else if(exchange==='Bybit'){
-    await Promise.all(syms.map(async s=>{ const j=await EX.json('https://api.bybit.com/v5/market/tickers?category=spot&symbol='+EX.bn(s)); const it=j.result&&j.result.list&&j.result.list[0]; if(it) out[s]={price:+it.lastPrice,changePct:+it.price24hPcnt*100}; }));
-  } else if(exchange==='OKX'){
-    await Promise.all(syms.map(async s=>{ const j=await EX.json('https://www.okx.com/api/v5/market/ticker?instId='+EX.okx(s)); const it=j.data&&j.data[0]; if(it){ const last=+it.last, op=+it.open24h; out[s]={price:last,changePct:op?(last-op)/op*100:0}; } }));
-  }
-  return out;
-}
-async function fetchKlines(exchange, sym, limit, interval='day'){
-  const iv = interval==='hour' ? {Binance:'1h',Bybit:'60',OKX:'1H'} : {Binance:'1d',Bybit:'D',OKX:'1D'};
-  let rows=[];
-  const M=k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],close:+k[4]});
-  if(exchange==='Binance'){ const j=await EX.json(`https://api.binance.com/api/v3/klines?symbol=${EX.bn(sym)}&interval=${iv.Binance}&limit=${limit}`); rows=j.map(M); }
-  else if(exchange==='Bybit'){ const j=await EX.json(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${EX.bn(sym)}&interval=${iv.Bybit}&limit=${limit}`); rows=((j.result&&j.result.list)||[]).map(M); }
-  else { const j=await EX.json(`https://www.okx.com/api/v5/market/candles?instId=${EX.okx(sym)}&bar=${iv.OKX}&limit=${Math.min(limit,300)}`); rows=(j.data||[]).map(M); }
-  return rows.filter(x=>isFinite(x.close)&&x.close>0).sort((a,b)=>a.t-b.t);
-}
-
-/* ----- deterministic fallbacks (used if a fetch fails) ----- */
-function strategyBeta(strat,r){ const m={Momentum:[0.8,1.2],Breakout:[0.7,1.1],Trend:[0.7,1.1],'Mean Reversion':[0.25,0.5],Grid:[0.2,0.45],Scalping:[0.15,0.4],Arbitrage:[0.03,0.12]}; const x=m[strat]||[0.4,0.8]; return x[0]+r()*(x[1]-x[0]); }
-function synthCloses(botId,n){ const b=BASE_BOTS.find(x=>x.id===botId); const r=mulberry32(seedStr(botId+'syn')); let p=FALLBACK_PRICE[b.symbol]||100; const out=[]; for(let i=n-1;i>=0;i--){ const ret=(r()+r()+r()-1.5)*0.03; p=Math.max(p*(1+ret),p*0.5); out.push({t:NOW-i*DAY,close:+p.toFixed(8)}); } return out; }
-function normalizeCloses(real,botId,target=365){ if(real.length>=target) return real.slice(real.length-target); const need=target-real.length; const r=mulberry32(seedStr(botId+'pad')); let p=real[0].close, t=real[0].t; const head=[]; for(let i=0;i<need;i++){ t-=DAY; const ret=(r()+r()+r()-1.5)*0.02; p=Math.max(p/(1+ret),p*0.5); head.push({t,close:+p.toFixed(8)}); } head.sort((a,b)=>a.t-b.t); return head.concat(real); }
-
-/* ----- loaders: fetch klines + tickers for all bots, never throw ----- */
-async function loadAllKlines(){ const bots={}; let fails=0; await Promise.all(BASE_BOTS.map(async b=>{ try{ const r=await fetchKlines(b.exchange,b.symbol,365); if(!r.length) throw 0; bots[b.id]={closes:normalizeCloses(r,b.id),failed:false}; }catch(e){ fails++; bots[b.id]={closes:synthCloses(b.id,365),failed:true}; } })); return {bots,fails,allFail:fails===BASE_BOTS.length}; }
-async function loadAllTickers(){ const byEx={}; BASE_BOTS.forEach(b=>{(byEx[b.exchange]=byEx[b.exchange]||[]).push(b);}); const out={}; let fails=0; await Promise.all(Object.entries(byEx).map(async([ex,bots])=>{ try{ const t=await fetchTickers(ex,bots.map(b=>b.symbol)); bots.forEach(b=>{ if(t[b.symbol]) out[b.id]={...t[b.symbol],failed:false}; else { out[b.id]={failed:true}; fails++; } }); }catch(e){ bots.forEach(b=>{ out[b.id]={failed:true}; }); fails+=bots.length; } })); return {bots:out,fails,allFail:fails===BASE_BOTS.length}; }
-
-/* ----- dataset builders: real klines -> equity, live tickers -> prices/PnL ----- */
-function genTrades(params){
-  const r=mulberry32(99173); const out=[];
-  for(let i=0;i<150;i++){
-    const b=BASE_BOTS[Math.floor(r()*BASE_BOTS.length)];
-    const ref=params[b.id].lastClose;
-    const ageDays=r()*360; const entry=NOW-ageDays*DAY-r()*DAY; const durMin=8+r()*r()*5200;
-    const isOpen=ageDays<2&&r()<0.5; const exit=isOpen?null:entry+durMin*60000;
-    const side=r()<0.55?'Long':'Short'; const lev=[1,2,3,5,10,20][Math.floor(r()*6)];
-    const entryPx=ref*(0.85+r()*0.3); const dir=side==='Long'?1:-1;
-    // net-winning strategy: ~68% winners, losses cut smaller than wins (good risk management)
-    const win=r()<0.68; const mag=0.004+r()*0.05; const move=dir*(win?1:-1)*(win?mag:mag*0.55); const exitPx=entryPx*(1+move);
-    const size=Math.round(2000+r()*22000);
-    const pnlPct=move*dir*lev*100; const pnl=size*(pnlPct/100);
-    out.push({id:'t'+i,botId:b.id,bot:b.name,symbol:b.symbol,exchange:b.exchange,strategy:b.strategy,side,status:isOpen?'Open':'Closed',entry,exit,entryPx,exitPx:isOpen?null:exitPx,size,leverage:lev,pnl:isOpen?size*((r()-0.28)*0.05):pnl,pnlPct:isOpen?(r()-0.28)*7:pnlPct,durMin:isOpen?(NOW-entry)/60000:durMin});
-  }
-  return out.sort((a,b)=>b.entry-a.entry);
-}
-function buildStatic(klines){
-  const params={},seriesBase={};
-  BASE_BOTS.forEach((b,idx)=>{
-    const closes=klines.bots[b.id].closes; const r=mulberry32(seedStr(b.id));
-    // alpha = dominant positive daily drift (~+900%/yr compounded); beta dampened so the
-    // real price moves add texture/drawdowns around the uptrend without reversing it.
-    const e0=40000+Math.floor(r()*160000); const beta=strategyBeta(b.strategy,r)*0.50; const alpha=0.0055+r()*0.0017;
-    const notional=Math.round(e0*(0.08+r()*0.22)); const side=r()<0.6?'Long':'Short';
-    params[b.id]={e0,beta,alpha,notional,side,statusSeed:STATUSES[idx],failed:klines.bots[b.id].failed,lastClose:closes[closes.length-1].close};
-    const s=[]; let eq=e0; s.push({t:closes[0].t,equity:eq});
-    for(let i=1;i<closes.length;i++){ const ret=closes[i].close/closes[i-1].close-1; eq=Math.max(eq*(1+alpha+beta*ret),e0*0.25); s.push({t:closes[i].t,equity:Math.round(eq)}); }
-    seriesBase[b.id]=s;
-  });
-  const trades=genTrades(params);
-  const stats={}; BASE_BOTS.forEach(b=>{ const ts=trades.filter(t=>t.botId===b.id); const closed=ts.filter(t=>t.status==='Closed'); const wins=closed.filter(t=>t.pnl>0).length; stats[b.id]={pnl:ts.reduce((a,t)=>a+t.pnl,0),trades:ts.length,winRate:closed.length?wins/closed.length*100:0,open:ts.filter(t=>t.status==='Open').length}; });
-  return {params,seriesBase,trades,stats};
-}
-function foldLive(stat,tickers){
-  const bots={};
-  BASE_BOTS.forEach(b=>{
-    const p=stat.params[b.id]; const base=stat.seriesBase[b.id]; const tk=tickers[b.id]||{};
-    const price=(tk.price!=null)?tk.price:p.lastClose; const changePct=(tk.changePct!=null)?tk.changePct:0;
-    const series=base.slice();
-    if(price&&p.lastClose){ const ret=price/p.lastClose-1; const last=series[series.length-1]; series[series.length-1]={t:last.t,equity:Math.max(Math.round(last.equity*(1+p.beta*ret)),1)}; }
-    const livePnl=(p.side==='Long'?1:-1)*changePct/100*p.notional;
-    const status=(p.failed&&tk.failed)?'error':p.statusSeed;
-    bots[b.id]={price,changePct,series,currentEquity:series[series.length-1].equity,livePnl,side:p.side,notional:p.notional,status,failed:!!tk.failed};
-  });
-  return bots;
-}
-
-// Services & incidents & logs
-const SERVICE_DEFS = [
-  {name:'Market Data Feed',base:35,jit:20},
-  {name:'Order Execution',base:70,jit:40},
-  {name:'Binance Gateway',ex:'Binance'},
-  {name:'Bybit Gateway',ex:'Bybit'},
-  {name:'OKX Gateway',ex:'OKX'},
-  {name:'Risk Engine',base:12,jit:15},
-  {name:'WhatsApp Notifier',base:90,jit:60},
-  {name:'Postgres Primary',base:5,jit:8},
-];
-async function pingOne(url){ const t0=performance.now(); try{ await fetch(url,{cache:'no-store',mode:'cors'}); return {ms:Math.round(performance.now()-t0),ok:true}; }catch(e){ return {ms:null,ok:false}; } }
-async function pingExchanges(){ const [a,b,c]=await Promise.all([pingOne('https://api.binance.com/api/v3/ping'),pingOne('https://api.bybit.com/v5/market/time'),pingOne('https://www.okx.com/api/v5/public/time')]); return {Binance:a,Bybit:b,OKX:c}; }
-function genIncidents(){
-  const r=mulberry32(5521);
-  const sev=['critical','warning','info','info','warning','info'];
-  const msgs=[
-    'Bybit gateway latency above threshold (340ms)',
-    'Bot Theta-MATIC-Grid paused by risk engine',
-    'Equity drawdown on Gamma-SOL-Mean exceeded -4%',
-    'Market data reconnected after brief outage',
-    'New deployment rolled out to execution service',
-    'OKX rate-limit warning on Delta-BNB-Arb',
-    'Bot Eta-AVAX-Breakout entered error state',
-    'Daily settlement completed successfully',
-    'WhatsApp notifier token refreshed',
-    'Order rejected: insufficient margin on Zeta-XRP-Scalp',
-  ];
-  return msgs.map((m,i)=>({id:'inc'+i,severity:sev[i%sev.length],message:m,t:NOW-Math.floor(r()*3*DAY)})).sort((a,b)=>b.t-a.t);
-}
-const INCIDENTS = genIncidents();
-
-function genLogs(){
-  const r=mulberry32(3391);
-  const levels=['critical','error','warning','info','info','info','debug'];
-  const types=['signal','trading','position','system'];
-  const out=[];
-  for(let i=0;i<260;i++){
-    const b=BASE_BOTS[Math.floor(r()*BASE_BOTS.length)];
-    const type=types[Math.floor(r()*types.length)];
-    const level=levels[Math.floor(r()*levels.length)];
-    const t=NOW-Math.floor(r()*30*DAY);
-    let msg;
-    if(type==='signal') msg=`Signal generated: ${r()<0.5?'BUY':'SELL'} ${b.symbol} @ ${(FALLBACK_PRICE[b.symbol]*(0.95+r()*0.1)).toFixed(2)}`;
-    else if(type==='trading') msg=`Order ${r()<0.5?'filled':'submitted'} ${b.symbol} size ${(1000+r()*8000).toFixed(0)}`;
-    else if(type==='position') msg=`Position ${r()<0.5?'opened':'closed'} on ${b.symbol} pnl ${((r()-0.4)*500).toFixed(2)}`;
-    else msg=`${['Heartbeat OK','Config reloaded','Cache warmup','Reconnect attempt','Risk check passed'][Math.floor(r()*5)]}`;
-    out.push({id:'l'+i, t, level, type, source:type==='system'?'infra':b.name, message:msg, botId:type==='system'?null:b.id,
-      meta:{requestId:'req_'+Math.floor(r()*1e6).toString(36), exchange:b.exchange, symbol:b.symbol, latencyMs:Math.floor(r()*200)}});
-  }
-  return out.sort((a,b)=>b.t-a.t);
-}
-const LOGS = genLogs();
+// Derive a display base asset from a futures symbol (e.g. BTCUSDT -> BTC, ETHUSDC -> ETH).
+function baseOf(sym){ if(!sym) return ''; const s=String(sym).toUpperCase(); for(const q of ['USDT','USDC','USD','BUSD']){ if(s.endsWith(q)) return s.slice(0,s.length-q.length); } return s; }
 
 /* ============================================================
    API CLIENT — all accounts/config/secrets live in the backend DB.
@@ -259,13 +103,6 @@ function b64ToBlob(b64,type='application/pdf'){
   const bin=atob(b64); const arr=new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
   return new Blob([arr],{type});
-}
-// starred items (assets/bots) kept in localStorage
-function useWatchlist(key){
-  const [list,setList]=useState(()=>PREF.get(key,[]));
-  const has=(id)=>list.includes(id);
-  const toggle=(id)=>setList(l=>{ const n=l.includes(id)?l.filter(x=>x!==id):[...l,id]; PREF.set(key,n); return n; });
-  return {list,has,toggle};
 }
 function toCSV(headers,rows){
   const esc=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
@@ -540,21 +377,6 @@ function AreaChart({data,positive,height=260,resetKey,benchmark}){
     {zoom && <button onClick={()=>setZoom(null)} className="absolute top-1 right-1 text-[11px] bg-white/90 border border-slate-200 rounded px-1.5 py-0.5 text-slate-500 hover:text-navy z-10">reset zoom ✕</button>}
   </div>;
 }
-function Donut({segments,size=180,onSlice}){
-  const total=segments.reduce((a,s)=>a+s.value,0)||1;
-  const r=size/2,cx=r,cy=r,ir=r*0.62; let ang=-Math.PI/2;
-  return <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
-    {segments.map((s,i)=>{
-      const frac=s.value/total; const a2=ang+frac*2*Math.PI; const large=frac>0.5?1:0;
-      const x1=cx+r*Math.cos(ang),y1=cy+r*Math.sin(ang),x2=cx+r*Math.cos(a2),y2=cy+r*Math.sin(a2);
-      const xi1=cx+ir*Math.cos(a2),yi1=cy+ir*Math.sin(a2),xi2=cx+ir*Math.cos(ang),yi2=cy+ir*Math.sin(ang);
-      const d=`M${x1} ${y1} A${r} ${r} 0 ${large} 1 ${x2} ${y2} L${xi1} ${yi1} A${ir} ${ir} 0 ${large} 0 ${xi2} ${yi2} Z`;
-      ang=a2;
-      return <path key={i} d={d} fill={s.color} className={onSlice?'cursor-pointer hover:opacity-80':''} onClick={()=>onSlice&&onSlice(s)}/>;
-    })}
-    <circle cx={cx} cy={cy} r={ir-1} fill="#fff"/>
-  </svg>;
-}
 
 /* ============================================================
    APP CONTEXT
@@ -564,19 +386,8 @@ const useApp = ()=>useContext(App);
 
 function hasPerm(user,perm){ if(!user)return false; if(user.role==='admin')return true; return (user.permissions||[]).includes(perm); }
 
-// helpers using funds + live data
-function fundOfBot(funds,botId){ return funds.find(f=>f.bots.includes(botId)); }
-function totalEquity(data){ return BASE_BOTS.reduce((a,b)=>a+data.bots[b.id].currentEquity,0); }
-function fundEquity(data,fund){ return (fund.bots.length/BASE_BOTS.length)*totalEquity(data); }
-
-// build portfolio series for a set of botIds (align by shortest series)
-function portfolioSeries(data,botIds){
-  const ids=botIds&&botIds.length?botIds:BASE_BOTS.map(b=>b.id);
-  const minLen=Math.min(...ids.map(id=>data.bots[id].series.length));
-  const out=[];
-  for(let i=0;i<minLen;i++){ let sum=0,t=0; ids.forEach(id=>{ const s=data.bots[id].series; const pt=s[s.length-minLen+i]; sum+=pt.equity; t=pt.t; }); out.push({t,equity:sum}); }
-  return out;
-}
+// helper: the fund a bot is assigned to (or undefined). Bots carry fundId; funds carry id+color.
+function fundOf(funds,bot){ return bot&&bot.fundId? funds.find(f=>f.id===bot.fundId) : undefined; }
 function sliceByPeriod(series,period,custom){
   if(period==='all') return series;
   if(period==='custom'&&custom&&custom.start&&custom.end){
@@ -586,7 +397,6 @@ function sliceByPeriod(series,period,custom){
   const cutoff=NOW-days*DAY;
   return series.filter(p=>p.t>=cutoff);
 }
-function maxDrawdown(series){ let peak=-Infinity,mdd=0; series.forEach(p=>{ peak=Math.max(peak,p.equity); mdd=Math.min(mdd,(p.equity-peak)/peak); }); return mdd*100; }
 // Sharpe/Sortino (annualised), max drawdown depth + duration (in days) from an equity series.
 function riskMetrics(series){
   const eq=series.map(p=>p.equity); const rets=[];
@@ -610,27 +420,31 @@ function ExposureBars({title,items,total}){
     </div>
   </div>;
 }
-function RiskPanel({series,botIds,data}){
-  const m=riskMetrics(series);
-  const byEx={},byAsset={};
-  botIds.forEach(id=>{ const b=BASE_BOTS.find(x=>x.id===id); const eq=data.bots[id].currentEquity; byEx[b.exchange]=(byEx[b.exchange]||0)+eq; const base=EX.parse(b.symbol).base; byAsset[base]=(byAsset[base]||0)+eq; });
-  const total=Object.values(byEx).reduce((a,b)=>a+b,0)||1;
+// Risk metrics from the equity series + live exposure broken down by fund and by asset.
+function RiskPanel({series,openBots,byFund}){
+  const m=riskMetrics(series&&series.length?series:[{equity:0}]);
+  const byAsset={};
+  openBots.forEach(b=>{ const k=baseOf(b.symbol); byAsset[k]=(byAsset[k]||0)+Math.abs(b.notional||0); });
+  const fundItems=byFund.filter(f=>f.notional>0).map(f=>[f.name,f.notional]).sort((a,b)=>b[1]-a[1]);
+  const assetItems=Object.entries(byAsset).sort((a,b)=>b[1]-a[1]);
+  const fundTotal=fundItems.reduce((a,x)=>a+x[1],0)||1;
+  const assetTotal=assetItems.reduce((a,x)=>a+x[1],0)||1;
   const M=({label,value,cls,tip})=><div className="bg-slate-50 rounded-lg p-3" title={tip||undefined}>
     <div className="text-[11px] text-slate-500 flex items-center gap-1">{label}{tip&&<Icon name="info" className="w-3 h-3 text-slate-300 cursor-help"/>}</div>
     <div className={`text-lg font-bold tnum mt-0.5 ${cls||'text-navy'}`}>{value}</div>
   </div>;
   return <Card className="p-5">
-    <SectionTitle right={<span className="text-[11px] text-slate-400">on the selected period</span>}>Risk & Exposure</SectionTitle>
+    <SectionTitle right={<span className="text-[11px] text-slate-400">equity history · live exposure</span>}>Risk & Exposure</SectionTitle>
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
       <M label="Sharpe" value={m.sharpe.toFixed(2)} tip="Risk-adjusted return: annualised mean daily return ÷ volatility of all returns. Higher is better — above 1 is solid, above 2 is excellent."/>
       <M label="Sortino" value={m.sortino.toFixed(2)} tip="Like Sharpe, but only downside (losing-day) volatility is penalised. Rewards strategies whose swings are mostly to the upside."/>
       <M label="Max Drawdown" value={fmtPctPlain(m.maxDrawdownPct)} cls="text-danger" tip="The largest peak-to-trough drop in equity over the period — your worst observed loss from a high-water mark."/>
       <M label="DD Duration" value={m.ddDurationDays+' d'} tip="Longest stretch, in days, the portfolio stayed below a previous equity peak before recovering."/>
     </div>
-    <div className="grid sm:grid-cols-2 gap-5">
-      <ExposureBars title="Exposure by exchange" items={Object.entries(byEx).sort((a,b)=>b[1]-a[1])} total={total}/>
-      <ExposureBars title="Exposure by asset" items={Object.entries(byAsset).sort((a,b)=>b[1]-a[1])} total={total}/>
-    </div>
+    {(fundItems.length||assetItems.length)? <div className="grid sm:grid-cols-2 gap-5">
+      {fundItems.length>0&&<ExposureBars title="Exposure by fund" items={fundItems} total={fundTotal}/>}
+      {assetItems.length>0&&<ExposureBars title="Exposure by asset" items={assetItems} total={assetTotal}/>}
+    </div> : <div className="text-sm text-slate-400">No open exposure.</div>}
   </Card>;
 }
 // Underwater (drawdown-over-time) chart: red area from 0 down to the running drawdown.
@@ -668,28 +482,29 @@ function PnlCalendar({series}){
    LIVE-DATA UI
    ============================================================ */
 function LiveBadge({status}){
-  if(status==='live') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-success" data-tip="Live market data"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>LIVE</span>;
-  if(status==='partial') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-amber-600"><span className="w-2 h-2 rounded-full bg-amber-500"/>PARTIAL</span>;
-  if(status==='sim') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400"><span className="w-2 h-2 rounded-full bg-slate-400"/>SIM</span>;
+  if(status==='live') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-success" data-tip="Connected to an exchange"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>LIVE</span>;
+  if(status==='partial') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-amber-600" data-tip="Sync error on last run"><span className="w-2 h-2 rounded-full bg-amber-500"/>PARTIAL</span>;
+  if(status==='offline') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400" data-tip="No exchange connected"><span className="w-2 h-2 rounded-full bg-slate-400"/>OFFLINE</span>;
   return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400"><span className="w-2 h-2 rounded-full bg-slate-300 animate-pulse"/>…</span>;
 }
+// Ticker tape of open positions: base asset + unrealized PnL. Hidden when there are none.
 function MarketTicker(){
-  const {data}=useApp(); if(!data) return null;
+  const {data}=useApp(); if(!data||!data.openBots.length) return null;
   return <div className="flex gap-2 overflow-x-auto pb-1 mb-4 -mx-1 px-1">
-    {BASE_BOTS.map(b=>{ const d=data.bots[b.id]; const base=EX.parse(b.symbol).base; return <div key={b.id} className="shrink-0 bg-white border border-slate-200/80 rounded-lg px-3 py-2 flex items-center gap-2.5">
-      <span className="font-mono text-xs font-semibold text-navy">{base}</span>
-      <span className="font-mono text-xs text-slate-600 tnum">{fmtPrice(d.price)}</span>
-      <span className={`text-[11px] font-medium tnum ${clsPnl(d.changePct)}`}>{fmtPct(d.changePct)}</span>
-    </div>; })}
+    {data.openBots.map(b=><div key={b.id} className="shrink-0 bg-white border border-slate-200/80 rounded-lg px-3 py-2 flex items-center gap-2.5">
+      <span className="font-mono text-xs font-semibold text-navy">{baseOf(b.symbol)}</span>
+      <span className={`text-[11px] font-medium ${b.side==='LONG'?'text-success':'text-danger'}`}>{b.side}</span>
+      <span className={`text-[11px] font-medium tnum ${clsPnl(b.unrealizedPnl)}`}>{fmtSigned(b.unrealizedPnl)}</span>
+    </div>)}
   </div>;
 }
-function LoadingScreen({status}){
+function LoadingScreen(){
   return <div className="h-full grid place-items-center bg-bg">
     <div className="text-center">
       <Logo className="h-8 text-navy mx-auto mb-3"/>
       <div className="flex items-center justify-center gap-2 text-slate-500 text-sm">
         <span className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-gold animate-spin"/>
-        {status==='sim'?'Live data unavailable — loading simulation…':'Connecting to live market data…'}
+        Loading your portfolio…
       </div>
     </div>
   </div>;
@@ -763,21 +578,20 @@ function Login(){
 // Nav entries: [icon, label, path, shortLabel, perm]. perm gates visibility (admins have all).
 const MAIN_NAV=[
   ['activity','Activity Dashboard','/activity','Activity','view_activity'],
-  ['radio','Real-Time','/realtime','Live','view_realtime'],
-  ['dollar','Prices','/prices','Prices','view_activity'],
-  ['briefcase','Trades','/trades','Trades','view_trades'],
-  ['list','Activity Log','/logs','Logs','view_logs'],
+  ['radio','Live','/realtime','Live','view_realtime'],
+  ['briefcase','Positions','/trades','Positions','view_trades'],
+  ['trendup','Prices','/prices','Prices','view_activity'],
 ];
 const TOOLS_NAV=[
-  ['clock','Timeline','/timeline','Timeline','view_trades'],
+  ['layers','Funds','/funds','Funds','view_trades'],
   ['database','System Status','/status','Status','view_activity'],
   ['filetext','Reports','/admin/reports','Reports','view_reports'],
 ];
 const ADMIN_NAV=[
+  ['list','Bots','/admin/bots'],
   ['users','Users','/admin/users'],
   ['link','Exchanges','/admin/exchanges'],
   ['msg','WhatsApp','/admin/openwa'],
-  ['layers','Funds','/admin/funds'],
 ];
 const ACCT_NAV=[
   ['usercircle','Profile','/profile'],
@@ -816,25 +630,23 @@ function Sidebar(){
   </aside>;
 }
 
+// Global search over detected bots (by symbol / exchange / assigned fund).
 function GlobalSearch(){
-  const {navigate,data}=useApp();
+  const {navigate,data,funds,user}=useApp();
   const [q,setQ]=useState(''); const [open,setOpen]=useState(false); const ref=useRef();
   useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
   const res=useMemo(()=>{
     if(!q.trim())return null; const s=q.toLowerCase();
-    const bots=BASE_BOTS.filter(b=>b.name.toLowerCase().includes(s)||b.symbol.toLowerCase().includes(s)).slice(0,4);
-    const trades=(data?data.trades:[]).filter(t=>t.bot.toLowerCase().includes(s)||t.symbol.toLowerCase().includes(s)||t.strategy.toLowerCase().includes(s)).slice(0,4);
-    const logs=LOGS.filter(l=>l.message.toLowerCase().includes(s)||l.source.toLowerCase().includes(s)).slice(0,4);
-    return {bots,trades,logs};
-  },[q,data]);
+    const bots=(data?data.bots:[]).filter(b=> b.symbol.toLowerCase().includes(s)||b.exchange.toLowerCase().includes(s)||(fundOf(funds,b)?.name||'').toLowerCase().includes(s)).slice(0,8);
+    return {bots};
+  },[q,data,funds]);
+  const go=user&&user.role==='admin'?'/admin/bots':'/trades';
   return <div ref={ref} className="relative flex-1 max-w-md">
     <Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-    <input value={q} onFocus={()=>setOpen(true)} onChange={e=>{setQ(e.target.value);setOpen(true);}} placeholder="Search bots, trades, logs…" className="w-full bg-slate-100 focus:bg-white border border-transparent focus:border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none"/>
+    <input value={q} onFocus={()=>setOpen(true)} onChange={e=>{setQ(e.target.value);setOpen(true);}} placeholder="Search positions by symbol…" className="w-full bg-slate-100 focus:bg-white border border-transparent focus:border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none"/>
     {open&&res&&<div className="absolute z-40 mt-1.5 w-full bg-white rounded-xl shadow-xl border border-slate-200 p-2 max-h-96 overflow-y-auto fadein">
-      {res.bots.length===0&&res.trades.length===0&&res.logs.length===0&&<div className="text-sm text-slate-400 px-3 py-4 text-center">No results</div>}
-      {res.bots.length>0&&<div><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">Bots</div>{res.bots.map(b=><button key={b.id} onClick={()=>{navigate('/activity/bot/'+b.id+'?name='+encodeURIComponent(b.name));setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center justify-between"><span>{b.name}</span><span className="font-mono text-xs text-slate-400">{b.symbol}</span></button>)}</div>}
-      {res.trades.length>0&&<div className="mt-1"><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">Trades</div>{res.trades.map(t=><button key={t.id} onClick={()=>{navigate('/trades');setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center justify-between"><span>{t.bot}</span><span className={'font-mono text-xs '+clsPnl(t.pnl)}>{fmtSigned(t.pnl)}</span></button>)}</div>}
-      {res.logs.length>0&&<div className="mt-1"><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">Logs</div>{res.logs.map(l=><button key={l.id} onClick={()=>{navigate('/logs');setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm truncate">{l.message}</button>)}</div>}
+      {res.bots.length===0&&<div className="text-sm text-slate-400 px-3 py-4 text-center">No results</div>}
+      {res.bots.length>0&&<div><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">Positions</div>{res.bots.map(b=>{ const f=fundOf(funds,b); return <button key={b.id} onClick={()=>{navigate(go);setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center justify-between gap-2"><span className="flex items-center gap-2"><span className="font-mono text-xs text-navy">{b.symbol}</span>{f&&<span className="w-2 h-2 rounded-full" style={{background:f.color}}/>}<span className="text-[11px] text-slate-400">{b.exchange}</span></span><span className={'font-mono text-xs '+clsPnl(b.unrealizedPnl)}>{fmtSigned(b.unrealizedPnl)}</span></button>; })}</div>}
     </div>}
   </div>;
 }
@@ -858,12 +670,7 @@ function Header(){
       <button onClick={()=>setBell(!bell)} className="relative p-2 rounded-lg hover:bg-slate-100"><Icon name="bell" className="w-5 h-5 text-slate-600"/>{unacked>0&&<span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-danger text-white text-[10px] rounded-full grid place-items-center">{unacked}</span>}</button>
       {bell&&<div className="absolute right-0 mt-1.5 w-80 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-40 fadein max-h-96 overflow-y-auto">
         <div className="text-xs font-semibold text-navy px-2 py-1.5 flex items-center justify-between">Alerts {unacked>0&&<span className="text-[10px] text-danger font-normal">{unacked} pending ack</span>}</div>
-        {alerts.length===0 && <>
-          {INCIDENTS.slice(0,5).map(i=><div key={i.id} className="px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5">
-            <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${i.severity==='critical'?'bg-danger':i.severity==='warning'?'bg-amber-500':'bg-blue-500'}`}/>
-            <div><div className="text-xs text-navy leading-snug">{i.message}</div><div className="text-[10px] text-slate-400 mt-0.5">{fmtDT(i.t)}</div></div>
-          </div>)}
-        </>}
+        {alerts.length===0 && <div className="text-xs text-slate-400 px-2 py-4 text-center">No alerts.</div>}
         {alerts.map(a=><div key={a.id} className="px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5">
           <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${a.ackedAt?'bg-success':'bg-danger'}`}/>
           <div className="flex-1 min-w-0">
@@ -952,9 +759,26 @@ function sortRows(rows,sort,getters){
 /* ============================================================
    ACTIVITY DASHBOARD
    ============================================================ */
-function PeriodControls({period,setPeriod,custom,setCustom,fund,setFund,funds,showFund=true}){
+// Reusable empty-state card shown when a list/table has no rows yet.
+function EmptyState({icon='database',title,hint,action}){
+  return <Card className="p-10 text-center">
+    <Icon name={icon} className="w-10 h-10 mx-auto text-slate-200 mb-2"/>
+    <div className="text-sm font-medium text-navy">{title}</div>
+    {hint&&<div className="text-sm text-slate-400 mt-1 max-w-sm mx-auto">{hint}</div>}
+    {action&&<div className="mt-4 flex justify-center">{action}</div>}
+  </Card>;
+}
+// Coloured side label for a position (green LONG / red SHORT).
+function SideTag({side}){ return <span className={side==='LONG'?'text-success font-medium':'text-danger font-medium'}>{side}</span>; }
+// A fund's colour dot + name (or a muted "Unassigned").
+function FundTag({fund,onClick}){
+  if(!fund) return <span className="text-xs text-slate-400">Unassigned</span>;
+  return <Badge color={fund.color} dot onClick={onClick}>{fund.name}</Badge>;
+}
+
+// Period selector operating on the real equity history (data.series).
+function PeriodControls({period,setPeriod,custom,setCustom}){
   return <div className="flex flex-wrap items-center gap-2">
-    {showFund&&<Select value={fund} onChange={setFund} className="w-40" options={[{value:'all',label:'All Funds'},...funds.map(f=>({value:f.id,label:f.name}))]}/>}
     <Select value={period} onChange={setPeriod} className="w-40" options={[{value:'7',label:'Last 7 days'},{value:'30',label:'Last 30 days'},{value:'90',label:'Last 90 days'},{value:'365',label:'Last 365 days'},{value:'all',label:'All time'},{value:'custom',label:'Custom range'}]}/>
     {period==='custom'&&<div className="flex items-center gap-1.5">
       <input type="date" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" onChange={e=>setCustom({...custom,start:e.target.value?new Date(e.target.value).getTime():null})}/>
@@ -974,7 +798,7 @@ function OnboardingCard(){
   if(user.role!=='admin'||dismissed) return null;
   const steps=[
     {label:'Change the default admin password', done:false, to:'/profile'},
-    {label:'Connect your exchange API keys', done:false, to:'/admin/exchanges'},
+    {label:'Connect your Binance API key', done:false, to:'/admin/exchanges'},
     {label:'Set up WhatsApp alerts (CallMeBot)', done:!!openwaOk, to:'/admin/openwa'},
   ];
   const left=steps.filter(s=>!s.done).length;
@@ -992,296 +816,114 @@ function OnboardingCard(){
   </Card>;
 }
 
-function ActivityPage({botId}){
+function ActivityPage(){
   const {funds,navigate,user,data}=useApp();
   const [period,setPeriod]=useState(()=>PREF.get('activity_period2','90'));
   const [custom,setCustom]=useState({start:null,end:null});
-  const [fund,setFund]=useState(()=>PREF.get('activity_fund','all'));
   useEffect(()=>{ PREF.set('activity_period2',period); },[period]);
-  useEffect(()=>{ PREF.set('activity_fund',fund); },[fund]);
-  // a remembered fund that no longer exists falls back to the whole portfolio
-  useEffect(()=>{ if(fund!=='all'&&funds.length&&!funds.find(f=>f.id===fund)) setFund('all'); },[funds]);// eslint-disable-line
-  const [sort,setSort]=useState({col:'pnl',dir:'desc'});
-  const [btc,setBtc]=useState(null); const [showBench,setShowBench]=useState(false);
-  useEffect(()=>{ let alive=true; fetchKlines('Binance','BTCUSDT',365,'day').then(r=>{ if(!alive)return; const m={}; r.forEach(x=>{ m[new Date(x.t).toISOString().slice(0,10)]=x.close; }); setBtc(m); }).catch(()=>{}); return ()=>{alive=false;}; },[]);
   if(!hasPerm(user,'view_activity')) return <Denied/>;
 
-  const bot = botId? BASE_BOTS.find(b=>b.id===botId): null;
-  const selFund = fund!=='all'? funds.find(f=>f.id===fund): null;
-
-  // scope botIds
-  let botIds;
-  if(bot) botIds=[bot.id];
-  else if(selFund) botIds=selFund.bots;
-  else botIds=BASE_BOTS.map(b=>b.id);
-
-  const full=portfolioSeries(data,botIds);
-  const series=sliceByPeriod(full,period,custom);
-  const periodPnl = series.length>1? series[series.length-1].equity-series[0].equity : 0;
-  const periodPnlPct = series.length>1? periodPnl/series[0].equity*100 : 0;
+  const {series,equity,openBots,byFund,bots}=data;
+  const view=sliceByPeriod(series,period,custom);            // real equity history, sliced
+  const hasHistory=series.length>=2;
+  const periodPnl = view.length>1? view[view.length-1].equity-view[0].equity : 0;
+  const periodPnlPct = view.length>1&&view[0].equity? periodPnl/view[0].equity*100 : 0;
   const positive = periodPnl>=0;
-  const eqNow = full[full.length-1].equity;
 
-  // previous period comparison
-  const prevSeries = useMemo(()=>{
-    if(period==='all'||period==='custom') return null;
-    const days={'7':7,'30':30,'90':90,'365':365}[period];
-    const start=NOW-2*days*DAY, end=NOW-days*DAY;
-    return full.filter(p=>p.t>=start&&p.t<=end);
-  },[period,fund,botId]);
+  // PnL day = last snapshot's pnlDay (or last-2 snapshots delta as fallback)
+  const lastSnap = series.length? series[series.length-1] : null;
+  const pnlDay = lastSnap&&lastSnap.pnlDay!=null? lastSnap.pnlDay
+    : series.length>=2? series[series.length-1].equity-series[series.length-2].equity : 0;
+  const openPnl = openBots.reduce((a,b)=>a+(b.unrealizedPnl||0),0);
+  const exposure = openBots.reduce((a,b)=>a+Math.abs(b.notional||0),0);
+  const fundsWithExposure = byFund.filter(f=>f.id!=null);  // real funds (drop the Unassigned bucket from this list view)
 
-  // BTC buy-and-hold benchmark, normalised to the period's starting equity
-  const benchmark = useMemo(()=>{
-    if(!showBench||!btc||series.length<2) return null;
-    const day=t=>new Date(t).toISOString().slice(0,10);
-    const baseBtc=btc[day(series[0].t)]; if(!baseBtc) return null;
-    let last=null;
-    return series.map(p=>{ const c=btc[day(p.t)]; if(c!=null) last=c; return last!=null? series[0].equity*(last/baseBtc): NaN; });
-  },[showBench,btc,series]);
-
-  // trades in range
-  const rangeStart = series.length? series[0].t : NOW;
-  const inScope = (t)=> botIds.includes(t.botId);
-  const rangeTrades = data.trades.filter(t=>inScope(t)&&t.entry>=rangeStart);
-  const closedRange = rangeTrades.filter(t=>t.status==='Closed');
-  const winRate = closedRange.length? closedRange.filter(t=>t.pnl>0).length/closedRange.length*100 : 0;
-  const prevTrades = prevSeries? data.trades.filter(t=>inScope(t)&&t.entry>=prevSeries[0]?.t&&t.entry<rangeStart):[];
-  const prevClosed = prevTrades.filter(t=>t.status==='Closed');
-  const prevWin = prevClosed.length? prevClosed.filter(t=>t.pnl>0).length/prevClosed.length*100:0;
-
-  // KPI day/week/month from full series
-  const last=full[full.length-1].equity;
-  const pnlDay=last-full[full.length-2].equity;
-  const pnlWeek=last-full[full.length-8].equity;
-  const pnlMonth=last-full[full.length-31].equity;
-  const mdd=maxDrawdown(full);
-  const activeBots=botIds.filter(id=>data.bots[id].status==='active').length;
-
-  // bot ranking
-  const ranking=botIds.map(id=>{ const b=BASE_BOTS.find(x=>x.id===id); const st=data.stats[id]; const f=fundOfBot(funds,id); return {...b,...st,fund:f,status:data.bots[id].status}; });
-  const sortedRank=sortRows(ranking,sort,{name:r=>r.name,fund:r=>r.fund?.name||'',exchange:r=>r.exchange,symbol:r=>r.symbol,pnl:r=>r.pnl,winRate:r=>r.winRate,trades:r=>r.trades,status:r=>r.status});
-
-  // recent positions
-  const recent = bot? data.trades.filter(t=>t.botId===bot.id) : data.trades.filter(t=>inScope(t)).slice(0,10);
-  const recentList = bot? recent : recent.slice(0,10);
-
-  const title = bot? bot.name : selFund? selFund.name : 'Activity Dashboard';
-  const subtitle = bot? `Individual bot · ${bot.exchange} · ${bot.symbol}` : selFund? `Fund overview · ${selFund.bots.length} bots` : 'Portfolio performance across all funds';
-
-  const fundKpis = selFund? [
-    ['Fund Equity', fmtUSD(fundEquity(data,selFund))],
-    ['Fund PnL', fmtSigned(selFund.bots.reduce((a,id)=>a+data.stats[id].pnl,0)), selFund.bots.reduce((a,id)=>a+data.stats[id].pnl,0)],
-    ['Active Bots', `${selFund.bots.filter(id=>data.bots[id].status==='active').length} / ${selFund.bots.length}`],
-    ['Win Rate', fmtPctPlain(selFund.bots.reduce((a,id)=>a+data.stats[id].winRate,0)/selFund.bots.length)],
-    ['Best Bot', BASE_BOTS.find(b=>b.id===selFund.bots.slice().sort((a,b)=>data.stats[b].pnl-data.stats[a].pnl)[0])?.name||'—'],
-    ['Fund Share', fmtPctPlain(selFund.bots.length/BASE_BOTS.length*100)],
-  ]:null;
+  const empty = !hasHistory && !openBots.length;
 
   return <div>
-    <PageHead title={title} subtitle={subtitle}
-      actions={ bot? <Btn variant="outline" onClick={()=>navigate('/activity')}><Icon name="back" className="w-4 h-4"/>Back to LNO overview</Btn>
-        : <PeriodControls {...{period,setPeriod,custom,setCustom,fund,setFund,funds}}/> }/>
+    <PageHead title="Activity Dashboard" subtitle="Portfolio performance across all funds"
+      actions={hasHistory&&<PeriodControls {...{period,setPeriod,custom,setCustom}}/>}/>
 
-    {bot&&<div className="mb-5"><PeriodControls {...{period,setPeriod,custom,setCustom,fund,setFund,funds}} showFund={false}/></div>}
+    <OnboardingCard/>
+    <MarketTicker/>
 
-    {!bot&&!selFund&&<OnboardingCard/>}
-    {!bot&&!selFund&&<MarketTicker/>}
-
-    {/* KPI cards */}
-    {fundKpis? <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-5">
-        {fundKpis.map(([l,v,raw],i)=><KpiCard key={i} label={l} value={<span className={raw!=null?clsPnl(raw):''}>{v}</span>}/>)}
+    {empty? <EmptyState icon="dollar" title="No positions yet"
+        hint="Connect an exchange and run a sync — your account equity, positions and funds will appear here automatically."
+        action={user.role==='admin'&&<Btn onClick={()=>navigate('/admin/exchanges')}><Icon name="link" className="w-4 h-4"/>Connect an exchange</Btn>}/>
+    : <>
+      {/* Hero: account equity + KPI cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+        <KpiCard label="Account Equity" value={fmtUSD(equity)} icon="dollar"/>
+        <KpiCard label="PnL Day" value={<span className={clsPnl(pnlDay)}>{fmtSigned(pnlDay)}</span>} badge={equity?<TrendBadge pct={pnlDay/equity*100}/>:null}/>
+        <KpiCard label="Open PnL" value={<span className={clsPnl(openPnl)}>{fmtSigned(openPnl)}</span>}/>
+        <KpiCard label="Exposure" value={fmtUSD(exposure)} icon="briefcase"/>
+        <KpiCard label="Open / Funds" value={`${openBots.length} / ${fundsWithExposure.length||funds.length}`} icon="layers"/>
       </div>
-    : <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-5">
-        <KpiCard label="Total Equity" value={fmtUSD(eqNow)} icon="dollar"/>
-        <KpiCard label="PnL Day" value={<span className={clsPnl(pnlDay)}>{fmtSigned(pnlDay)}</span>} badge={<TrendBadge pct={pnlDay/eqNow*100}/>}/>
-        <KpiCard label="PnL Week" value={<span className={clsPnl(pnlWeek)}>{fmtSigned(pnlWeek)}</span>} badge={<TrendBadge pct={pnlWeek/eqNow*100}/>}/>
-        <KpiCard label="PnL Month" value={<span className={clsPnl(pnlMonth)}>{fmtSigned(pnlMonth)}</span>} badge={<TrendBadge pct={pnlMonth/eqNow*100}/>}/>
-        <KpiCard label="Max Drawdown" value={<span className="text-danger">{fmtPctPlain(mdd)}</span>}/>
-        <KpiCard label="Active Bots" value={`${activeBots} / ${botIds.length}`} icon="power"/>
-      </div>}
 
-    {/* Equity curve */}
-    <Card className="p-5 mb-5">
-      <SectionTitle right={<div className="flex items-center gap-3">
-        <button onClick={()=>setShowBench(v=>!v)} className={`text-xs px-2 py-1 rounded-lg border transition ${showBench?'border-gold text-gold bg-gold/5':'border-slate-200 text-slate-500 hover:text-navy'}`}>vs BTC hold</button>
-        <span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} <span className="tnum">({fmtPct(periodPnlPct)})</span> this period</span>
-      </div>}>Equity Curve</SectionTitle>
-      <AreaChart data={series} positive={positive} resetKey={`${period}|${fund}|${botId||''}|${custom.start||''}`} benchmark={benchmark}/>
-      <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{series.length?fmtDate(series[0].t):''}</span><span>{series.length?fmtDate(series[series.length-1].t):''}</span></div>
-    </Card>
-
-    {/* Period summary */}
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-      <Card className="p-4"><div className="text-xs text-slate-500">Period PnL</div><div className={`text-xl font-bold mt-1 tnum ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)}</div></Card>
-      <Card className="p-4"><div className="text-xs text-slate-500">Period PnL %</div><div className={`text-xl font-bold mt-1 tnum ${clsPnl(periodPnl)}`}>{fmtPct(periodPnlPct)}</div></Card>
-      <Card className="p-4"><div className="text-xs text-slate-500">Win Rate</div><div className="text-xl font-bold mt-1 text-navy">{closedRange.length?fmtPctPlain(winRate):'—'}</div><div className="text-xs text-slate-400 mt-1">prev: {prevClosed.length?fmtPctPlain(prevWin):'—'}</div></Card>
-      <Card className="p-4"><div className="text-xs text-slate-500">Total Trades</div><div className="text-xl font-bold mt-1 text-navy">{rangeTrades.length}</div><div className="text-xs text-slate-400 mt-1">prev: {prevTrades.length}</div></Card>
-    </div>
-
-    {/* Risk & exposure */}
-    <div className="mb-5"><RiskPanel series={series} botIds={botIds} data={data}/></div>
-
-    {/* Drawdown + PnL calendar */}
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-      <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">underwater</span>}>Drawdown</SectionTitle><Underwater series={series}/></Card>
-      <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">daily</span>}>PnL Calendar</SectionTitle><PnlCalendar series={series}/></Card>
-    </div>
-
-    <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-      {/* Fund repartition (global only) */}
-      {!bot&&!selFund&&<Card className="p-5 xl:col-span-1">
-        <SectionTitle>Fund Repartition</SectionTitle>
-        <div className="flex items-center justify-center mb-4">
-          <Donut segments={funds.map(f=>({label:f.name,value:f.bots.length,color:f.color}))} onSlice={s=>{const f=funds.find(x=>x.name===s.label); if(f)setFund(f.id);}}/>
-        </div>
-        <div className="space-y-2.5">
-          {funds.map(f=>{ const share=f.bots.length/BASE_BOTS.length*100; const eq=fundEquity(data,f); return <div key={f.id}>
-            <div className="flex items-center justify-between text-xs mb-1">
-              <button onClick={()=>setFund(f.id)} className="flex items-center gap-1.5 font-medium text-navy hover:underline"><span className="w-2.5 h-2.5 rounded-full" style={{background:f.color}}/>{f.name}</button>
-              <span className="text-slate-400">{f.bots.length} bots · {fmtUSD(eq)}</span>
-            </div>
-            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{width:share+'%',background:f.color}}/></div>
-          </div>; })}
-        </div>
-      </Card>}
-
-      {/* Bot performance ranking */}
-      <Card className={`overflow-hidden ${!bot&&!selFund?'xl:col-span-2':'xl:col-span-3'}`}>
-        <div className="p-5 pb-0"><SectionTitle right={hasPerm(user,'export_data')&&<ExportMenu filename="lno_bot_ranking" size="sm" variant="outline" label="Export"
-          headers={['Bot','Fund','Exchange','Symbol','PnL','Win %','Trades','Status']}
-          getRows={()=>sortedRank.map(r=>[r.name,r.fund?.name||'',r.exchange,r.symbol,Math.round(r.pnl),Number(r.winRate.toFixed(1)),r.trades,r.status])}/>}>Bot Performance Ranking</SectionTitle></div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-xs"><tr className="border-b border-slate-100">
-              <SortHeader label="Bot" col="name" sort={sort} setSort={setSort}/>
-              <SortHeader label="Fund" col="fund" sort={sort} setSort={setSort}/>
-              <SortHeader label="Exchange" col="exchange" sort={sort} setSort={setSort} className="hidden md:table-cell"/>
-              <SortHeader label="Symbol" col="symbol" sort={sort} setSort={setSort} className="hidden md:table-cell"/>
-              <SortHeader label="PnL" col="pnl" sort={sort} setSort={setSort} align="right"/>
-              <SortHeader label="Win%" col="winRate" sort={sort} setSort={setSort} align="right" className="hidden sm:table-cell"/>
-              <SortHeader label="Trades" col="trades" sort={sort} setSort={setSort} align="right" className="hidden sm:table-cell"/>
-              <SortHeader label="Status" col="status" sort={sort} setSort={setSort}/>
-            </tr></thead>
-            <tbody>
-              {sortedRank.map(r=><tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
-                <td className="px-3 py-2.5"><button onClick={()=>navigate('/activity/bot/'+r.id+'?name='+encodeURIComponent(r.name))} className="font-medium text-navy hover:text-gold">{r.name}</button></td>
-                <td className="px-3 py-2.5">{r.fund&&<Badge color={r.fund.color} dot onClick={()=>setFund(r.fund.id)}>{r.fund.name}</Badge>}</td>
-                <td className="px-3 py-2.5 hidden md:table-cell text-slate-500">{r.exchange}</td>
-                <td className="px-3 py-2.5 hidden md:table-cell font-mono text-xs text-slate-500">{r.symbol}</td>
-                <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(r.pnl)}`}>{fmtSigned(r.pnl)}</td>
-                <td className="px-3 py-2.5 text-right hidden sm:table-cell tnum">{fmtPctPlain(r.winRate)}</td>
-                <td className="px-3 py-2.5 text-right hidden sm:table-cell tnum">{r.trades}</td>
-                <td className="px-3 py-2.5"><StatusPill status={r.status}/></td>
-              </tr>)}
-            </tbody>
-          </table>
-        </div>
+      {/* Equity curve */}
+      <Card className="p-5 mb-5">
+        <SectionTitle right={hasHistory&&<span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} <span className="tnum">({fmtPct(periodPnlPct)})</span> this period</span>}>Equity Curve</SectionTitle>
+        {hasHistory? <>
+          <AreaChart data={view} positive={positive} resetKey={`${period}|${custom.start||''}`}/>
+          <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{view.length?fmtDate(view[0].t):''}</span><span>{view.length?fmtDate(view[view.length-1].t):''}</span></div>
+        </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">No equity history yet — the daily sync records one snapshot per day.</div>}
       </Card>
-    </div>
 
-    {/* Recent / all positions */}
-    <Card className="overflow-hidden mt-5">
-      <div className="p-5 pb-0"><SectionTitle>{bot?'All Positions':'Recent Positions'}</SectionTitle></div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      {/* By-fund breakdown */}
+      <Card className="overflow-hidden mb-5">
+        <div className="p-5 pb-3"><SectionTitle>By Fund</SectionTitle></div>
+        {byFund.length===0? <div className="px-5 pb-5 text-sm text-slate-400">No funds yet.</div>
+        : <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-            <th className="px-3 py-2.5 text-left font-medium">Entry</th><th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">Exit</th>
-            {!bot&&<th className="px-3 py-2.5 text-left font-medium">Bot</th>}{!bot&&<th className="px-3 py-2.5 text-left font-medium">Fund</th>}
-            <th className="px-3 py-2.5 text-left font-medium">Symbol</th><th className="px-3 py-2.5 text-left font-medium">Side</th>
-            <th className="px-3 py-2.5 text-right font-medium">PnL</th><th className="px-3 py-2.5 text-right font-medium hidden sm:table-cell">PnL%</th>
-            <th className="px-3 py-2.5 text-right font-medium hidden md:table-cell">Duration</th><th className="px-3 py-2.5 text-left font-medium">Status</th>
+            <th className="px-4 py-2.5 text-left font-medium">Fund</th>
+            <th className="px-4 py-2.5 text-right font-medium">Open PnL</th>
+            <th className="px-4 py-2.5 text-right font-medium">Exposure</th>
+            <th className="px-4 py-2.5 text-right font-medium">Positions</th>
           </tr></thead>
           <tbody>
-            {recentList.map(t=>{ const f=fundOfBot(funds,t.botId); return <tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50/60">
-              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDT(t.entry)}</td>
-              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap hidden md:table-cell">{t.exit?fmtDT(t.exit):'—'}</td>
-              {!bot&&<td className="px-3 py-2.5 font-medium text-navy">{t.bot}</td>}
-              {!bot&&<td className="px-3 py-2.5">{f&&<Badge color={f.color} dot onClick={()=>setFund(f.id)}>{f.name}</Badge>}</td>}
-              <td className="px-3 py-2.5 font-mono text-xs">{t.symbol}</td>
-              <td className="px-3 py-2.5"><span className={t.side==='Long'?'text-success':'text-danger'}>{t.side}</span></td>
-              <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(t.pnl)}`}>{fmtSigned(t.pnl)}</td>
-              <td className={`px-3 py-2.5 text-right hidden sm:table-cell tnum ${clsPnl(t.pnlPct)}`}>{fmtPct(t.pnlPct)}</td>
-              <td className="px-3 py-2.5 text-right hidden md:table-cell text-slate-500">{fmtDur(t.durMin)}</td>
-              <td className="px-3 py-2.5"><StatusPill status={t.status}/></td>
+            {byFund.map(f=><tr key={f.id||'unassigned'} className="border-b border-slate-50 hover:bg-slate-50/60">
+              <td className="px-4 py-2.5"><span className="flex items-center gap-2">{f.id!=null?<span className="w-2.5 h-2.5 rounded-full" style={{background:f.color}}/>:<span className="w-2.5 h-2.5 rounded-full border border-slate-300"/>}<span className={f.id!=null?'font-medium text-navy':'text-slate-500'}>{f.name}</span></span></td>
+              <td className={`px-4 py-2.5 text-right tnum ${clsPnl(f.uPnl)}`}>{fmtSigned(f.uPnl)}</td>
+              <td className="px-4 py-2.5 text-right tnum text-slate-500">{fmtUSD(f.notional)}</td>
+              <td className="px-4 py-2.5 text-right tnum">{f.bots.length}</td>
+            </tr>)}
+          </tbody>
+        </table></div>}
+      </Card>
+
+      {/* Risk & exposure (only meaningful with history/exposure) */}
+      {(hasHistory||openBots.length>0)&&<div className="mb-5"><RiskPanel series={view.length?view:series} openBots={openBots} byFund={byFund}/></div>}
+
+      {/* Drawdown + PnL calendar (need history) */}
+      {hasHistory&&<div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">underwater</span>}>Drawdown</SectionTitle><Underwater series={view}/></Card>
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">daily</span>}>PnL Calendar</SectionTitle><PnlCalendar series={view}/></Card>
+      </div>}
+
+      {/* Open positions snapshot */}
+      <Card className="overflow-hidden">
+        <div className="p-5 pb-0"><SectionTitle right={<button onClick={()=>navigate(hasPerm(user,'view_realtime')?'/realtime':'/trades')} className="text-xs text-gold hover:underline">View all</button>}>Open Positions</SectionTitle></div>
+        {openBots.length===0? <div className="p-8 text-center text-slate-400 text-sm">No open positions.</div>
+        : <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+            <th className="px-3 py-2.5 text-left font-medium">Symbol</th><th className="px-3 py-2.5 text-left font-medium">Side</th>
+            <th className="px-3 py-2.5 text-left font-medium">Fund</th>
+            <th className="px-3 py-2.5 text-right font-medium">Open PnL</th><th className="px-3 py-2.5 text-right font-medium hidden sm:table-cell">Notional</th>
+            <th className="px-3 py-2.5 text-right font-medium hidden md:table-cell">Lev</th>
+          </tr></thead>
+          <tbody>
+            {openBots.slice(0,10).map(b=>{ const f=fundOf(funds,b); return <tr key={b.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+              <td className="px-3 py-2.5 font-mono text-xs text-navy">{b.symbol}</td>
+              <td className="px-3 py-2.5"><SideTag side={b.side}/></td>
+              <td className="px-3 py-2.5"><FundTag fund={f}/></td>
+              <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(b.unrealizedPnl)}`}>{fmtSigned(b.unrealizedPnl)}</td>
+              <td className="px-3 py-2.5 text-right tnum text-slate-500 hidden sm:table-cell">{fmtUSD(Math.abs(b.notional))}</td>
+              <td className="px-3 py-2.5 text-right tnum text-slate-500 hidden md:table-cell">{b.leverage?b.leverage+'×':'—'}</td>
             </tr>; })}
           </tbody>
-        </table>
-      </div>
-    </Card>
-  </div>;
-}
-
-/* ============================================================
-   PRICES
-   ============================================================ */
-const ASSET_NAMES={BTC:'Bitcoin',ETH:'Ethereum',AVAX:'Avalanche',SOL:'Solana',BNB:'BNB',MATIC:'Polygon (POL)',ADA:'Cardano',XRP:'XRP',DOT:'Polkadot',LINK:'Chainlink'};
-function uniqueAssets(){
-  const seen={}, out=[];
-  BASE_BOTS.forEach(b=>{ const base=EX.parse(b.symbol).base; if(!seen[base]){ seen[base]=1; out.push({base, symbol:b.symbol, exchange:b.exchange, botId:b.id}); } });
-  return out;
-}
-function Candles({data,height=64}){
-  if(!data||data.length<2) return <div style={{height}} className="grid place-items-center text-[11px] text-slate-300">loading…</div>;
-  const w=240,h=height; const min=Math.min(...data.map(d=>d.l)),max=Math.max(...data.map(d=>d.h)); const range=(max-min)||1;
-  const Y=v=>h-((v-min)/range)*(h*0.9)-h*0.05;
-  const n=data.length, cw=w/n, bw=Math.max(1.4,cw*0.62);
-  return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full" style={{height}}>
-    {data.map((d,i)=>{ const x=i*cw+cw/2; const up=d.close>=d.o; const c=up?'#10B981':'#EF4444';
-      const yO=Y(d.o),yC=Y(d.close); const top=Math.min(yO,yC), bh=Math.max(0.8,Math.abs(yC-yO));
-      return <g key={i}>
-        <line x1={x} x2={x} y1={Y(d.h)} y2={Y(d.l)} stroke={c} strokeWidth="1" vectorEffect="non-scaling-stroke"/>
-        <rect x={x-bw/2} y={top} width={bw} height={bh} fill={c}/>
-      </g>;
-    })}
-  </svg>;
-}
-function PricesPage(){
-  const {data,user}=useApp();
-  const assets=useMemo(uniqueAssets,[]);
-  const [spark,setSpark]=useState({});
-  const wl=useWatchlist('watchlist_assets'); const [wlOnly,setWlOnly]=useState(false);
-  useEffect(()=>{
-    let alive=true;
-    const load=async()=>{ const res={}; await Promise.all(assets.map(async a=>{ try{ const r=await fetchKlines(a.exchange,a.symbol,24,'hour'); res[a.base]=r; }catch(e){ res[a.base]=null; } })); if(alive)setSpark(res); };
-    load(); const iv=setInterval(load,60000); return ()=>{alive=false;clearInterval(iv);};
-  },[]);
-  if(!hasPerm(user,'view_activity')) return <Denied/>;
-  const shown=[...assets].sort((a,b)=>(wl.has(b.base)?1:0)-(wl.has(a.base)?1:0)).filter(a=>!wlOnly||wl.has(a.base));
-  return <div>
-    <PageHead title="Prices" subtitle="Live prices for the crypto assets traded by LNO bots"
-      actions={<div className="flex items-center gap-3">
-        <button onClick={()=>setWlOnly(v=>!v)} className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${wlOnly?'border-gold text-gold bg-gold/5':'border-slate-200 text-slate-500 hover:text-navy'}`}><Icon name="star" fill={wlOnly?'currentColor':'none'} className="w-3.5 h-3.5"/>Watchlist{wl.list.length>0&&<span className="text-[10px]">{wl.list.length}</span>}</button>
-        <span className="flex items-center gap-1.5 text-xs text-success font-medium"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>Live · 24h change</span>
-      </div>}/>
-    {wlOnly&&shown.length===0&&<Card className="p-10 text-center text-slate-400 text-sm"><Icon name="star" className="w-9 h-9 mx-auto text-slate-200 mb-2"/>Your watchlist is empty — tap the ☆ on any asset to add it.</Card>}
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {shown.map(a=>{
-        const d=data.bots[a.botId]; const up=d.changePct>=0;
-        const sp=spark[a.base]; const hi=sp&&sp.length?Math.max(...sp.map(x=>x.h)):null; const lo=sp&&sp.length?Math.min(...sp.map(x=>x.l)):null;
-        const starred=wl.has(a.base);
-        return <Card key={a.base} className="p-4 relative overflow-hidden">
-          <span className="absolute left-0 top-0 bottom-0 w-1" style={{background:up?'#10B981':'#EF4444'}}/>
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <div className="flex items-center gap-2">
-                <button onClick={()=>wl.toggle(a.base)} title={starred?'Remove from watchlist':'Add to watchlist'} className={starred?'text-gold':'text-slate-300 hover:text-gold'}><Icon name="star" fill={starred?'currentColor':'none'} className="w-4 h-4"/></button>
-                <span className="font-bold text-navy text-lg">{a.base}</span><span className="text-xs text-slate-400">{ASSET_NAMES[a.base]||a.base}</span>
-              </div>
-              <div className="text-2xl font-bold text-navy tnum mt-1">{fmtPrice(d.price)}</div>
-            </div>
-            <span className={`flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold tnum ${up?'bg-success/10 text-success':'bg-danger/10 text-danger'}`}>
-              <Icon name="trendup" className={'w-4 h-4 '+(up?'':'rotate-180')}/>{fmtPct(d.changePct)}
-            </span>
-          </div>
-          <div className="mt-3"><Candles data={sp}/></div>
-          <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2">
-            <span>24h low <span className="tnum text-slate-500">{lo!=null?fmtPrice(lo):'—'}</span></span>
-            <span className="font-mono text-slate-300">{a.exchange}</span>
-            <span>24h high <span className="tnum text-slate-500">{hi!=null?fmtPrice(hi):'—'}</span></span>
-          </div>
-        </Card>;
-      })}
-    </div>
+        </table></div>}
+      </Card>
+    </>}
   </div>;
 }
 
@@ -1289,98 +931,72 @@ function PricesPage(){
    REAL-TIME OPERATIONS
    ============================================================ */
 function RealtimePage(){
-  const {funds,user,data}=useApp();
+  const {funds,user,data,dataStatus}=useApp();
   const [fund,setFund]=useState('all');
-  const [alertsOn,setAlertsOn]=useState(true);
-  const [tick,setTick]=useState(0);
-  const [pins,setPins]=useState([]);
-  const [perBot,setPerBot]=useState(()=>Object.fromEntries(BASE_BOTS.map(b=>[b.id,true])));
-  const [sort,setSort]=useState({col:'',dir:'asc'});
-  const services=useServiceHealth();
-  useEffect(()=>{ const a=setInterval(()=>setTick(t=>t+1),5000); return ()=>clearInterval(a); },[]);
+  const [sort,setSort]=useState({col:'uPnl',dir:'desc'});
+  const [incidents,setIncidents]=useState(null);
+  useEffect(()=>{ if(!hasPerm(user,'view_realtime'))return; api('alerts').then(r=>setIncidents((r.alerts||[]).slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,6))).catch(()=>setIncidents([])); },[]);
   if(!hasPerm(user,'view_realtime')) return <Denied/>;
 
-  const selFund=fund!=='all'?funds.find(f=>f.id===fund):null;
-  const botIds = selFund? selFund.bots : BASE_BOTS.map(b=>b.id);
-  // live values derived from real tickers (refreshed every 5s)
-  const activeBots=botIds.filter(id=>data.bots[id].status==='active').length;
-  const livePnl=botIds.reduce((a,id)=>a+data.bots[id].livePnl,0);
-  const openPos=botIds.reduce((a,id)=>a+data.stats[id].open,0)+3;
+  const selFund=fund!=='all'?(fund==='unassigned'?'unassigned':funds.find(f=>f.id===fund)):null;
+  let open=data.openBots;
+  if(fund==='unassigned') open=open.filter(b=>!b.fundId);
+  else if(selFund) open=open.filter(b=>b.fundId===fund);
 
-  let rows=botIds.map(id=>{ const b=BASE_BOTS.find(x=>x.id===id); const f=fundOfBot(funds,id); const d=data.bots[id]; return {...b,fund:f,status:d.status,live:d.livePnl,price:d.price,changePct:d.changePct,pos:data.stats[id].open>0?(d.side+' '+EX.parse(b.symbol).base):'—'}; });
-  rows=sortRows(rows,sort,{bot:r=>r.name,fund:r=>r.fund?.name||'',symbol:r=>r.symbol,status:r=>r.status,live:r=>r.live,price:r=>r.price});
-  rows.sort((a,b)=>(pins.includes(b.id)?1:0)-(pins.includes(a.id)?1:0));
+  const livePnl=open.reduce((a,b)=>a+(b.unrealizedPnl||0),0);
+  const exposure=open.reduce((a,b)=>a+Math.abs(b.notional||0),0);
 
-  const sevBorder={critical:'border-danger',warning:'border-amber-500',info:'border-blue-500'};
-  const sevIcon={critical:'triangle',warning:'triangle',info:'info'};
+  let rows=open.map(b=>({...b,fund:fundOf(funds,b)}));
+  rows=sortRows(rows,sort,{symbol:r=>r.symbol,side:r=>r.side,exchange:r=>r.exchange,fund:r=>r.fund?.name||'',qty:r=>r.qty,entry:r=>r.entry,mark:r=>r.mark,uPnl:r=>r.unrealizedPnl,notional:r=>Math.abs(r.notional),leverage:r=>r.leverage});
 
+  const fundOpts=[{value:'all',label:'All Funds'},...funds.map(f=>({value:f.id,label:f.name})),{value:'unassigned',label:'Unassigned'}];
   return <div>
-    <PageHead title="Real-Time Operations" subtitle={selFund?`Live view · ${selFund.name}`:'Live view of all bots · refreshing every 5s'}
+    <PageHead title="Live" subtitle="Open futures positions across all connected exchanges"
       actions={<div className="flex items-center gap-3">
-        <Select value={fund} onChange={setFund} className="w-40" options={[{value:'all',label:'All Funds'},...funds.map(f=>({value:f.id,label:f.name}))]}/>
-        <div className="flex items-center gap-2 text-sm"><span className="text-slate-500">Alerts</span><Toggle on={alertsOn} onChange={setAlertsOn}/></div>
-        <span className="flex items-center gap-1.5 text-xs text-success font-medium"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>Live</span>
+        <Select value={fund} onChange={setFund} className="w-40" options={fundOpts}/>
+        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">{data.live&&data.live.syncedAt?<>synced {fmtAgo(data.live.syncedAt)}</>:'not synced yet'}</span>
       </div>}/>
 
     <MarketTicker/>
 
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-      <KpiCard label="Active Bots" value={`${activeBots} / ${botIds.length}`} icon="power"/>
-      <KpiCard label="Live PnL" value={<span className={clsPnl(livePnl)}>{fmtSigned(livePnl)}</span>} badge={<span className="text-[11px] text-slate-400">updates every 5s</span>}/>
-      <KpiCard label="Open Positions" value={openPos} icon="briefcase"/>
-      <KpiCard label="System Alerts" value={INCIDENTS.filter(i=>i.severity!=='info').length} icon="bell"/>
-    </div>
-
-    <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 mb-5">
-      <Card className="p-5">
-        <SectionTitle right={<span className="text-[11px] text-slate-400">live ping · 10s</span>}>Service Health</SectionTitle>
-        <div className="space-y-2">
-          {services.map(s=><div key={s.name} className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${s.status==='active'?'bg-success':s.status==='degraded'?'bg-amber-500':s.status==='pending'?'bg-slate-300 animate-pulse':'bg-danger'}`}/>{s.name}{s.ex&&<span className="text-[10px] text-slate-300">●</span>}</span>
-            <span className={`font-mono text-xs ${s.latency==null?'text-slate-300':s.latency>250?'text-amber-600':'text-slate-400'}`}>{s.latency==null?(s.status==='down'?'down':'—'):s.latency+'ms'}</span>
-          </div>)}
-        </div>
-      </Card>
-      <Card className="p-5 xl:col-span-2">
-        <SectionTitle right={<span className="text-[11px] text-slate-400">latest</span>}>Recent Incidents</SectionTitle>
-        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-          {INCIDENTS.map(i=><div key={i.id} className={`border-l-4 ${sevBorder[i.severity]} bg-slate-50/70 rounded-r-lg px-3 py-2 flex items-start gap-2`}>
-            <Icon name={sevIcon[i.severity]} className={`w-4 h-4 mt-0.5 shrink-0 ${i.severity==='critical'?'text-danger':i.severity==='warning'?'text-amber-500':'text-blue-500'}`}/>
-            <div className="flex-1"><div className="text-sm text-navy leading-snug">{i.message}</div><div className="text-[11px] text-slate-400 mt-0.5">{fmtDT(i.t)}</div></div>
-          </div>)}
-        </div>
-      </Card>
+      <KpiCard label="Account Equity" value={fmtUSD(data.equity)} icon="dollar"/>
+      <KpiCard label="Open PnL" value={<span className={clsPnl(livePnl)}>{fmtSigned(livePnl)}</span>}/>
+      <KpiCard label="Open Positions" value={open.length} icon="briefcase"/>
+      <KpiCard label="Exposure" value={fmtUSD(exposure)} icon="layers"/>
     </div>
 
     <Card className="overflow-hidden">
-      <div className="p-5 pb-0"><SectionTitle right={<span className="flex items-center gap-1.5 text-xs text-success"><span className="w-1.5 h-1.5 rounded-full bg-success pulse-dot"/>updating</span>}>Live Bot Status</SectionTitle></div>
+      <div className="p-5 pb-0"><SectionTitle right={data.live&&data.live.connected>0&&<span className="flex items-center gap-1.5 text-xs text-success"><span className="w-1.5 h-1.5 rounded-full bg-success pulse-dot"/>{data.live.connected} connected</span>}>Open Positions</SectionTitle></div>
+      {rows.length===0? <div className="p-8"><EmptyState icon="briefcase" title="No open positions" hint={data.live&&data.live.connected? 'No positions are currently open on your connected exchange.' : 'Connect an exchange and sync to see live positions here.'}/></div>
+      : <>
       {/* desktop table */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-            <th className="px-3 py-2.5 w-8"></th>
-            <SortHeader label="Bot" col="bot" sort={sort} setSort={setSort}/>
-            <SortHeader label="Fund" col="fund" sort={sort} setSort={setSort}/>
             <SortHeader label="Symbol" col="symbol" sort={sort} setSort={setSort}/>
-            <SortHeader label="Last Price" col="price" sort={sort} setSort={setSort} align="right"/>
-            <SortHeader label="Status" col="status" sort={sort} setSort={setSort}/>
-            <th className="px-3 py-2.5 text-left font-medium">Position</th>
-            <SortHeader label="Live PnL" col="live" sort={sort} setSort={setSort} align="right"/>
-            <th className="px-3 py-2.5 text-left font-medium">Last Action</th>
-            <th className="px-3 py-2.5 w-10"></th>
+            <SortHeader label="Side" col="side" sort={sort} setSort={setSort}/>
+            <SortHeader label="Qty" col="qty" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label="Entry" col="entry" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label="Mark" col="mark" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label="Open PnL" col="uPnl" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label="Notional" col="notional" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label="Lev" col="leverage" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label="Fund" col="fund" sort={sort} setSort={setSort}/>
+            <th className="px-3 py-2.5 text-left font-medium">Exchange</th>
           </tr></thead>
           <tbody>
-            {rows.map(r=><tr key={r.id} className={`border-b border-slate-50 hover:bg-slate-50/60 ${pins.includes(r.id)?'bg-gold/5':''}`}>
-              <td className="px-3 py-2.5"><button onClick={()=>setPins(p=>p.includes(r.id)?p.filter(x=>x!==r.id):[...p,r.id])} className={pins.includes(r.id)?'text-gold':'text-slate-300 hover:text-slate-500'}><Icon name="pin" className="w-4 h-4"/></button></td>
-              <td className="px-3 py-2.5"><div className="font-medium text-navy">{r.name}</div><div className="text-[11px] text-slate-400">{r.exchange}</div></td>
-              <td className="px-3 py-2.5">{r.fund&&<Badge color={r.fund.color} dot onClick={()=>setFund(r.fund.id)}>{r.fund.name}</Badge>}</td>
-              <td className="px-3 py-2.5 font-mono text-xs">{r.symbol}</td>
-              <td className="px-3 py-2.5 text-right"><div className="font-mono text-xs text-navy tnum">{fmtPrice(r.price)}</div><div className={`text-[10px] tnum ${clsPnl(r.changePct)}`}>{fmtPct(r.changePct)}</div></td>
-              <td className="px-3 py-2.5"><StatusPill status={r.status}/></td>
-              <td className="px-3 py-2.5 text-slate-500">{r.pos}</td>
-              <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(r.live)}`}>{fmtSigned(r.live)}</td>
-              <td className="px-3 py-2.5 text-slate-500 text-xs">{['Order filled','Signal check','Position sync','Heartbeat'][r.id.charCodeAt(1)%4]}<br/><span className="text-slate-400">{fmtTime(NOW-((tick%6)+1)*60000)}</span></td>
-              <td className="px-3 py-2.5"><button onClick={()=>setPerBot(s=>({...s,[r.id]:!s[r.id]}))} className={perBot[r.id]&&alertsOn?'text-gold':'text-slate-300 hover:text-slate-500'}><Icon name="bell" className="w-4 h-4"/></button></td>
+            {rows.map(r=><tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+              <td className="px-3 py-2.5 font-mono text-xs text-navy">{r.symbol}</td>
+              <td className="px-3 py-2.5"><SideTag side={r.side}/></td>
+              <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtNum(r.qty,r.qty<1?4:2)}</td>
+              <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtPrice(r.entry)}</td>
+              <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtPrice(r.mark)}</td>
+              <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(r.unrealizedPnl)}`}>{fmtSigned(r.unrealizedPnl)}</td>
+              <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtUSD(Math.abs(r.notional))}</td>
+              <td className="px-3 py-2.5 text-right tnum text-slate-500">{r.leverage?r.leverage+'×':'—'}</td>
+              <td className="px-3 py-2.5">{r.fund? <Badge color={r.fund.color} dot onClick={()=>setFund(r.fund.id)}>{r.fund.name}</Badge> : <span className="text-xs text-slate-400">Unassigned</span>}</td>
+              <td className="px-3 py-2.5 text-slate-500 capitalize">{r.exchange}</td>
             </tr>)}
           </tbody>
         </table>
@@ -1388,11 +1004,41 @@ function RealtimePage(){
       {/* mobile cards */}
       <div className="md:hidden p-3 space-y-2">
         {rows.map(r=><div key={r.id} className="border border-slate-100 rounded-lg p-3">
-          <div className="flex items-center justify-between"><div className="font-medium text-navy">{r.name}</div><StatusPill status={r.status}/></div>
-          <div className="flex items-center justify-between mt-2">{r.fund&&<Badge color={r.fund.color} dot>{r.fund.name}</Badge>}<span className={`font-medium tnum ${clsPnl(r.live)}`}>{fmtSigned(r.live)}</span></div>
+          <div className="flex items-center justify-between"><div className="font-mono text-sm text-navy">{r.symbol} <SideTag side={r.side}/></div><span className={`font-medium tnum ${clsPnl(r.unrealizedPnl)}`}>{fmtSigned(r.unrealizedPnl)}</span></div>
+          <div className="flex items-center justify-between mt-2 text-xs text-slate-500"><FundTag fund={r.fund}/><span className="tnum">{fmtUSD(Math.abs(r.notional))} · {r.leverage?r.leverage+'×':'—'}</span></div>
         </div>)}
       </div>
+      </>}
     </Card>
+
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
+      <Card className="p-5">
+        <SectionTitle right={<LiveBadge status={dataStatus}/>}>Service health</SectionTitle>
+        <div className="space-y-2.5">
+          {[
+            ['Exchange sync', data.live&&data.live.connected>0?'ok':'neutral', data.live&&data.live.connected>0?`${data.live.connected} connected`:'No exchange connected'],
+            ['Market data feed', dataStatus==='live'?'ok':dataStatus==='partial'?'warn':'neutral', dataStatus==='live'?'Streaming':dataStatus==='partial'?'Degraded':'Idle'],
+            ['Open positions', data.openBots.length?'ok':'neutral', `${data.openBots.length} open · ${data.bots.length} tracked`],
+            ['Last sync', data.live&&data.live.syncedAt?'ok':'neutral', data.live&&data.live.syncedAt?fmtAgo(data.live.syncedAt):'never'],
+          ].map(([label,state,sub])=><div key={label} className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2 text-navy"><span className={`w-2 h-2 rounded-full ${state==='ok'?'bg-success':state==='warn'?'bg-amber-500':'bg-slate-300'}`}/>{label}</span>
+            <span className="text-xs text-slate-400">{sub}</span>
+          </div>)}
+        </div>
+      </Card>
+      <Card className="p-5">
+        <SectionTitle right={<span className="text-[11px] text-slate-400">latest alerts</span>}>Recent incidents</SectionTitle>
+        {incidents===null? <div className="text-sm text-slate-400">Loading…</div>
+         : incidents.length===0? <div className="text-sm text-slate-400 py-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-success"/>No incidents — all clear.</div>
+         : <div className="space-y-2.5">
+            {incidents.map(a=><div key={a.id} className="flex items-start gap-2.5 text-sm">
+              <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${a.ackedAt?'bg-success':'bg-danger'}`}/>
+              <div className="flex-1 min-w-0"><div className="text-navy">{a.summary}</div>
+                <div className="text-[11px] text-slate-400">{fmtAgo(a.createdAt)} · {a.ackedAt?'acknowledged':'pending'}</div></div>
+            </div>)}
+          </div>}
+      </Card>
+    </div>
   </div>;
 }
 
@@ -1450,65 +1096,64 @@ function PresetMenu({storeKey,current,onApply}){
 }
 
 /* ============================================================
-   TRADES
+   POSITIONS (all bots — open + closed; full table, sort/filter/export)
    ============================================================ */
-const TRADE_COLS=[
-  {key:'entry',label:'Entry',cell:t=>fmtDT(t.entry),csv:t=>fmtDT(t.entry),cls:'text-slate-500',def:true},
-  {key:'exit',label:'Exit',cell:t=>t.exit?fmtDT(t.exit):'—',csv:t=>t.exit?fmtDT(t.exit):'',cls:'text-slate-500',def:true},
-  {key:'bot',label:'Bot',cell:t=><span className="font-medium text-navy">{t.bot}</span>,csv:t=>t.bot,def:true},
-  {key:'symbol',label:'Symbol',cell:t=><span className="font-mono text-xs">{t.symbol}</span>,csv:t=>t.symbol,def:true},
-  {key:'exchange',label:'Exchange',cell:t=><span className="text-slate-500">{t.exchange}</span>,csv:t=>t.exchange,def:true},
-  {key:'side',label:'Side',cell:t=><span className={t.side==='Long'?'text-success':'text-danger'}>{t.side}</span>,csv:t=>t.side,def:true},
-  {key:'status',label:'Status',cell:t=><StatusPill status={t.status}/>,csv:t=>t.status,def:true},
-  {key:'pnl',label:'PnL',align:'right',cell:t=><span className={`font-medium tnum ${clsPnl(t.pnl)}`}>{fmtSigned(t.pnl)}</span>,csv:t=>Number(t.pnl.toFixed(2)),def:true},
-  {key:'pnlPct',label:'PnL%',align:'right',cell:t=><span className={`tnum ${clsPnl(t.pnlPct)}`}>{fmtPct(t.pnlPct)}</span>,csv:t=>Number(t.pnlPct.toFixed(2)),def:true},
-  {key:'size',label:'Size',align:'right',cell:t=><span className="tnum text-slate-500">{fmtUSD(t.size)}</span>,csv:t=>Math.round(t.size),def:true},
-  {key:'leverage',label:'Lev',align:'right',cell:t=><span className="tnum text-slate-500">{t.leverage}×</span>,csv:t=>t.leverage,def:false},
-  {key:'strategy',label:'Strategy',cell:t=><span className="text-slate-500">{t.strategy}</span>,csv:t=>t.strategy,def:true},
-  {key:'durMin',label:'Duration',align:'right',cell:t=><span className="text-slate-500">{fmtDur(t.durMin)}</span>,csv:t=>fmtDur(t.durMin),def:true},
+// Columns operate on a "bot" (one exchange/symbol futures position). `csv` returns
+// a plain value for export; `cell` renders the table cell. `fund` is attached per row.
+const POS_COLS=[
+  {key:'symbol',label:'Symbol',cell:b=><span className="font-mono text-xs text-navy">{b.symbol}</span>,csv:b=>b.symbol,def:true},
+  {key:'exchange',label:'Exchange',cell:b=><span className="text-slate-500 capitalize">{b.exchange}</span>,csv:b=>b.exchange,def:true},
+  {key:'fund',label:'Fund',cell:b=> b.fund? <Badge color={b.fund.color} dot>{b.fund.name}</Badge> : <span className="text-xs text-slate-400">Unassigned</span>,csv:b=>b.fund?.name||'',def:true},
+  {key:'side',label:'Side',cell:b=><SideTag side={b.side}/>,csv:b=>b.side,def:true},
+  {key:'qty',label:'Qty',align:'right',cell:b=><span className="tnum text-slate-500">{fmtNum(b.qty,b.qty&&b.qty<1?4:2)}</span>,csv:b=>b.qty,def:true},
+  {key:'entry',label:'Entry',align:'right',cell:b=><span className="tnum text-slate-500">{fmtPrice(b.entry)}</span>,csv:b=>b.entry,def:true},
+  {key:'mark',label:'Mark',align:'right',cell:b=><span className="tnum text-slate-500">{fmtPrice(b.mark)}</span>,csv:b=>b.mark,def:true},
+  {key:'uPnl',label:'Open PnL',align:'right',cell:b=><span className={`font-medium tnum ${clsPnl(b.unrealizedPnl)}`}>{fmtSigned(b.unrealizedPnl)}</span>,csv:b=>Number((b.unrealizedPnl||0).toFixed(2)),def:true},
+  {key:'notional',label:'Notional',align:'right',cell:b=><span className="tnum text-slate-500">{fmtUSD(Math.abs(b.notional))}</span>,csv:b=>Math.round(Math.abs(b.notional)),def:true},
+  {key:'leverage',label:'Lev',align:'right',cell:b=><span className="tnum text-slate-500">{b.leverage?b.leverage+'×':'—'}</span>,csv:b=>b.leverage,def:false},
+  {key:'status',label:'Status',cell:b=><StatusPill status={b.status==='open'?'active':'inactive'}/>,csv:b=>b.status,def:true},
 ];
-const TRADE_GETTERS={entry:r=>r.entry,exit:r=>r.exit||0,bot:r=>r.bot,symbol:r=>r.symbol,exchange:r=>r.exchange,side:r=>r.side,status:r=>r.status,pnl:r=>r.pnl,pnlPct:r=>r.pnlPct,size:r=>r.size,leverage:r=>r.leverage,strategy:r=>r.strategy,durMin:r=>r.durMin};
+const POS_GETTERS={symbol:r=>r.symbol,exchange:r=>r.exchange,fund:r=>r.fund?.name||'',side:r=>r.side,qty:r=>r.qty,entry:r=>r.entry,mark:r=>r.mark,uPnl:r=>r.unrealizedPnl,notional:r=>Math.abs(r.notional),leverage:r=>r.leverage,status:r=>r.status};
 
 function TradesPage(){
-  const {user,data}=useApp();
-  const [f,setF]=useState(()=>PREF.get('trades_filter',{bot:'all',exchange:'All',side:'All',status:'All',q:''}));
-  const [sort,setSort]=useState(()=>PREF.get('trades_sort',{col:'entry',dir:'desc'}));
-  const [colKeys,setColKeys]=useState(()=>PREF.get('trades_cols',TRADE_COLS.filter(c=>c.def).map(c=>c.key)));
-  useEffect(()=>{ PREF.set('trades_filter',f); },[f]);
-  useEffect(()=>{ PREF.set('trades_sort',sort); },[sort]);
-  useEffect(()=>{ PREF.set('trades_cols',colKeys); },[colKeys]);
+  const {user,data,funds}=useApp();
+  const [f,setF]=useState(()=>PREF.get('pos_filter',{fund:'all',side:'All',status:'open',q:''}));
+  const [sort,setSort]=useState(()=>PREF.get('pos_sort',{col:'uPnl',dir:'desc'}));
+  const [colKeys,setColKeys]=useState(()=>PREF.get('pos_cols',POS_COLS.filter(c=>c.def).map(c=>c.key)));
+  useEffect(()=>{ PREF.set('pos_filter',f); },[f]);
+  useEffect(()=>{ PREF.set('pos_sort',sort); },[sort]);
+  useEffect(()=>{ PREF.set('pos_cols',colKeys); },[colKeys]);
+  if(!hasPerm(user,'view_trades')) return <Denied/>;
 
-  const cols=colKeys.map(k=>TRADE_COLS.find(c=>c.key===k)).filter(Boolean);
-  let rows=data.trades.filter(t=>
-    (f.bot==='all'||t.botId===f.bot)&&
-    (f.exchange==='All'||t.exchange===f.exchange)&&
-    (f.side==='All'||t.side===f.side)&&
-    (f.status==='All'||t.status===f.status)&&
-    (!f.q|| (t.bot+t.symbol+t.strategy).toLowerCase().includes(f.q.toLowerCase()))
+  const cols=colKeys.map(k=>POS_COLS.find(c=>c.key===k)).filter(Boolean);
+  let rows=data.bots.map(b=>({...b,fund:fundOf(funds,b)})).filter(b=>
+    (f.fund==='all'|| (f.fund==='unassigned'? !b.fundId : b.fundId===f.fund))&&
+    (f.side==='All'||b.side===f.side)&&
+    (f.status==='all'||b.status===f.status)&&
+    (!f.q|| (b.symbol+' '+b.exchange+' '+(b.fund?.name||'')).toLowerCase().includes(f.q.toLowerCase()))
   );
-  rows=sortRows(rows,sort,TRADE_GETTERS);
+  rows=sortRows(rows,sort,POS_GETTERS);
   const vt=useVirtual({count:rows.length,rowH:41,resetKey:JSON.stringify(f)+sort.col+sort.dir});
 
-  if(!hasPerm(user,'view_trades')) return <Denied/>;
-  const clear=()=>setF({bot:'all',exchange:'All',side:'All',status:'All',q:''});
-  const active = f.bot!=='all'||f.exchange!=='All'||f.side!=='All'||f.status!=='All'||f.q;
+  const clear=()=>setF({fund:'all',side:'All',status:'open',q:''});
+  const active = f.fund!=='all'||f.side!=='All'||f.status!=='open'||f.q;
   const exportHeaders=cols.map(c=>c.label);
-  const getExportRows=()=>rows.map(t=>cols.map(c=>c.csv(t)));
+  const getExportRows=()=>rows.map(b=>cols.map(c=>c.csv(b)));
+  const fundOpts=[{value:'all',label:'All funds'},...funds.map(ff=>({value:ff.id,label:ff.name})),{value:'unassigned',label:'Unassigned'}];
 
   return <div>
-    <PageHead title="Trades" subtitle={`${rows.length} of ${data.trades.length} trades`}
+    <PageHead title="Positions" subtitle={`${rows.length} of ${data.bots.length} position${data.bots.length===1?'':'s'}`}
       actions={<div className="flex items-center gap-2">
-        <PresetMenu storeKey="trades_presets" current={{f,sort,colKeys}} onApply={s=>{ if(s.f)setF(s.f); if(s.sort)setSort(s.sort); if(s.colKeys)setColKeys(s.colKeys); }}/>
-        <ColumnPicker columns={TRADE_COLS} visible={colKeys} onChange={setColKeys}/>
-        {hasPerm(user,'export_data')&&<ExportMenu filename="lno_trades" headers={exportHeaders} getRows={getExportRows}/>}
+        <PresetMenu storeKey="pos_presets" current={{f,sort,colKeys}} onApply={s=>{ if(s.f)setF(s.f); if(s.sort)setSort(s.sort); if(s.colKeys)setColKeys(s.colKeys); }}/>
+        <ColumnPicker columns={POS_COLS} visible={colKeys} onChange={setColKeys}/>
+        {hasPerm(user,'export_data')&&<ExportMenu filename="lno_positions" headers={exportHeaders} getRows={getExportRows}/>}
       </div>}/>
     <Card className="p-3 mb-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={f.bot} onChange={v=>setF({...f,bot:v})} className="w-44" options={[{value:'all',label:'All bots'},...BASE_BOTS.map(b=>({value:b.id,label:b.name}))]}/>
-        <Select value={f.exchange} onChange={v=>setF({...f,exchange:v})} className="w-36" options={['All','Binance','Bybit','OKX']}/>
-        <Select value={f.side} onChange={v=>setF({...f,side:v})} className="w-28" options={['All','Long','Short']}/>
-        <Select value={f.status} onChange={v=>setF({...f,status:v})} className="w-32" options={['All','Open','Closed']}/>
-        <div className="relative flex-1 min-w-[160px]"><Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={f.q} onChange={e=>setF({...f,q:e.target.value})} placeholder="Search bot, symbol, strategy…" className="w-full bg-slate-100 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"/></div>
+        <Select value={f.fund} onChange={v=>setF({...f,fund:v})} className="w-44" options={fundOpts}/>
+        <Select value={f.side} onChange={v=>setF({...f,side:v})} className="w-32" options={['All','LONG','SHORT']}/>
+        <Select value={f.status} onChange={v=>setF({...f,status:v})} className="w-32" options={[{value:'all',label:'All'},{value:'open',label:'Open'},{value:'closed',label:'Closed'}]}/>
+        <div className="relative flex-1 min-w-[160px]"><Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={f.q} onChange={e=>setF({...f,q:e.target.value})} placeholder="Search symbol, exchange, fund…" className="w-full bg-slate-100 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"/></div>
         {active&&<Btn variant="ghost" size="sm" onClick={clear}><Icon name="x" className="w-3.5 h-3.5"/>Clear filters</Btn>}
       </div>
     </Card>
@@ -1520,77 +1165,15 @@ function TradesPage(){
           </tr></thead>
           <tbody>
             {vt.padTop>0&&<tr style={{height:vt.padTop}}><td colSpan={cols.length}/></tr>}
-            {rows.slice(vt.start,vt.end).map(t=><tr key={t.id} style={{height:41}} className="border-b border-slate-50 hover:bg-slate-50/60">
-              {cols.map(c=><td key={c.key} className={`px-3 py-2.5 whitespace-nowrap ${c.align==='right'?'text-right':''} ${c.cls||''}`}>{c.cell(t)}</td>)}
+            {rows.slice(vt.start,vt.end).map(b=><tr key={b.id} style={{height:41}} className="border-b border-slate-50 hover:bg-slate-50/60">
+              {cols.map(c=><td key={c.key} className={`px-3 py-2.5 whitespace-nowrap ${c.align==='right'?'text-right':''} ${c.cls||''}`}>{c.cell(b)}</td>)}
             </tr>)}
             {vt.padBottom>0&&<tr style={{height:vt.padBottom}}><td colSpan={cols.length}/></tr>}
           </tbody>
         </table>
       </div>
-      {rows.length===0&&<div className="p-10 text-center text-slate-400 text-sm">No trades match the current filters.</div>}
+      {rows.length===0&&<div className="p-10"><EmptyState icon="briefcase" title={data.bots.length===0?'No positions yet':'No positions match the current filters'} hint={data.bots.length===0?'Positions appear automatically when a sync detects them on a connected exchange.':undefined}/></div>}
     </Card>
-  </div>;
-}
-
-/* ============================================================
-   ACTIVITY LOG
-   ============================================================ */
-function LogsPage(){
-  const {funds,user}=useApp();
-  const [sev,setSev]=useState('All'); const [type,setType]=useState('All'); const [page,setPage]=useState(0); const [sel,setSel]=useState(null);
-  if(!hasPerm(user,'view_logs')) return <Denied/>;
-  const rows=LOGS.filter(l=>(sev==='All'||l.level===sev.toLowerCase())&&(type==='All'||l.type===type.toLowerCase()));
-  const PER=50; const pages=Math.ceil(rows.length/PER); const slice=rows.slice(page*PER,page*PER+PER);
-  const lvlColor={critical:'text-danger bg-danger/10',error:'text-danger bg-danger/10',warning:'text-amber-600 bg-warn/10',info:'text-blue-600 bg-blue-50',debug:'text-slate-500 bg-slate-100'};
-  return <div>
-    <PageHead title="Activity Log" subtitle={`${rows.length} events`}
-      actions={hasPerm(user,'export_data')&&<ExportMenu filename="lno_logs" headers={['Timestamp','Level','Type','Source','Message']}
-        getRows={()=>rows.map(l=>[fmtDT(l.t),l.level,l.type,l.source,l.message])}/>}/>
-    <Card className="p-3 mb-4"><div className="flex flex-wrap items-center gap-2">
-      <Select value={sev} onChange={v=>{setSev(v);setPage(0);}} className="w-40" options={['All','Critical','Error','Warning','Info','Debug']}/>
-      <Select value={type} onChange={v=>{setType(v);setPage(0);}} className="w-40" options={['All','Signal','Trading','Position','System']}/>
-    </div></Card>
-    <div className="flex gap-5">
-      <Card className="overflow-hidden flex-1">
-        <div className="overflow-x-auto"><table className="w-full text-sm">
-          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-            <th className="px-3 py-2.5 text-left font-medium">Timestamp</th><th className="px-3 py-2.5 text-left font-medium">Level</th>
-            <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">Type</th><th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">Source</th>
-            <th className="px-3 py-2.5 text-left font-medium">Message</th>
-          </tr></thead>
-          <tbody>
-            {slice.map(l=><tr key={l.id} onClick={()=>setSel(l)} className={`border-b border-slate-50 cursor-pointer hover:bg-slate-50/60 ${sel?.id===l.id?'bg-gold/5':''}`}>
-              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap font-mono text-xs">{fmtDT(l.t)}</td>
-              <td className="px-3 py-2.5"><span className={`px-2 py-0.5 rounded-full text-[11px] font-medium uppercase ${lvlColor[l.level]}`}>{l.level}</span></td>
-              <td className="px-3 py-2.5 hidden sm:table-cell capitalize text-slate-500">{l.type}</td>
-              <td className="px-3 py-2.5 hidden md:table-cell text-slate-500">{l.source}</td>
-              <td className="px-3 py-2.5 text-navy max-w-md truncate">{l.message}</td>
-            </tr>)}
-          </tbody>
-        </table></div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm">
-          <span className="text-slate-400">Page {page+1} of {pages}</span>
-          <div className="flex gap-2">
-            <Btn variant="outline" size="sm" disabled={page===0} onClick={()=>setPage(p=>p-1)}><Icon name="chevleft" className="w-4 h-4"/>Previous</Btn>
-            <Btn variant="outline" size="sm" disabled={page>=pages-1} onClick={()=>setPage(p=>p+1)}>Next<Icon name="chevright" className="w-4 h-4"/></Btn>
-          </div>
-        </div>
-      </Card>
-      {sel&&<Card className="w-80 shrink-0 p-5 h-fit slidein hidden lg:block">
-        <div className="flex items-center justify-between mb-3"><h3 className="font-semibold text-navy">Log detail</h3><button onClick={()=>setSel(null)} className="text-slate-400 hover:text-navy"><Icon name="x" className="w-4 h-4"/></button></div>
-        <div className="space-y-3 text-sm">
-          <div><div className="text-xs text-slate-400">Message</div><div className="text-navy">{sel.message}</div></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><div className="text-xs text-slate-400">Level</div><span className={`px-2 py-0.5 rounded-full text-[11px] font-medium uppercase ${lvlColor[sel.level]}`}>{sel.level}</span></div>
-            <div><div className="text-xs text-slate-400">Type</div><div className="capitalize text-navy">{sel.type}</div></div>
-            <div><div className="text-xs text-slate-400">Source</div><div className="text-navy">{sel.source}</div></div>
-            <div><div className="text-xs text-slate-400">Timestamp</div><div className="text-navy font-mono text-xs">{fmtDT(sel.t)}</div></div>
-          </div>
-          <div><div className="text-xs text-slate-400 mb-1">Metadata</div><pre className="bg-slate-50 rounded-lg p-3 text-[11px] font-mono text-slate-600 overflow-x-auto">{JSON.stringify(sel.meta,null,2)}</pre></div>
-          {sel.botId&&<div><div className="text-xs text-slate-400">Associated bot</div><div className="text-navy">{BASE_BOTS.find(b=>b.id===sel.botId)?.name}</div></div>}
-        </div>
-      </Card>}
-    </div>
   </div>;
 }
 
@@ -1845,11 +1428,12 @@ function ExchangeModal({modal,onClose,onSave}){
   if(!modal)return null;
   return <Modal open={true} onClose={onClose} title={modal.mode==='add'?'Add Exchange':'Edit Exchange'}>
     <div className="space-y-3">
-      <Field label="Exchange name"><Input value={v.name||''} onChange={e=>setV({...v,name:e.target.value})} placeholder="binance"/></Field>
+      <Field label="Exchange name" hint="Use exactly “binance” — the position sync looks for connections named binance."><Input value={v.name||''} onChange={e=>setV({...v,name:e.target.value})} placeholder="binance"/></Field>
       <Field label="Label"><Input value={v.label||''} onChange={e=>setV({...v,label:e.target.value})} placeholder="Binance Main"/></Field>
       <Field label="API Key"><Input value={v.apiKey||''} onChange={e=>setV({...v,apiKey:e.target.value})}/></Field>
       <Field label="API Secret" hint={modal.mode==='edit'?'Leave blank to keep the existing secret':undefined}><Input type="password" value={v.secret||''} onChange={e=>setV({...v,secret:e.target.value})}/></Field>
       <Field label="Note (optional)"><Input value={v.note||''} onChange={e=>setV({...v,note:e.target.value})}/></Field>
+      <div className="text-[11px] text-slate-500 bg-navy/5 border border-slate-200 rounded-lg p-3">The key needs <span className="font-medium">Futures read</span> + <span className="font-medium">IP whitelist</span> (Vercel has no fixed IP, so route via a static-IP proxy). The secret is stored AES-encrypted and never returned. See <span className="font-mono">BINANCE_SETUP.md</span>.</div>
       <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={()=>onSave(v)}>Save</Btn></div>
     </div>
   </Modal>;
@@ -1869,7 +1453,7 @@ function AdminOpenWA(){
   const loadLog=()=>api('openwa?log=1').then(r=>setLog(r.log||[])).catch(()=>setLog([]));
   useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setEnabled(c.enabled); setMatrix(c.notifMatrix||{}); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); loadLog(); },[]);
   if(user.role!=='admin') return <Denied/>;
-  const scopeOpts=[{value:'portfolio',label:'Portfolio'},...funds.map(f=>({value:'fund:'+f.id,label:'Fund · '+f.name})),...BASE_BOTS.map(b=>({value:'bot:'+b.id,label:'Bot · '+b.name}))];
+  const scopeOpts=[{value:'portfolio',label:'Portfolio'},...funds.map(f=>({value:'fund:'+f.id,label:'Fund · '+f.name}))];
   const metricOpts=[{value:'drawdown',label:'Max drawdown (%)'},{value:'pnlDay',label:'Daily PnL ($)'}];
   const filteredLog=(log||[]).filter(l=>{
     if(logStatus==='ok'&&!l.ok) return false;
@@ -1981,78 +1565,133 @@ function AdminOpenWA(){
 }
 
 /* ============================================================
-   ADMIN — FUNDS
+   FUNDS — global CRUD (admins) / read-only list (operators, viewers)
    ============================================================ */
-function AdminFunds(){
-  const {funds,saveFunds,user}=useApp();
-  const [newName,setNewName]=useState(''); const [edit,setEdit]=useState(null); const [editVal,setEditVal]=useState(''); const [editColor,setEditColor]=useState('#C9A24D'); const [del,setDel]=useState(null); const [reassignTo,setReassignTo]=useState('');
-  if(user.role!=='admin') return <Denied/>;
-  const usedColors=funds.map(f=>f.color); const freeColor=FUND_PALETTE.find(c=>!usedColors.includes(c))||FUND_PALETTE[funds.length%8];
-  const persist=(next)=>{ saveFunds(next).catch(e=>toast.error(e.message)); };
-  function create(){ if(!newName.trim())return; persist([...funds,{id:'f'+Date.now(),name:newName.trim(),color:freeColor,bots:[]}]); setNewName(''); }
-  function reassign(botId,toId){ persist(funds.map(f=>({...f,bots: f.id===toId? [...f.bots.filter(b=>b!==botId),botId] : f.bots.filter(b=>b!==botId)}))); }
-  function saveEdit(id){ persist(funds.map(x=>x.id===id?{...x,name:editVal,color:editColor}:x)); setEdit(null); }
-  function doDelete(){ const victim=del; persist(funds.filter(f=>f.id!==victim.id).map(f=>f.id===reassignTo?{...f,bots:[...f.bots,...victim.bots]}:f)); setDel(null); setReassignTo(''); }
+// Row of clickable colour chips from FUND_PALETTE.
+function ColorPicker({value,onChange}){
+  return <div className="flex flex-wrap gap-1.5">
+    {FUND_PALETTE.map(c=><button key={c} type="button" onClick={()=>onChange(c)} title={c}
+      className={`w-7 h-7 rounded-full transition ${value===c?'ring-2 ring-offset-2 ring-navy':'hover:scale-110'}`} style={{background:c}}>
+      {value===c&&<Icon name="check" className="w-4 h-4 text-white mx-auto"/>}
+    </button>)}
+  </div>;
+}
+function FundModal({open,initial,onClose,onSave}){
+  const [name,setName]=useState(''); const [color,setColor]=useState(FUND_PALETTE[0]); const [busy,setBusy]=useState(false);
+  useEffect(()=>{ if(open){ setName(initial?.name||''); setColor(initial?.color||FUND_PALETTE[0]); setBusy(false); } },[open,initial]);
+  if(!open) return null;
+  const save=async()=>{ if(!name.trim())return; setBusy(true); try{ await onSave({name:name.trim(),color}); }catch(e){ toast.error(e.message); setBusy(false); } };
+  return <Modal open={open} onClose={onClose} title={initial?'Edit fund':'Create fund'}>
+    <div className="space-y-4">
+      <Field label="Name"><Input value={name} autoFocus onChange={e=>setName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')save();}} placeholder="Delta Fund"/></Field>
+      <Field label="Colour" hint="Shown as a coloured dot here and as an emoji in the WhatsApp report"><ColorPicker value={color} onChange={setColor}/></Field>
+      <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={save} disabled={busy||!name.trim()}>{busy?'Saving…':(initial?'Save':'Create')}</Btn></div>
+    </div>
+  </Modal>;
+}
+function FundsPage(){
+  const {funds,user,reloadData}=useApp();
+  const isAdmin=user.role==='admin';
+  const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
+  if(!hasPerm(user,'view_trades')) return <Denied/>;
+  async function createFund(v){ await api('funds',{method:'POST',body:v}); await reloadData(); setModal(null); toast.success('Fund created'); }
+  async function editFund(v){ await api('funds',{method:'PATCH',body:{id:modal.id,...v}}); await reloadData(); setModal(null); toast.success('Fund updated'); }
+  async function removeFund(){ try{ await api('funds',{method:'DELETE',body:{id:del.id}}); await reloadData(); toast.success('Fund deleted — its bots are now unassigned'); }catch(e){ toast.error(e.message); } setDel(null); }
   return <div>
-    <PageHead title="Funds" subtitle="Create funds and manage bot-to-fund assignments"/>
-    <Card className="p-4 mb-5">
-      <div className="flex items-end gap-2">
-        <div className="flex-1 max-w-xs"><Field label="Create a new fund"><Input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&create()} placeholder="Delta Fund"/></Field></div>
-        <Btn onClick={create}><Icon name="plus" className="w-4 h-4"/>Create</Btn>
-        <div className="flex items-center gap-1.5 text-xs text-slate-400 pb-2">next color <span className="w-4 h-4 rounded-full" style={{background:freeColor}}/></div>
-      </div>
-    </Card>
-
-    <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+    <PageHead title="Funds" subtitle="Group your positions into funds — each gets a colour used in reports"
+      actions={isAdmin&&<Btn onClick={()=>setModal({})}><Icon name="plus" className="w-4 h-4"/>New fund</Btn>}/>
+    {funds.length===0? <EmptyState icon="layers" title="No funds yet"
+        hint={isAdmin?'Create your first fund, then assign positions to it from the Bots page.':'No funds have been created yet.'}
+        action={isAdmin&&<Btn onClick={()=>setModal({})}><Icon name="plus" className="w-4 h-4"/>Create a fund</Btn>}/>
+    : <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
       {funds.map(f=><Card key={f.id} className="p-5">
-        <div className="flex items-center justify-between mb-3">
-          {edit===f.id? <div className="flex items-center gap-2 flex-1">
-            <input type="color" value={editColor} onChange={e=>setEditColor(e.target.value)} className="w-7 h-7 rounded cursor-pointer border border-slate-200"/>
-            <Input value={editVal} autoFocus onChange={e=>setEditVal(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')saveEdit(f.id);}}/>
-            <Btn size="icon" variant="subtle" onClick={()=>saveEdit(f.id)}><Icon name="check" className="w-4 h-4"/></Btn>
-          </div> : <div className="flex items-center gap-2"><span className="w-3.5 h-3.5 rounded-full" style={{background:f.color}}/><span className="font-semibold text-navy">{f.name}</span><span className="text-xs text-slate-400">{f.bots.length} bots</span></div>}
-          {edit!==f.id&&<div className="flex gap-1">
-            <button onClick={()=>{setEdit(f.id);setEditVal(f.name);setEditColor(f.color);}} className="text-slate-400 hover:text-navy p-1" data-tip="Edit name"><Icon name="pencil" className="w-4 h-4"/></button>
-            <button onClick={()=>{setDel(f);setReassignTo(funds.find(x=>x.id!==f.id)?.id||'');}} disabled={funds.length<=1} className="text-slate-400 hover:text-danger p-1 disabled:opacity-30"><Icon name="trash" className="w-4 h-4"/></button>
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-4 h-4 rounded-full shrink-0" style={{background:f.color}}/>
+            <span className="font-semibold text-navy truncate">{f.name}</span>
+          </div>
+          {isAdmin&&<div className="flex gap-1 shrink-0">
+            <button onClick={()=>setModal(f)} className="text-slate-400 hover:text-navy p-1" data-tip="Edit"><Icon name="pencil" className="w-4 h-4"/></button>
+            <button onClick={()=>setDel(f)} className="text-slate-400 hover:text-danger p-1" data-tip="Delete"><Icon name="trash" className="w-4 h-4"/></button>
           </div>}
         </div>
-        <div className="space-y-1.5">
-          {f.bots.length===0&&<div className="text-xs text-slate-400 py-2">No bots assigned</div>}
-          {f.bots.map(bid=>{ const b=BASE_BOTS.find(x=>x.id===bid); return <div key={bid} className="flex items-center justify-between gap-2 text-sm">
-            <span className="text-navy truncate">{b.name}</span>
-            <select value={f.id} onChange={e=>reassign(bid,e.target.value)} className="text-xs border border-slate-200 rounded-md px-1.5 py-1 bg-white cursor-pointer shrink-0">
-              {funds.map(ff=><option key={ff.id} value={ff.id}>{ff.name}</option>)}
-            </select>
-          </div>; })}
+        <div className="flex items-center gap-4 mt-4 text-sm">
+          <div><div className="text-[11px] text-slate-400">Bots</div><div className="text-lg font-bold text-navy tnum">{f.botCount}</div></div>
+          <div><div className="text-[11px] text-slate-400">Open</div><div className="text-lg font-bold text-success tnum">{f.openCount}</div></div>
         </div>
       </Card>)}
-    </div>
+    </div>}
+    <FundModal open={!!modal} initial={modal&&modal.id?modal:null} onClose={()=>setModal(null)} onSave={modal&&modal.id?editFund:createFund}/>
+    <Confirm open={!!del} title="Delete fund" confirmLabel="Delete fund"
+      message={`Delete "${del?.name}"? Its ${del?.botCount||0} bot(s) will become unassigned (not deleted). This cannot be undone.`}
+      onCancel={()=>setDel(null)} onConfirm={removeFund}/>
+  </div>;
+}
 
-    <Card className="overflow-hidden">
-      <div className="p-5 pb-0"><SectionTitle>All Bots</SectionTitle></div>
-      <div className="overflow-x-auto"><table className="w-full text-sm">
-        <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-          <th className="px-4 py-2.5 text-left font-medium">Bot</th><th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Exchange</th>
-          <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Symbol</th><th className="px-4 py-2.5 text-left font-medium">Fund</th>
-        </tr></thead>
-        <tbody>
-          {BASE_BOTS.map(b=>{ const f=fundOfBot(funds,b.id); return <tr key={b.id} className="border-b border-slate-50">
-            <td className="px-4 py-2.5 font-medium text-navy">{b.name}</td>
-            <td className="px-4 py-2.5 text-slate-500 hidden sm:table-cell">{b.exchange}</td>
-            <td className="px-4 py-2.5 font-mono text-xs hidden sm:table-cell">{b.symbol}</td>
-            <td className="px-4 py-2.5"><select value={f?.id||''} onChange={e=>reassign(b.id,e.target.value)} className="text-sm border border-slate-200 rounded-md px-2 py-1 bg-white cursor-pointer">
-              {funds.map(ff=><option key={ff.id} value={ff.id}>{ff.name}</option>)}
-            </select></td>
-          </tr>; })}
-        </tbody>
-      </table></div>
-    </Card>
+/* ============================================================
+   ADMIN — BOTS (auto-detected positions; assign to funds, sync)
+   ============================================================ */
+function BotsPage(){
+  const {funds,user,data,reloadData}=useApp();
+  const [syncing,setSyncing]=useState(false); const [del,setDel]=useState(null);
+  if(user.role!=='admin') return <Denied/>;
+  const fundOpts=[{value:'',label:'— Unassigned —'},...funds.map(f=>({value:f.id,label:f.name}))];
 
-    <Modal open={!!del} onClose={()=>setDel(null)} title="Delete fund">
-      <p className="text-sm text-slate-600 mb-3">Every bot must belong to a fund. Choose which fund will receive the <span className="font-semibold">{del?.bots.length}</span> bot(s) from <span className="font-semibold">{del?.name}</span>.</p>
-      <Field label="Reassign bots to"><Select value={reassignTo} onChange={setReassignTo} options={funds.filter(f=>f.id!==del?.id).map(f=>({value:f.id,label:f.name}))}/></Field>
-      <div className="flex justify-end gap-2 mt-5"><Btn variant="outline" onClick={()=>setDel(null)}>Cancel</Btn><Btn variant="danger" onClick={doDelete}>Delete fund</Btn></div>
-    </Modal>
+  async function assign(id,fundId){ try{ await api('bots',{method:'PATCH',body:{id,fundId:fundId||null}}); await reloadData(); }catch(e){ toast.error(e.message); } }
+  async function removeBot(){ try{ await api('bots',{method:'DELETE',body:{id:del.id}}); await reloadData(); toast.success('Bot removed'); }catch(e){ toast.error(e.message); } setDel(null); }
+  async function sync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); await reloadData(); if(!r.connected) toast.error('No exchange connected — add a Binance key under Exchanges.'); else toast.success(`Synced — ${r.positions} position${r.positions===1?'':'s'}, ${r.created} new${r.errors?` · ${r.errors} error(s)`:''}`); }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
+
+  const bots=data.bots;
+  const unassigned=bots.filter(b=>b.status==='open'&&!b.fundId);
+  const lastSynced=data.live&&data.live.syncedAt? fmtAgo(data.live.syncedAt) : 'never';
+
+  const Row=({b})=>{ return <tr className="border-b border-slate-50 hover:bg-slate-50/60">
+    <td className="px-3 py-2.5 font-mono text-xs text-navy">{b.symbol}<div className="text-[10px] text-slate-400 capitalize">{b.exchange}</div></td>
+    <td className="px-3 py-2.5"><SideTag side={b.side}/></td>
+    <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtNum(b.qty,b.qty&&b.qty<1?4:2)}</td>
+    <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(b.unrealizedPnl)}`}>{fmtSigned(b.unrealizedPnl)}</td>
+    <td className="px-3 py-2.5 text-right tnum text-slate-500 hidden sm:table-cell">{fmtUSD(Math.abs(b.notional))}</td>
+    <td className="px-3 py-2.5"><StatusPill status={b.status==='open'?'active':'inactive'}/></td>
+    <td className="px-3 py-2.5"><Select className="w-40" value={b.fundId||''} onChange={v=>assign(b.id,v)} options={fundOpts}/></td>
+    <td className="px-3 py-2.5 text-right"><button onClick={()=>setDel(b)} className="text-slate-300 hover:text-danger p-1" data-tip="Remove bot"><Icon name="trash" className="w-4 h-4"/></button></td>
+  </tr>; };
+  const head=<tr className="border-b border-slate-100 text-slate-500">
+    <th className="px-3 py-2.5 text-left font-medium">Symbol</th><th className="px-3 py-2.5 text-left font-medium">Side</th>
+    <th className="px-3 py-2.5 text-right font-medium">Qty</th><th className="px-3 py-2.5 text-right font-medium">Open PnL</th>
+    <th className="px-3 py-2.5 text-right font-medium hidden sm:table-cell">Notional</th><th className="px-3 py-2.5 text-left font-medium">Status</th>
+    <th className="px-3 py-2.5 text-left font-medium">Fund</th><th className="px-3 py-2.5 w-10"></th>
+  </tr>;
+
+  return <div>
+    <PageHead title="Bots" subtitle="Auto-detected positions — assign each to a fund"
+      actions={<div className="flex items-center gap-3">
+        <span className="hidden sm:block text-xs text-slate-400">last synced {lastSynced}</span>
+        <Btn onClick={sync} disabled={syncing}><Icon name="refresh" className={`w-4 h-4 ${syncing?'animate-spin':''}`}/>{syncing?'Syncing…':'Sync now'}</Btn>
+      </div>}/>
+
+    {bots.length===0? <EmptyState icon="list" title="No bots yet"
+        hint="Bots appear automatically when a position is detected on a connected exchange. Add a Binance key under Exchanges, then Sync now."/>
+    : <>
+      {/* Unassigned inbox — needs attention */}
+      {unassigned.length>0&&<Card className="overflow-hidden mb-5 border border-gold/30">
+        <div className="p-4 pb-2 flex items-center gap-2"><Icon name="triangle" className="w-4 h-4 text-gold"/><span className="text-sm font-semibold text-navy">Unassigned positions</span><span className="text-[11px] text-slate-400">{unassigned.length} need a fund</span></div>
+        <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-xs">{head}</thead>
+          <tbody>{unassigned.map(b=><Row key={b.id} b={b}/>)}</tbody>
+        </table></div>
+      </Card>}
+
+      {/* All bots */}
+      <Card className="overflow-hidden">
+        <div className="p-5 pb-0"><SectionTitle right={<span className="text-[11px] text-slate-400">{bots.filter(b=>b.status==='open').length} open · {bots.filter(b=>b.status==='closed').length} closed</span>}>All Bots</SectionTitle></div>
+        <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-xs">{head}</thead>
+          <tbody>{bots.map(b=><Row key={b.id} b={b}/>)}</tbody>
+        </table></div>
+      </Card>
+    </>}
+
+    <Confirm open={!!del} title="Remove bot" confirmLabel="Remove"
+      message={`Remove ${del?.symbol} (${del?.exchange})? It will reappear on the next sync if the position is still open.`}
+      onCancel={()=>setDel(null)} onConfirm={removeBot}/>
   </div>;
 }
 
@@ -2148,20 +1787,65 @@ function SupportPage(){
 /* ============================================================
    SYSTEM STATUS
    ============================================================ */
-const fmtAgo=(t)=>{ if(t==null)return '—'; const min=Math.round((NOW-new Date(t).getTime())/60000); if(min<1)return 'just now'; if(min<60)return min+'m ago'; const h=Math.floor(min/60); if(h<24)return h+'h ago'; return Math.floor(h/24)+'d ago'; };
+const PRICE_SYMBOLS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','DOGEUSDT','LINKUSDT','DOTUSDT','LTCUSDT','TRXUSDT','ATOMUSDT','NEARUSDT'];
+// Live public crypto prices (Binance public REST, CORS-enabled, no key). Independent of the account.
+function PricesPage(){
+  const {user}=useApp();
+  const [rows,setRows]=useState(null); const [err,setErr]=useState(false); const [ts,setTs]=useState(null);
+  useEffect(()=>{
+    if(!hasPerm(user,'view_activity')) return;
+    let alive=true;
+    const load=async()=>{
+      try{
+        const q=encodeURIComponent(JSON.stringify(PRICE_SYMBOLS));
+        const r=await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbols=${q}`,{cache:'no-store'});
+        if(!r.ok) throw 0; const j=await r.json(); if(!alive) return;
+        setRows(j.map(t=>({symbol:t.symbol,base:baseOf(t.symbol),price:+t.lastPrice,chg:+t.priceChangePercent,vol:+t.quoteVolume})).sort((a,b)=>b.vol-a.vol));
+        setErr(false); setTs(Date.now());
+      }catch(e){ if(alive){ setErr(true); setRows(p=>p||[]); } }
+    };
+    load(); const iv=setInterval(load,20000); return ()=>{alive=false;clearInterval(iv);};
+  },[]);
+  if(!hasPerm(user,'view_activity')) return <Denied/>;
+  return <div>
+    <PageHead title="Prices" subtitle="Live public crypto prices" actions={ts&&<span className="text-xs text-slate-400">Updated {fmtAgo(ts)}</span>}/>
+    {rows==null? <Card className="p-10 text-center text-slate-400 text-sm">Loading prices…</Card>
+     : err&&!rows.length? <Card className="p-10 text-center text-slate-400 text-sm">Couldn't load prices right now — retrying…</Card>
+     : <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
+        <thead className="text-xs text-slate-500 border-b border-slate-100"><tr>
+          <th className="text-left px-4 py-2.5 font-medium">Asset</th>
+          <th className="text-right px-4 py-2.5 font-medium">Price</th>
+          <th className="text-right px-4 py-2.5 font-medium">24h</th>
+          <th className="text-right px-4 py-2.5 font-medium hidden sm:table-cell">24h volume</th>
+        </tr></thead>
+        <tbody>
+          {rows.map(t=><tr key={t.symbol} className="border-b border-slate-50 last:border-0">
+            <td className="px-4 py-2.5 font-medium text-navy whitespace-nowrap">{t.base}<span className="text-slate-400 font-normal">/USDT</span></td>
+            <td className="px-4 py-2.5 text-right tabular-nums text-navy whitespace-nowrap">{fmtPrice(t.price)}</td>
+            <td className={`px-4 py-2.5 text-right tabular-nums font-medium whitespace-nowrap ${t.chg>=0?'text-success':'text-danger'}`}>{fmtPct(t.chg)}</td>
+            <td className="px-4 py-2.5 text-right tabular-nums text-slate-500 whitespace-nowrap hidden sm:table-cell">{fmtUSD(t.vol)}</td>
+          </tr>)}
+        </tbody>
+      </table></div></Card>}
+    <p className="text-[11px] text-slate-400 mt-3">Public market data from Binance · refreshes every 20s · independent of your account &amp; positions.</p>
+  </div>;
+}
+
 function StatusPage(){
-  const {user,data,dataStatus}=useApp();
-  const services=useServiceHealth();
+  const {user,data,dataStatus,reloadData}=useApp();
   const [snaps,setSnaps]=useState(null); const [alerts,setAlerts]=useState(null); const [openwa,setOpenwa]=useState(undefined); const [dbErr,setDbErr]=useState(null);
+  const [exchanges,setExchanges]=useState(null);
+  const [wipe,setWipe]=useState(false); const [wiping,setWiping]=useState(false);
+  async function doReset(){ setWiping(true); try{ await api('init',{method:'POST',body:{action:'reset'}}); toast.success('Trading data reset — accounts kept'); reloadData&&reloadData(); }catch(e){ toast.error(e.message); } finally{ setWiping(false); setWipe(false); } }
   useEffect(()=>{
     api('snapshots?limit=3').then(r=>setSnaps(r.snapshots||[])).catch(e=>{ setSnaps([]); setDbErr(e.message); });
     api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>setAlerts([]));
-    if(user.role==='admin') api('openwa').then(r=>setOpenwa(r.config)).catch(()=>setOpenwa(null));
+    if(user.role==='admin'){ api('openwa').then(r=>setOpenwa(r.config)).catch(()=>setOpenwa(null)); api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>setExchanges([])); }
   },[]);
   if(!hasPerm(user,'view_activity')) return <Denied/>;
 
-  const exDown=services.filter(s=>s.ex&&s.status==='down');
-  const exDegraded=services.filter(s=>s.status==='degraded');
+  const live=data.live; const connected=live?live.connected:0;
+  const syncErr=dataStatus==='partial';
   const lastSnap=snaps&&snaps.length? snaps[snaps.length-1] : null;
   const dbOk=dbErr==null;
   const unacked=(alerts||[]).filter(a=>!a.ackedAt);
@@ -2170,9 +1854,9 @@ function StatusPage(){
   const ackRate=(alerts&&alerts.length)? acked.length/alerts.length*100 : null;
 
   const checks=[
-    {label:'Market data feed', state:dataStatus==='live'?'ok':dataStatus==='partial'?'warn':dataStatus==='sim'?'down':'neutral', sub:dataStatus==='live'?'All exchanges streaming':dataStatus==='partial'?'Some feeds degraded':dataStatus==='sim'?'Simulation fallback':'Connecting…'},
+    {label:'Exchange sync', state:connected>0?(syncErr?'warn':'ok'):'neutral', sub:connected>0?(syncErr?'Connected · last sync had errors':`${connected} exchange${connected===1?'':'s'} connected`):'No exchange connected'},
     {label:'Database', state:dbOk?'ok':'down', sub:dbOk?(lastSnap?`Last snapshot ${lastSnap.day}`:'Connected'):'Unreachable'},
-    {label:'Exchange APIs', state:exDown.length?'down':exDegraded.length?'warn':'ok', sub:exDown.length?`${exDown.map(s=>s.ex).join(', ')} down`:exDegraded.length?`${exDegraded.length} degraded`:'Binance · Bybit · OKX OK'},
+    {label:'Positions', state:data.openBots.length?'ok':'neutral', sub:`${data.openBots.length} open · ${data.bots.length} tracked`},
     {label:'Alerting', state:alerts==null?'neutral':'ok', sub:alerts==null?'Checking…':`${unacked.length} pending acknowledgement`},
     ...(user.role==='admin'?[{label:'WhatsApp (CallMeBot)', state:openwa==null?'neutral':openwa.enabled?(openwa.hasApiKey?'ok':'warn'):'neutral', sub:openwa===undefined?'Checking…':openwa===null?'—':openwa.enabled?(openwa.hasApiKey?'Enabled & configured':'Enabled · no API key'):'Disabled (optional)'}]:[]),
   ];
@@ -2181,7 +1865,7 @@ function StatusPage(){
   const dotCls=(s)=>s==='ok'?'bg-success':s==='warn'?'bg-amber-500':s==='down'?'bg-danger':'bg-slate-300';
 
   return <div>
-    <PageHead title="System Status" subtitle="Live health of feeds, database, alerting and integrations"/>
+    <PageHead title="System Status" subtitle="Health of exchange sync, database, alerting and integrations"/>
     <Card className="p-5 mb-5 flex items-center gap-3">
       <span className={`w-3 h-3 rounded-full ${overall[1]} ${anyDown?'':'pulse-dot'}`}/>
       <span className={`text-lg font-semibold ${overall[2]}`}>{overall[0]}</span>
@@ -2198,13 +1882,16 @@ function StatusPage(){
     </div>
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
       <Card className="p-5">
-        <SectionTitle right={<span className="text-[11px] text-slate-400">live ping · 10s</span>}>Service Health</SectionTitle>
-        <div className="space-y-2">
-          {services.map(s=><div key={s.name} className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${s.status==='active'?'bg-success':s.status==='degraded'?'bg-amber-500':s.status==='pending'?'bg-slate-300 animate-pulse':'bg-danger'}`}/>{s.name}</span>
-            <span className={`font-mono text-xs ${s.latency==null?'text-slate-300':s.latency>250?'text-amber-600':'text-slate-400'}`}>{s.latency==null?(s.status==='down'?'down':'—'):s.latency+'ms'}</span>
+        <SectionTitle right={<span className="text-[11px] text-slate-400">{live&&live.syncedAt?`synced ${fmtAgo(live.syncedAt)}`:'never synced'}</span>}>Exchange Connections</SectionTitle>
+        {user.role!=='admin'? <div className="text-sm text-slate-400">{connected>0?`${connected} exchange${connected===1?'':'s'} connected.`:'No exchange connected.'}</div>
+        : exchanges==null? <div className="text-sm text-slate-400">Loading…</div>
+        : exchanges.length===0? <div className="text-sm text-slate-400">No exchange connections yet — add one under Exchanges.</div>
+        : <div className="space-y-2">
+          {exchanges.map(e=><div key={e.id} className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${e.status==='connected'?'bg-success':e.status==='error'?'bg-danger':'bg-slate-300'}`}/>{e.label||e.name}</span>
+            <span className="font-mono text-xs text-slate-400">{e.lastSync?fmtAgo(e.lastSync):'—'}</span>
           </div>)}
-        </div>
+        </div>}
       </Card>
       <Card className="p-5">
         <SectionTitle right={<span className="text-[11px] text-slate-400">acknowledgement</span>}>Alert Analytics</SectionTitle>
@@ -2217,58 +1904,14 @@ function StatusPage(){
         <div className="text-[11px] text-slate-400 mt-3">{lastSnap?`Last recorded snapshot ${lastSnap.day} · ${fmtAgo(lastSnap.day)}`:'No recorded snapshots yet — the daily cron writes one per day.'}</div>
       </Card>
     </div>
-  </div>;
-}
-
-/* ============================================================
-   UNIFIED TIMELINE
-   ============================================================ */
-function TimelinePage(){
-  const {user,data}=useApp();
-  const [kind,setKind]=useState('all'); const [limit,setLimit]=useState(50);
-  const [alerts,setAlerts]=useState([]);
-  useEffect(()=>{ api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>{}); },[]);
-  const events=useMemo(()=>{
-    const ev=[];
-    data.trades.forEach(t=>{
-      if(t.status==='Closed'&&t.exit) ev.push({t:t.exit,kind:'trade',icon:'briefcase',color:t.pnl>=0?'text-success':'text-danger',dot:t.pnl>=0?'bg-success':'bg-danger',title:`Closed ${t.side} ${t.symbol}`,sub:`${t.bot} · ${fmtSigned(t.pnl)} (${fmtPct(t.pnlPct)})`});
-      else if(t.status==='Open') ev.push({t:t.entry,kind:'trade',icon:'briefcase',color:'text-blue-500',dot:'bg-blue-500',title:`Opened ${t.side} ${t.symbol}`,sub:`${t.bot} · size ${fmtUSD(t.size)}`});
-    });
-    LOGS.filter(l=>l.level==='critical'||l.level==='error'||l.level==='warning').forEach(l=>ev.push({t:l.t,kind:'log',icon:l.level==='warning'?'triangle':'info',color:l.level==='warning'?'text-amber-500':'text-danger',dot:l.level==='warning'?'bg-amber-500':'bg-danger',title:l.message,sub:`${l.source} · ${l.level}`}));
-    INCIDENTS.forEach(i=>ev.push({t:i.t,kind:'incident',icon:'zap',color:i.severity==='critical'?'text-danger':i.severity==='warning'?'text-amber-500':'text-blue-500',dot:i.severity==='critical'?'bg-danger':i.severity==='warning'?'bg-amber-500':'bg-blue-500',title:i.message,sub:'System incident'}));
-    alerts.forEach(a=>ev.push({t:new Date(a.createdAt).getTime(),kind:'alert',icon:'bell',color:'text-danger',dot:'bg-danger',title:a.summary,sub:`Alert ${a.code}${a.ackedAt?' · acknowledged':' · pending'}`}));
-    return ev.sort((x,y)=>y.t-x.t);
-  },[data,alerts]);
-  if(!hasPerm(user,'view_trades')) return <Denied/>;
-
-  const filtered=kind==='all'?events:events.filter(e=>e.kind===kind);
-  const shown=filtered.slice(0,limit);
-  const kinds=[['all','All'],['trade','Trades'],['log','Logs'],['incident','Incidents'],['alert','Alerts']];
-  return <div>
-    <PageHead title="Timeline" subtitle="Unified chronological feed across trades, logs, incidents and alerts"/>
-    <div className="flex items-center gap-2 mb-4 flex-wrap">
-      {kinds.map(([k,l])=><button key={k} onClick={()=>{setKind(k);setLimit(50);}} className={`px-3 py-1.5 rounded-lg text-sm border transition ${kind===k?'border-gold text-gold bg-gold/5':'border-slate-200 text-slate-500 hover:text-navy'}`}>{l}</button>)}
-      <span className="text-xs text-slate-400 ml-auto">{filtered.length} events</span>
-    </div>
-    <Card className="p-5">
-      <div className="relative">
-        <div className="absolute left-1.5 top-2 bottom-2 w-px bg-slate-200"/>
-        <div className="space-y-4">
-          {shown.map((e,i)=><div key={i} className="relative pl-7">
-            <span className={`absolute left-0 top-1 w-3 h-3 rounded-full ring-2 ring-white ${e.dot}`}/>
-            <div className="flex items-start gap-2">
-              <Icon name={e.icon} className={`w-4 h-4 mt-0.5 shrink-0 ${e.color}`}/>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-navy leading-snug">{e.title}</div>
-                <div className="text-[11px] text-slate-400 mt-0.5">{e.sub} · {fmtDT(e.t)}</div>
-              </div>
-            </div>
-          </div>)}
-          {shown.length===0&&<div className="text-sm text-slate-400 py-6 text-center">No events for this filter.</div>}
-        </div>
+    {user.role==='admin'&&<Card className="p-5 mt-5">
+      <SectionTitle>Maintenance</SectionTitle>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="text-sm text-slate-600 max-w-md">Wipe all trading data — bots, funds, exchanges, equity snapshots, reports, alerts, the WhatsApp log and sign-in history. <span className="font-medium text-navy">User accounts and settings are kept.</span> Use this once when going live, to clear test data.</div>
+        <Btn variant="danger" onClick={()=>setWipe(true)}><Icon name="trash" className="w-4 h-4"/>Reset data</Btn>
       </div>
-      {filtered.length>shown.length&&<div className="text-center mt-4"><Btn variant="outline" size="sm" onClick={()=>setLimit(l=>l+50)}>Show more ({filtered.length-shown.length})</Btn></div>}
-    </Card>
+    </Card>}
+    <Confirm open={wipe} title="Reset all trading data?" message="This permanently deletes bots, funds, exchanges, snapshots, reports, alerts, the WhatsApp log and sign-in history. User accounts and settings are kept. This cannot be undone." confirmLabel={wiping?'Resetting…':'Reset everything'} onCancel={()=>setWipe(false)} onConfirm={doReset}/>
   </div>;
 }
 
@@ -2322,41 +1965,49 @@ function useHashRoute(){
   return route;
 }
 
-/* Live market data: fetch real klines once + poll real tickers every 5s. Falls back to simulation on failure. */
-function useLiveData(authed){
-  const [klines,setKlines]=useState(null);
-  const [tickers,setTickers]=useState({});
-  const [status,setStatus]=useState('loading');
-  useEffect(()=>{
-    if(!authed) return;
-    let alive=true; setStatus('loading');
-    (async()=>{
-      const kl=await loadAllKlines(); if(!alive)return; setKlines(kl);
-      const tk=await loadAllTickers(); if(!alive)return; setTickers(tk.bots);
-      setStatus(kl.allFail?'sim':(kl.fails||tk.fails)?'partial':'live');
-    })();
-    return ()=>{alive=false;};
-  },[authed]);
-  useEffect(()=>{
-    if(!authed||!klines)return;
-    const iv=setInterval(async()=>{ const tk=await loadAllTickers(); setTickers(tk.bots); if(!tk.allFail&&klines&&!klines.allFail) setStatus(s=>s==='sim'?s:(tk.fails?'partial':'live')); },5000);
-    return ()=>clearInterval(iv);
-  },[authed,klines]);
-  const stat=useMemo(()=> klines? buildStatic(klines):null,[klines]);
-  const data=useMemo(()=> stat? {bots:foldLive(stat,tickers),trades:stat.trades,stats:stat.stats,status}:null,[stat,tickers,status]);
-  return {data,status};
-}
+/* Real data: fetch bots + funds + snapshots on login; refresh bots/live every ~30s.
+   Builds the derived `data` shape the UI reads, plus the funds array + a reload(). */
+function useData(authed){
+  const [raw,setRaw]=useState(null);     // { bots, live }
+  const [funds,setFunds]=useState([]);
+  const [snaps,setSnaps]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(null);
 
-/* Real exchange latency for Service Health (pings every 10s). */
-function useServiceHealth(){
-  const [pings,setPings]=useState(null);
-  const [tick,setTick]=useState(0);
-  useEffect(()=>{ let alive=true; const run=async()=>{ const p=await pingExchanges(); if(alive){setPings(p);setTick(t=>t+1);} }; run(); const iv=setInterval(run,10000); return ()=>{alive=false;clearInterval(iv);}; },[]);
-  const r=mulberry32(2026+tick*7);
-  return SERVICE_DEFS.map(s=>{
-    if(s.ex){ const p=pings&&pings[s.ex]; return {name:s.name,ex:s.ex,status:!pings?'pending':(p.ok?(p.ms>250?'degraded':'active'):'down'),latency:p?p.ms:null}; }
-    return {name:s.name,status:'active',latency:s.base+Math.floor(r()*s.jit)};
-  });
+  const loadBots=useCallback(async()=>{ const r=await api('bots'); setRaw({bots:r.bots||[],live:r.live||null}); return r; },[]);
+  const loadFunds=useCallback(async()=>{ const r=await api('funds'); setFunds(r.funds||[]); return r.funds; },[]);
+  const loadSnaps=useCallback(async()=>{ const r=await api('snapshots'); setSnaps(r.snapshots||[]); return r.snapshots; },[]);
+  // reloadData: re-fetch everything (used after sync / fund or bot mutations).
+  const reloadData=useCallback(async()=>{ try{ await Promise.all([loadBots(),loadFunds(),loadSnaps()]); setError(null); }catch(e){ setError(e); } },[loadBots,loadFunds,loadSnaps]);
+
+  useEffect(()=>{
+    if(!authed){ setRaw(null); setFunds([]); setSnaps([]); setLoading(true); return; }
+    let alive=true; setLoading(true);
+    Promise.allSettled([loadBots(),loadFunds(),loadSnaps()]).then(rs=>{ if(!alive)return; const bad=rs.find(x=>x.status==='rejected'); setError(bad?bad.reason:null); setLoading(false); });
+    return ()=>{alive=false;};
+  },[authed,loadBots,loadFunds,loadSnaps]);
+
+  // poll positions/live every 30s (snapshots/funds change rarely)
+  useEffect(()=>{ if(!authed)return; const iv=setInterval(()=>{ loadBots().catch(e=>setError(e)); },30000); return ()=>clearInterval(iv); },[authed,loadBots]);
+
+  const data=useMemo(()=>{
+    if(!raw) return null;
+    const bots=raw.bots, live=raw.live;
+    const series=snaps.map(s=>({t:new Date(s.day+'T00:00:00Z').getTime(), equity:s.equity, pnlDay:s.pnlDay, metrics:s.metrics}));
+    const lastSnapEq=series.length? series[series.length-1].equity : 0;
+    const equity = (live&&live.equity!=null)? live.equity : lastSnapEq;
+    const openBots=bots.filter(b=>b.status==='open');
+    const unassigned=openBots.filter(b=>b.fundId==null);
+    // group ALL bots (open+closed) by fund for counts/PnL; uPnl/notional reflect open ones.
+    const map=new Map(funds.map(f=>[f.id,{...f,bots:[],uPnl:0,notional:0}]));
+    const unb={id:null,name:'Unassigned',color:null,bots:[],uPnl:0,notional:0};
+    bots.forEach(b=>{ const g=(b.fundId&&map.get(b.fundId))||unb; g.bots.push(b); if(b.status==='open'){ g.uPnl+=b.unrealizedPnl||0; g.notional+=Math.abs(b.notional||0); } });
+    const byFund=[...map.values()]; if(unb.bots.length) byFund.push(unb);
+    return { bots, live, series, equity, openBots, unassigned, byFund, loading, error };
+  },[raw,funds,snaps,loading,error]);
+
+  const dataStatus = error? 'partial' : (raw&&raw.live&&raw.live.connected>0)? (raw.live.errors? 'partial':'live') : 'offline';
+  return { data, funds, setFunds, reloadData, reloadFunds:loadFunds, dataStatus };
 }
 
 // Global keyboard navigation: `g` then a letter jumps between pages, `/` focuses
@@ -2372,11 +2023,11 @@ function useKeyboardNav(navigate,user){
       if(e.key==='Escape'){ setHelp(false); if(typing)document.activeElement.blur(); return; }
       if(typing) return;
       if(e.key==='?'){ e.preventDefault(); setHelp(h=>!h); return; }
-      if(e.key==='/'){ e.preventDefault(); const s=document.querySelector('input[placeholder^="Search bots"]'); if(s)s.focus(); return; }
+      if(e.key==='/'){ e.preventDefault(); const s=document.querySelector('input[placeholder^="Search positions"]'); if(s)s.focus(); return; }
       if(gPending){
         gPending=false; clearTimeout(gTimer); const k=e.key.toLowerCase();
-        const go={a:'/activity',r:'/realtime',p:'/prices',t:'/trades',l:'/logs',s:'/status',i:'/timeline'}[k];
-        const adminGo={u:'/admin/users',e:'/admin/exchanges',w:'/admin/openwa',f:'/admin/funds'}[k];
+        const go={a:'/activity',r:'/realtime',t:'/trades',f:'/funds',s:'/status'}[k];
+        const adminGo={b:'/admin/bots',u:'/admin/users',e:'/admin/exchanges',w:'/admin/openwa'}[k];
         if(go){ e.preventDefault(); navigate(go); }
         else if(adminGo&&user.role==='admin'){ e.preventDefault(); navigate(adminGo); }
         return;
@@ -2390,9 +2041,8 @@ function useKeyboardNav(navigate,user){
 }
 function ShortcutsModal({open,onClose,isAdmin}){
   const rows=[
-    ['g a','Activity Dashboard'],['g r','Real-Time'],['g p','Prices'],['g t','Trades'],['g l','Activity Log'],
-    ['g s','System Status'],['g i','Timeline'],
-    ...(isAdmin?[['g u','Admin · Users'],['g e','Admin · Exchanges'],['g w','Admin · WhatsApp'],['g f','Admin · Funds']]:[]),
+    ['g a','Activity Dashboard'],['g r','Live'],['g t','Positions'],['g f','Funds'],['g s','System Status'],
+    ...(isAdmin?[['g b','Admin · Bots'],['g u','Admin · Users'],['g e','Admin · Exchanges'],['g w','Admin · WhatsApp']]:[]),
     ['/','Focus search'],['?','Toggle this help'],['Esc','Close / blur field'],
   ];
   return <Modal open={open} onClose={onClose} title="Keyboard shortcuts">
@@ -2409,19 +2059,19 @@ function ShortcutsModal({open,onClose,isAdmin}){
 function Shell(){
   const {route,navigate,user}=useApp();
   const {help,setHelp}=useKeyboardNav(navigate,user);
-  const [a,b,c]=route.parts;
+  const [a,b]=route.parts;
   let page;
-  if(a==='activity'){ page = b==='bot'? <ActivityPage botId={c}/> : <ActivityPage/>; }
+  if(a==='activity') page=<ActivityPage/>;
   else if(a==='realtime') page=<RealtimePage/>;
   else if(a==='prices') page=<PricesPage/>;
   else if(a==='trades') page=<TradesPage/>;
-  else if(a==='logs') page=<LogsPage/>;
+  else if(a==='funds') page=<FundsPage/>;
   else if(a==='status') page=<StatusPage/>;
-  else if(a==='timeline') page=<TimelinePage/>;
+  else if(a==='admin'&&b==='bots') page=<BotsPage/>;
   else if(a==='admin'&&b==='users') page=<AdminUsers/>;
   else if(a==='admin'&&b==='exchanges') page=<AdminExchanges/>;
   else if(a==='admin'&&(b==='openwa'||b==='whatsapp')) page=<AdminOpenWA/>;
-  else if(a==='admin'&&b==='funds') page=<AdminFunds/>;
+  else if(a==='admin'&&b==='funds') page=<FundsPage/>;
   else if(a==='admin'&&b==='reports') page=<AdminReports/>;
   else if(a==='profile') page=<ProfilePage/>;
   else if(a==='support') page=<SupportPage/>;
@@ -2441,8 +2091,7 @@ function Root(){
   const route=useHashRoute();
   const [user,setUser]=useState(null);
   const [booting,setBooting]=useState(true);
-  const [funds,setFunds]=useState([]);
-  const {data,status:dataStatus}=useLiveData(!!user);
+  const {data,funds,setFunds,reloadData,reloadFunds,dataStatus}=useData(!!user);
 
   // restore session from the JWT on load
   useEffect(()=>{
@@ -2471,16 +2120,6 @@ function Root(){
     return ()=>clearInterval(iv);
   },[user]);
 
-  // funds are read by many pages (Activity/Realtime) — load once authed
-  useEffect(()=>{
-    if(!user){ setFunds([]); return; }
-    let alive=true;
-    api('funds').then(r=>{ if(alive) setFunds(r.funds||[]); }).catch(()=>{});
-    return ()=>{alive=false;};
-  },[user]);
-  const reloadFunds=useCallback(async()=>{ const r=await api('funds'); setFunds(r.funds||[]); return r.funds; },[]);
-  const saveFunds=useCallback(async(next)=>{ const r=await api('funds',{method:'PUT',body:{funds:next}}); setFunds(r.funds||[]); return r.funds; },[]);
-
   async function login(email,password){
     const r=await api('auth',{method:'POST',body:{action:'login',email,password}});
     setToken(r.token); setUser(r.user); return r.user;
@@ -2492,11 +2131,11 @@ function Root(){
   function logout(){ api('auth',{method:'POST',body:{action:'logout'}}).catch(()=>{}); setToken(null); setUser(null); window.location.hash='#/activity'; }
   function navigate(to){ window.location.hash='#'+to; }
 
-  const ctx={route,navigate,user,setUser,login,loginGoogle,logout,api,funds,setFunds,reloadFunds,saveFunds,data,dataStatus};
+  const ctx={route,navigate,user,setUser,login,loginGoogle,logout,api,funds,setFunds,reloadFunds,reloadData,data,dataStatus};
 
-  const content = booting ? <LoadingScreen status="loading"/>
+  const content = booting ? <LoadingScreen/>
     : !user ? <Login/>
-    : (!data||!funds.length) ? <LoadingScreen status={dataStatus}/>
+    : !data ? <LoadingScreen/>
     : <Shell/>;
   return <App.Provider value={ctx}>{content}<Toaster/></App.Provider>;
 }

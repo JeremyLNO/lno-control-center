@@ -5,7 +5,8 @@
 //   POST {action:'generateReport'} -> build + store a report now (admin); notifies shareholders
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
-import { computePortfolio, riskMetrics } from './_lib/metrics.js';
+import { riskMetrics } from './_lib/metrics.js';
+import { buildPortfolio } from './_lib/portfolio.js';
 import { buildMonthlyPdf } from './_lib/report.js';
 import { notify, REPORT_AVAILABLE } from './_lib/notify.js';
 
@@ -38,16 +39,18 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const a = requireAdmin(req, res); if (!a) return;
       if (req.body?.action === 'generateReport') {
-        const p = await computePortfolio(); const m = riskMetrics(p.series);
-        const dt = new Date(p.series[p.series.length - 1].t);
-        const eq = p.series.map(x => x.equity);
-        const pnl30 = eq[eq.length - 1] - eq[Math.max(0, eq.length - 1 - 30)];
-        const label = dt.toISOString().slice(0, 10);
-        const b64 = await buildMonthlyPdf({ equity: m.totalEquity, pnl30, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, best: p.best, worst: p.worst, byExchange: p.byExchange, dateLabel: label });
+        const port = await buildPortfolio();
+        const snaps = (await query('SELECT equity FROM equity_snapshots ORDER BY day ASC')).rows;
+        const series = snaps.map(r => ({ equity: Number(r.equity) }));
+        const m = riskMetrics(series);
+        const eq = series.map(x => x.equity);
+        const pnl30 = eq.length ? eq[eq.length - 1] - eq[Math.max(0, eq.length - 1 - 30)] : 0;
+        const label = new Date().toISOString().slice(0, 10);
+        const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: label });
         const { rows } = await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at',
-          ['monthly', label, Math.round(m.totalEquity), Math.round(pnl30), b64]);
+          ['monthly', label, Math.round(port.equity), Math.round(pnl30), b64]);
         await notify(REPORT_AVAILABLE, { type: 'new_report' });
-        return res.status(200).json({ ok: true, report: { id: Number(rows[0].id), kind: 'monthly', periodLabel: label, equity: Math.round(m.totalEquity), pnl: Math.round(pnl30), createdAt: rows[0].created_at } });
+        return res.status(200).json({ ok: true, report: { id: Number(rows[0].id), kind: 'monthly', periodLabel: label, equity: Math.round(port.equity), pnl: Math.round(pnl30), createdAt: rows[0].created_at } });
       }
       return res.status(400).json({ error: 'unknown action' });
     }

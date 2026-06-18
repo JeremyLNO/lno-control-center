@@ -1,8 +1,7 @@
 // Schema creation + idempotent seed of defaults.
 import { query } from './db.js';
 import { hashPassword } from './auth.js';
-import { encrypt } from './crypto.js';
-import { ROLE_PERMS, DEFAULT_USERS, DEFAULT_FUNDS, DEFAULT_EXCHANGES, DEFAULT_OPENWA } from './constants.js';
+import { ROLE_PERMS, DEFAULT_USERS, DEFAULT_OPENWA } from './constants.js';
 
 export async function migrate() {
   await query(`CREATE TABLE IF NOT EXISTS users (
@@ -39,12 +38,31 @@ export async function migrate() {
     response TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
+  // funds are GLOBAL entities (name + colour); a bot is assigned to a fund via bots.fund_id
   await query(`CREATE TABLE IF NOT EXISTS funds (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     color TEXT NOT NULL,
     bots JSONB NOT NULL DEFAULT '[]',
     sort INT NOT NULL DEFAULT 0
+  )`);
+  // a bot = one (exchange, symbol) pair, created automatically when a position is detected.
+  // It must be assigned to a fund (fund_id). Position fields reflect the latest sync.
+  await query(`CREATE TABLE IF NOT EXISTS bots (
+    id TEXT PRIMARY KEY,
+    exchange TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    fund_id TEXT,
+    side TEXT,
+    qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+    entry DOUBLE PRECISION NOT NULL DEFAULT 0,
+    mark DOUBLE PRECISION NOT NULL DEFAULT 0,
+    unrealized_pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
+    notional DOUBLE PRECISION NOT NULL DEFAULT 0,
+    leverage DOUBLE PRECISION NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'open',
+    first_seen TIMESTAMPTZ DEFAULT now(),
+    last_seen TIMESTAMPTZ DEFAULT now()
   )`);
   await query(`CREATE TABLE IF NOT EXISTS exchanges (
     id TEXT PRIMARY KEY,
@@ -102,6 +120,8 @@ export async function seedIfEmpty() {
   const { rows } = await query('SELECT COUNT(*)::int AS n FROM users');
   if (rows[0].n > 0) return { seeded: false };
 
+  // Only seed user accounts + default config. Funds, exchanges and bots are created by
+  // the operator (funds) / detected from real positions (bots) — no demo data.
   for (const u of DEFAULT_USERS) {
     const hash = await hashPassword(u.password);
     await query(
@@ -110,16 +130,6 @@ export async function seedIfEmpty() {
       [u.id, u.username, u.email, u.firstName, u.lastName, u.role, u.active,
        JSON.stringify(ROLE_PERMS[u.role]), u.phone, u.notify, hash]
     );
-  }
-  let sort = 0;
-  for (const f of DEFAULT_FUNDS) {
-    await query(`INSERT INTO funds (id,name,color,bots,sort) VALUES ($1,$2,$3,$4::jsonb,$5)`,
-      [f.id, f.name, f.color, JSON.stringify(f.bots), sort++]);
-  }
-  for (const e of DEFAULT_EXCHANGES) {
-    await query(`INSERT INTO exchanges (id,name,label,api_key,api_secret_enc,status,note)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [e.id, e.name, e.label, e.apiKey, e.secret ? encrypt(e.secret) : null, e.status, e.note]);
   }
   await query(`INSERT INTO app_config (key,value) VALUES ('openwa',$1::jsonb)
                ON CONFLICT (key) DO NOTHING`, [JSON.stringify(DEFAULT_OPENWA)]);
