@@ -1387,11 +1387,16 @@ function AdminExchanges(){
   const [exchanges,setExchanges]=useState([]);
   const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
   const reload=()=>api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{});
+  const [syncing,setSyncing]=useState(false);
+  async function runSync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); toast.success(`Synced ${r.connected||0} exchange${(r.connected||0)===1?'':'s'} · ${r.positions||0} position${(r.positions||0)===1?'':'s'}${r.errors?` · ${r.errors} error${r.errors===1?'':'s'}`:''}`); await reload(); }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
   useEffect(()=>{ if(user.role==='admin') reload(); },[]);
   if(user.role!=='admin') return <Denied/>;
   const mask=(s)=> s? s.slice(0,6)+'••••••••'+s.slice(-4) : '';
   return <div>
-    <PageHead title="Exchanges" subtitle="Exchange API connections" actions={<Btn onClick={()=>setModal({mode:'add',data:{name:'',label:'',apiKey:'',secret:'',note:''}})}><Icon name="plus" className="w-4 h-4"/>Add Exchange</Btn>}/>
+    <PageHead title="Exchanges" subtitle="Exchange API connections" actions={<div className="flex items-center gap-2">
+      <Btn variant="outline" onClick={runSync} disabled={syncing}><Icon name="refresh" className="w-4 h-4"/>{syncing?'Syncing…':'Sync now'}</Btn>
+      <Btn onClick={()=>setModal({mode:'add',data:{name:'binance',label:'',apiKey:'',secret:'',note:''}})}><Icon name="plus" className="w-4 h-4"/>Add Exchange</Btn>
+    </div>}/>
     <div className="grid md:grid-cols-2 gap-4">
       {exchanges.map(e=><Card key={e.id} className="p-5">
         <div className="flex items-start justify-between">
@@ -1414,10 +1419,10 @@ function AdminExchanges(){
     </div>
     <ExchangeModal modal={modal} onClose={()=>setModal(null)} onSave={async(d)=>{
       try{
-        const body={name:d.name,label:d.label,apiKey:d.apiKey,note:d.note}; if(d.secret) body.apiSecret=d.secret;
+        const body={name:(d.name||'binance'),label:d.label,apiKey:d.apiKey,note:d.note}; if(d.secret) body.apiSecret=d.secret;
         if(modal.mode==='add') await api('exchanges',{method:'POST',body});
         else await api('exchanges',{method:'PATCH',body:{id:d.id,...body}});
-        await reload(); setModal(null);
+        setModal(null); await runSync(); // kick off a first sync so it doesn't sit at "pending"
       }catch(e){ toast.error(e.message); }
     }}/>
     <Confirm open={!!del} title="Delete exchange" message={`Remove ${del?.label}? Bots using this connection will lose API access.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('exchanges',{method:'DELETE',body:{id:del.id}});await reload();toast.success('Exchange removed');}catch(e){toast.error(e.message);}setDel(null);}}/>
@@ -1428,8 +1433,8 @@ function ExchangeModal({modal,onClose,onSave}){
   if(!modal)return null;
   return <Modal open={true} onClose={onClose} title={modal.mode==='add'?'Add Exchange':'Edit Exchange'}>
     <div className="space-y-3">
-      <Field label="Exchange name" hint="Use exactly “binance” — the position sync looks for connections named binance."><Input value={v.name||''} onChange={e=>setV({...v,name:e.target.value})} placeholder="binance"/></Field>
-      <Field label="Label"><Input value={v.label||''} onChange={e=>setV({...v,label:e.target.value})} placeholder="Binance Main"/></Field>
+      <Field label="Exchange"><Select value={v.name||'binance'} onChange={x=>setV({...v,name:x})} options={[{value:'binance',label:'Binance (USDT-M Futures)'}]}/></Field>
+      <Field label="Label" hint="Any name you like — e.g. “Main account”, “Sub-account 2”."><Input value={v.label||''} onChange={e=>setV({...v,label:e.target.value})} placeholder="Main account"/></Field>
       <Field label="API Key"><Input value={v.apiKey||''} onChange={e=>setV({...v,apiKey:e.target.value})}/></Field>
       <Field label="API Secret" hint={modal.mode==='edit'?'Leave blank to keep the existing secret':undefined}><Input type="password" value={v.secret||''} onChange={e=>setV({...v,secret:e.target.value})}/></Field>
       <Field label="Note (optional)"><Input value={v.note||''} onChange={e=>setV({...v,note:e.target.value})}/></Field>
