@@ -8,6 +8,7 @@ function pub(r) {
   return {
     id: r.id, name: r.name, label: r.label, apiKey: r.api_key,
     status: r.status, lastSync: r.last_sync ? Number(r.last_sync) : null, note: r.note || '',
+    lastError: r.last_error || null,
     hasSecret: !!r.api_secret_enc,
     secretMasked: r.api_secret_enc ? mask(decrypt(r.api_secret_enc)) : '',
   };

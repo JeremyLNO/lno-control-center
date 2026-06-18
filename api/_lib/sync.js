@@ -12,15 +12,21 @@ export async function syncExchanges() {
   const existing = new Set((await query('SELECT id FROM bots')).rows.map(r => r.id));
   const seen = [];
   let connected = 0, created = 0, updated = 0, positions = 0, totalEquity = 0, errors = 0;
+  const errorMsgs = [];
+  // record the failure on the exchange (status + message) and collect it for the caller
+  const fail = async (ex, msg) => {
+    errors++; errorMsgs.push(`${ex.label || ex.name}: ${msg}`);
+    await query('UPDATE exchanges SET status=$2, last_error=$3 WHERE id=$1', [ex.id, 'error', String(msg).slice(0, 400)]);
+  };
 
   for (const ex of exs) {
-    let secret; try { secret = decrypt(ex.api_secret_enc); } catch (e) { errors++; continue; }
+    let secret; try { secret = decrypt(ex.api_secret_enc); } catch (e) { await fail(ex, 'Stored API secret could not be decrypted — re-enter it.'); continue; }
     let pos, acct;
     try { [pos, acct] = await Promise.all([getPositions(ex.api_key, secret), getAccountEquity(ex.api_key, secret)]); }
-    catch (e) { errors++; await query('UPDATE exchanges SET status=$2 WHERE id=$1', [ex.id, 'error']); continue; }
+    catch (e) { await fail(ex, (e && e.code ? `[${e.code}] ` : '') + String((e && e.message) || e)); continue; }
 
     connected++; totalEquity += acct.equity; positions += pos.length;
-    await query('UPDATE exchanges SET status=$2, last_sync=$3 WHERE id=$1', [ex.id, 'connected', Date.now()]);
+    await query('UPDATE exchanges SET status=$2, last_sync=$3, last_error=NULL WHERE id=$1', [ex.id, 'connected', Date.now()]);
 
     for (const p of pos) {
       const id = `binance:${p.symbol}`; seen.push(id);
@@ -48,5 +54,5 @@ export async function syncExchanges() {
   await query(`INSERT INTO app_config (key,value) VALUES ('live',$1::jsonb)
                ON CONFLICT (key) DO UPDATE SET value=$1::jsonb`, [JSON.stringify(live)]);
 
-  return { connected, created, updated, positions, errors, totalEquity: Math.round(totalEquity) };
+  return { connected, created, updated, positions, errors, errorMsgs, totalEquity: Math.round(totalEquity) };
 }

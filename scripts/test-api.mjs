@@ -87,9 +87,11 @@ let binancePositions = [
   { symbol: 'XRPUSDT', positionAmt: '-2000', entryPrice: '0.62', markPrice: '0.60',  unRealizedProfit: '40', leverage: '3',  notional: '-1200' },
   { symbol: 'BTCUSDT', positionAmt: '0',     entryPrice: '0',    markPrice: '67000', unRealizedProfit: '0',  leverage: '10', notional: '0' },
 ];
+let binanceFail = false; // when true, Binance returns the classic -2015 (key/IP/permissions) error
 globalThis.fetch = async (url, opts) => {
   const u = String(url);
   if (u.includes('fapi.binance.com')) { // signed Binance USDⓈ-M futures (read-only)
+    if (binanceFail) return { ok: false, status: 401, json: async () => ({ code: -2015, msg: 'Invalid API-key, IP, or permissions for action.' }) };
     if (u.includes('/fapi/v2/positionRisk')) return { ok: true, status: 200, json: async () => binancePositions };
     if (u.includes('/fapi/v2/account')) return { ok: true, status: 200, json: async () => ({ totalMarginBalance: '125000.50', totalWalletBalance: '120000', totalUnrealizedProfit: '5000.50', availableBalance: '90000' }) };
     return { ok: true, status: 200, json: async () => ({}) };
@@ -201,6 +203,16 @@ ok('re-sync updates the open bot AND keeps its fund assignment', ada2 && ada2.st
 ok('non-admin cannot trigger a sync', [401, 403].includes((await call(bots, { method: 'POST', body: { action: 'sync' } })).status));
 r = await call(bots, { method: 'DELETE', headers: authH, body: { id: 'binance:XRPUSDT' } });
 ok('admin can delete a bot', r.status === 200 && (await call(bots, { method: 'GET', headers: authH })).body.bots.every(b => b.symbol !== 'XRPUSDT'), r.body);
+
+// a failed sync surfaces + stores the exchange error message
+binanceFail = true;
+r = await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } });
+ok('a failed sync returns the error message', r.body.errors >= 1 && /Invalid API-key, IP, or permissions/.test((r.body.errorMsgs || []).join(' ')), r.body);
+const exErr = (await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId);
+ok('the sync error is stored on the exchange (status=error + lastError)', !!exErr && exErr.status === 'error' && /-2015|permissions/.test(exErr.lastError || ''), exErr);
+binanceFail = false;
+await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } }); // restore good state (clears lastError)
+ok('a successful re-sync clears the stored error', ((await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId) || {}).lastError == null);
 
 // ── Funds: global CRUD with colour + colour→emoji mapping ──
 r = await call(funds, { method: 'POST', headers: authH, body: { name: 'Growth Fund', color: '#3B82F6' } });

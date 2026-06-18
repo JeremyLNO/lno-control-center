@@ -74,6 +74,8 @@ export async function migrate() {
     last_sync BIGINT,
     note TEXT DEFAULT ''
   )`);
+  // last sync error message (shown on the Exchanges page when status='error')
+  await query(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS last_error TEXT`);
   await query(`CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
     value JSONB NOT NULL DEFAULT '{}'

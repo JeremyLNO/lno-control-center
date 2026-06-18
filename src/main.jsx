@@ -1388,7 +1388,7 @@ function AdminExchanges(){
   const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
   const reload=()=>api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{});
   const [syncing,setSyncing]=useState(false);
-  async function runSync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); toast.success(`Synced ${r.connected||0} exchange${(r.connected||0)===1?'':'s'} · ${r.positions||0} position${(r.positions||0)===1?'':'s'}${r.errors?` · ${r.errors} error${r.errors===1?'':'s'}`:''}`); await reload(); }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
+  async function runSync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); await reload(); if(r.errors){ toast.error((r.errorMsgs&&r.errorMsgs[0])||`${r.errors} exchange${r.errors===1?'':'s'} failed to sync`); } else { toast.success(`Synced ${r.connected||0} exchange${(r.connected||0)===1?'':'s'} · ${r.positions||0} position${(r.positions||0)===1?'':'s'}`); } }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
   useEffect(()=>{ if(user.role==='admin') reload(); },[]);
   if(user.role!=='admin') return <Denied/>;
   const mask=(s)=> s? s.slice(0,6)+'••••••••'+s.slice(-4) : '';
@@ -1410,6 +1410,7 @@ function AdminExchanges(){
           </div>
           <div className="flex justify-between"><span className="text-slate-400">Last sync</span><span className="text-xs">{e.lastSync?fmtDT(e.lastSync):'—'}</span></div>
           {e.note&&<div className="text-xs text-slate-400 pt-1">{e.note}</div>}
+          {e.status==='error'&&e.lastError&&<div className="text-xs text-danger bg-danger/5 border border-danger/20 rounded-lg p-2 mt-1 break-words"><span className="font-medium">Sync error:</span> {e.lastError}</div>}
         </div>
         <div className="flex gap-2 mt-4">
           <Btn variant="outline" size="sm" onClick={()=>setModal({mode:'edit',data:{...e,secret:''}})}><Icon name="pencil" className="w-3.5 h-3.5"/>Edit</Btn>
@@ -1644,7 +1645,7 @@ function BotsPage(){
 
   async function assign(id,fundId){ try{ await api('bots',{method:'PATCH',body:{id,fundId:fundId||null}}); await reloadData(); }catch(e){ toast.error(e.message); } }
   async function removeBot(){ try{ await api('bots',{method:'DELETE',body:{id:del.id}}); await reloadData(); toast.success('Bot removed'); }catch(e){ toast.error(e.message); } setDel(null); }
-  async function sync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); await reloadData(); if(!r.connected) toast.error('No exchange connected — add a Binance key under Exchanges.'); else toast.success(`Synced — ${r.positions} position${r.positions===1?'':'s'}, ${r.created} new${r.errors?` · ${r.errors} error(s)`:''}`); }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
+  async function sync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); await reloadData(); if(r.errors){ toast.error((r.errorMsgs&&r.errorMsgs[0])||`${r.errors} exchange${r.errors===1?'':'s'} failed to sync`); } else if(!r.connected){ toast.error('No exchange connected — add a Binance key under Exchanges.'); } else { toast.success(`Synced — ${r.positions} position${r.positions===1?'':'s'}, ${r.created} new`); } }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
 
   const bots=data.bots;
   const unassigned=bots.filter(b=>b.status==='open'&&!b.fundId);
