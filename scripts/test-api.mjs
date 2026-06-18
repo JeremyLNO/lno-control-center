@@ -173,7 +173,12 @@ ok('report archive requires auth -> 401', r.status === 401, r.status);
 
 // ── Bots: auto-detected from Binance futures positions, assigned to global funds ──
 r = await call(exchanges, { method: 'POST', headers: authH, body: { name: 'binance', label: 'Binance Futures', apiKey: 'BINKEY', apiSecret: 'BINSECRET' } });
-ok('admin connects a Binance exchange (read-only key, secret encrypted)', r.status === 201, r.body);
+ok('admin connects a Binance exchange (read-only key, secret encrypted)', r.status === 201 && r.body.exchange.hasSecret === true, r.body);
+const exId = r.body.exchange.id;
+// editing without a new secret must KEEP the existing secret (regression)
+await call(exchanges, { method: 'PATCH', headers: authH, body: { id: exId, name: 'binance', label: 'Renamed acct', apiKey: 'BINKEY', note: '' } });
+const exAfter = (await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId);
+ok('editing an exchange without a new secret keeps the secret', !!exAfter && exAfter.hasSecret === true && exAfter.label === 'Renamed acct', exAfter);
 r = await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } });
 ok('sync creates one bot per OPEN futures position', r.status === 200 && r.body.created === 2 && r.body.positions === 2 && r.body.connected === 1, r.body);
 ok('sync reads account equity (margin balance)', r.body.totalEquity === 125001, r.body);

@@ -1435,8 +1435,8 @@ function ExchangeModal({modal,onClose,onSave}){
     <div className="space-y-3">
       <Field label="Exchange"><Select value={v.name||'binance'} onChange={x=>setV({...v,name:x})} options={[{value:'binance',label:'Binance (USDT-M Futures)'}]}/></Field>
       <Field label="Label" hint="Any name you like — e.g. “Main account”, “Sub-account 2”."><Input value={v.label||''} onChange={e=>setV({...v,label:e.target.value})} placeholder="Main account"/></Field>
-      <Field label="API Key"><Input value={v.apiKey||''} onChange={e=>setV({...v,apiKey:e.target.value})}/></Field>
-      <Field label="API Secret" hint={modal.mode==='edit'?'Leave blank to keep the existing secret':undefined}><Input type="password" value={v.secret||''} onChange={e=>setV({...v,secret:e.target.value})}/></Field>
+      <Field label="API Key"><Input autoComplete="off" value={v.apiKey||''} onChange={e=>setV({...v,apiKey:e.target.value})}/></Field>
+      <Field label="API Secret" hint={modal.mode==='edit'?'Leave blank to keep the existing secret':undefined}><Input type="password" autoComplete="new-password" value={v.secret||''} onChange={e=>setV({...v,secret:e.target.value})} placeholder={modal.mode==='edit'?'•••••••• — leave blank to keep':undefined}/></Field>
       <Field label="Note (optional)"><Input value={v.note||''} onChange={e=>setV({...v,note:e.target.value})}/></Field>
       <div className="text-[11px] text-slate-500 bg-navy/5 border border-slate-200 rounded-lg p-3">The key needs <span className="font-medium">Futures read</span> + <span className="font-medium">IP whitelist</span> (Vercel has no fixed IP, so route via a static-IP proxy). The secret is stored AES-encrypted and never returned. See <span className="font-mono">BINANCE_SETUP.md</span>.</div>
       <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>Cancel</Btn><Btn onClick={()=>onSave(v)}>Save</Btn></div>
