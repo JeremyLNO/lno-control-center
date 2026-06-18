@@ -1798,9 +1798,11 @@ function PricesPage(){
     let alive=true;
     const load=async()=>{
       try{
-        const q=encodeURIComponent(JSON.stringify(PRICE_SYMBOLS));
-        const r=await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbols=${q}`,{cache:'no-store'});
-        if(!r.ok) throw 0; const j=await r.json(); if(!alive) return;
+        // Binance USDⓈ-M FUTURES 24h tickers (public, no key). The futures endpoint has no
+        // `symbols` batch param → fetch all and filter to our list.
+        const r=await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr',{cache:'no-store'});
+        if(!r.ok) throw 0; const all=await r.json(); if(!alive) return;
+        const want=new Set(PRICE_SYMBOLS); const j=(Array.isArray(all)?all:[]).filter(t=>want.has(t.symbol));
         setRows(j.map(t=>({symbol:t.symbol,base:baseOf(t.symbol),price:+t.lastPrice,chg:+t.priceChangePercent,vol:+t.quoteVolume,high:+t.highPrice,low:+t.lowPrice})).sort((a,b)=>b.vol-a.vol));
         setErr(false); setTs(Date.now());
       }catch(e){ if(alive){ setErr(true); setRows(p=>p||[]); } }
@@ -1814,7 +1816,7 @@ function PricesPage(){
   const px=(p)=>fmtPrice(p).replace(' USDT','');
   const onDrop=(targetSym)=>{ const cur=(ordered||[]).map(r=>r.symbol); const from=cur.indexOf(drag); if(from<0||drag===targetSym){ setDrag(null); return; } cur.splice(from,1); const to=cur.indexOf(targetSym); cur.splice(to<0?cur.length:to,0,drag); setOrder(cur); PREF.set('prices_order',cur); setDrag(null); };
   return <div>
-    <PageHead title="Prices" subtitle="Live public crypto prices · drag a card to reorder" actions={<div className="flex items-center gap-3">
+    <PageHead title="Prices" subtitle="Live Binance futures prices · drag a card to reorder" actions={<div className="flex items-center gap-3">
       {order.length>0&&<button onClick={()=>{setOrder([]);PREF.set('prices_order',[]);}} className="text-xs text-slate-400 hover:text-navy">Reset order</button>}
       {ts&&<span className="text-xs text-slate-400">Updated {fmtAgo(ts)}</span>}
     </div>}/>
