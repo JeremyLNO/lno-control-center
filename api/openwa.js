@@ -8,6 +8,7 @@ import { requireAdmin } from './_lib/auth.js';
 import { encrypt, decrypt, mask } from './_lib/crypto.js';
 import { sendTextMeBot, getApiKey } from './_lib/notify.js';
 import { DEFAULT_MATRIX, WA_ROLES, WA_MSG_TYPES } from './_lib/constants.js';
+import { audit } from './_lib/audit.js';
 
 async function getCfg() {
   const { rows } = await query(`SELECT value FROM app_config WHERE key='openwa'`);
@@ -72,9 +73,11 @@ export default async function handler(req, res) {
         notifMatrix: body.notifMatrix ? cleanMatrix(body.notifMatrix) : cleanMatrix(cfg.notifMatrix),
       };
       // Firm-wide TextMeBot account key — stored encrypted; blank means "keep existing".
-      if (typeof body.apiKey === 'string' && body.apiKey.trim() !== '') next.apiKeyEnc = encrypt(body.apiKey.trim());
+      const keyChanged = typeof body.apiKey === 'string' && body.apiKey.trim() !== '';
+      if (keyChanged) next.apiKeyEnc = encrypt(body.apiKey.trim());
       delete next.defaultSender; // legacy default-recipient field removed
       await setCfg(next);
+      await audit(req, a, 'whatsapp.config', null, { enabled: next.enabled, apiKeyChanged: keyChanged, dailyReport: next.dailyReport });
       return res.status(200).json({ config: pub(next) });
     }
 

@@ -26,6 +26,8 @@ export async function migrate() {
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
+  // brute-force lockout: account is locked from password login until this time
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`);
   // legacy per-user WhatsApp api key column — unused since the switch to TextMeBot's single
   // firm-wide account key; kept (not dropped) for backward compatibility.
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wa_apikey TEXT`);
@@ -105,6 +107,17 @@ export async function migrate() {
     username TEXT NOT NULL,
     ip TEXT,
     method TEXT NOT NULL DEFAULT 'password',
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`);
+  // admin-action audit trail (sensitive mutations: user/role/account, exchange + WhatsApp config)
+  await query(`CREATE TABLE IF NOT EXISTS audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    actor_id TEXT,
+    actor_email TEXT,
+    action TEXT NOT NULL,
+    target TEXT,
+    detail JSONB NOT NULL DEFAULT '{}',
+    ip TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
   // generated report archive (PDF kept as base64 so it can be re-downloaded)

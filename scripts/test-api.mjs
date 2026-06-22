@@ -323,6 +323,19 @@ r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcr
 ok('Google sign-in links an existing account by email (keeps admin role)', r.status === 200 && r.body.user.email === 'admin@lno.company' && r.body.user.role === 'admin', r.body.user);
 delete globalThis.__GOOGLE_VERIFY__;
 
+// ── P3: account lockout after repeated failed logins ──
+await call(users, { method: 'POST', headers: authH, body: { email: 'lock.test@external.com', role: 'shareholder', password: 'Str0ng!Passw0rd' } });
+for (let i = 0; i < 5; i++) await call(auth, { method: 'POST', body: { action: 'login', email: 'lock.test@external.com', password: 'wrong' } });
+const lockedTry = await call(auth, { method: 'POST', body: { action: 'login', email: 'lock.test@external.com', password: 'Str0ng!Passw0rd' } });
+ok('account locks after 5 failed logins (correct pw still -> 429)', lockedTry.status === 429, lockedTry.body);
+
+// ── P3: admin actions are recorded in the audit log ──
+const auditLog = (await call(users, { method: 'GET', headers: authH, query: { audit: '1' } })).body.audit || [];
+const auditActions = auditLog.map(x => x.action);
+ok('audit log records user.create', auditActions.includes('user.create'), auditActions.slice(0, 8));
+ok('audit log records exchange.create', auditActions.includes('exchange.create'), auditActions.slice(0, 8));
+ok('audit entries carry actor + action fields', auditLog.length > 0 && 'actorEmail' in auditLog[0] && 'action' in auditLog[0]);
+
 // ── Reset: wipe trading/demo data, keep users + config (admin only) — run last ──
 r = await call(init, { method: 'POST', body: { action: 'reset' } });
 ok('non-admin cannot reset -> 401/403', [401, 403].includes(r.status), r.status);

@@ -4,11 +4,16 @@
 import { query } from './_lib/db.js';
 import { requireAdmin, hashPassword, sanitizeUser, passwordIssues } from './_lib/auth.js';
 import { ROLE_PERMS } from './_lib/constants.js';
+import { audit, recentAudit } from './_lib/audit.js';
 
 export default async function handler(req, res) {
   const a = requireAdmin(req, res); if (!a) return;
   try {
     if (req.method === 'GET') {
+      if (req.query?.audit) {
+        try { return res.status(200).json({ audit: await recentAudit(req.query.limit || 100) }); }
+        catch (e) { return res.status(200).json({ audit: [] }); }
+      }
       if (req.query?.logins) {
         let rows = [];
         try { rows = (await query('SELECT username,ip,method,created_at FROM login_events WHERE user_id=$1 ORDER BY created_at DESC LIMIT 12', [req.query.logins])).rows; } catch (e) {}
@@ -44,6 +49,7 @@ export default async function handler(req, res) {
          VALUES ($1,$2,$3,$4,$5,$6,true,$7::jsonb,$8,$9)`,
         [id, email, email, firstName, lastName, role, JSON.stringify(perms), hash, provider]
       );
+      await audit(req, a, 'user.create', email, { role, provider });
       const { rows } = await query('SELECT * FROM users WHERE id=$1', [id]);
       return res.status(201).json({ user: sanitizeUser(rows[0]) });
     }
@@ -72,6 +78,7 @@ export default async function handler(req, res) {
       if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
       vals.push(id);
       await query(`UPDATE users SET ${sets.join(',')} WHERE id=$${i}`, vals);
+      await audit(req, a, 'user.update', id, { fields: Object.keys(patch), passwordSet: typeof password === 'string' && password !== '' });
       const { rows } = await query('SELECT * FROM users WHERE id=$1', [id]);
       return res.status(200).json({ user: sanitizeUser(rows[0]) });
     }
@@ -81,6 +88,7 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'id required' });
       if (id === a.id) return res.status(400).json({ error: 'cannot delete yourself' });
       await query('DELETE FROM users WHERE id=$1', [id]);
+      await audit(req, a, 'user.delete', id, {});
       return res.status(200).json({ ok: true });
     }
     res.status(405).json({ error: 'method not allowed' });

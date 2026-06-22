@@ -3,6 +3,7 @@
 import { query } from './_lib/db.js';
 import { requireAdmin } from './_lib/auth.js';
 import { encrypt, decrypt, mask } from './_lib/crypto.js';
+import { audit } from './_lib/audit.js';
 
 function pub(r) {
   return {
@@ -27,6 +28,7 @@ export default async function handler(req, res) {
       const id = 'e' + Date.now();
       await query('INSERT INTO exchanges (id,name,label,api_key,api_secret_enc,status,note) VALUES ($1,$2,$3,$4,$5,$6,$7)',
         [id, body.name || '', body.label || '', body.apiKey || '', body.apiSecret ? encrypt(body.apiSecret) : null, 'pending', body.note || '']);
+      await audit(req, a, 'exchange.create', id, { name: body.name || '', hasSecret: !!body.apiSecret });
       const { rows } = await query('SELECT * FROM exchanges WHERE id=$1', [id]);
       return res.status(201).json({ exchange: pub(rows[0]) });
     }
@@ -41,6 +43,7 @@ export default async function handler(req, res) {
       if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
       vals.push(id);
       await query(`UPDATE exchanges SET ${sets.join(',')} WHERE id=$${i}`, vals);
+      await audit(req, a, 'exchange.update', id, { fields: Object.keys(body).filter(k => k !== 'id'), secretChanged: !!body.apiSecret });
       const { rows } = await query('SELECT * FROM exchanges WHERE id=$1', [id]);
       return res.status(200).json({ exchange: pub(rows[0]) });
     }
@@ -49,6 +52,7 @@ export default async function handler(req, res) {
       const id = body.id || req.query?.id;
       if (!id) return res.status(400).json({ error: 'id required' });
       await query('DELETE FROM exchanges WHERE id=$1', [id]);
+      await audit(req, a, 'exchange.delete', id, {});
       return res.status(200).json({ ok: true });
     }
     res.status(405).json({ error: 'method not allowed' });

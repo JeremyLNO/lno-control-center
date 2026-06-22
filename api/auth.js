@@ -10,7 +10,7 @@ async function recordLogin(u, req, method) {
   const ip = clientIp(req);
   await query('UPDATE users SET failed_attempts=0 WHERE id=$1', [u.id]); // works even pre-migration
   try {
-    await query('UPDATE users SET last_login_at=now(), last_seen_at=now(), last_ip=COALESCE($2, last_ip) WHERE id=$1', [u.id, ip]);
+    await query('UPDATE users SET last_login_at=now(), last_seen_at=now(), last_ip=COALESCE($2, last_ip), locked_until=NULL WHERE id=$1', [u.id, ip]);
     await query('INSERT INTO login_events (user_id,username,ip,method) VALUES ($1,$2,$3,$4)', [u.id, u.email, ip, method]);
   } catch (e) { /* audit columns/table not migrated yet — don't block sign-in */ }
   return (await query('SELECT * FROM users WHERE id=$1', [u.id])).rows[0];
@@ -30,17 +30,24 @@ export default async function handler(req, res) {
       const action = body.action;
 
       if (action === 'login') {
+        const MAX_ATTEMPTS = 5, LOCK_MINUTES = 15;
         // shareholders (external email) sign in with email + password; internal users use Google
         const { rows } = await query('SELECT * FROM users WHERE lower(email)=lower($1)', [String(body.email || '').trim()]);
         const u = rows[0];
+        // brute-force lockout (account-based): block while locked, regardless of password
+        if (u && u.locked_until && new Date(u.locked_until).getTime() > Date.now()) {
+          const mins = Math.ceil((new Date(u.locked_until).getTime() - Date.now()) / 60000);
+          return res.status(429).json({ error: `Too many failed attempts. Try again in ${mins} min.` });
+        }
         const ok = u && u.active && await verifyPassword(body.password, u.password_hash);
         if (!ok) {
           if (u) {
             const up = await query('UPDATE users SET failed_attempts=failed_attempts+1 WHERE id=$1 RETURNING failed_attempts', [u.id]);
+            const n = up.rows[0]?.failed_attempts || 0;
             // alert admins on the 3rd consecutive failure (spec: after 3 failed attempts)
-            if (up.rows[0]?.failed_attempts === 3) {
-              await notify(`⚠️ LNO Control Center — 3 failed login attempts for "${u.email}".`, { type: 'login' });
-            }
+            if (n === 3) await notify(`⚠️ LNO Control Center — 3 failed login attempts for "${u.email}".`, { type: 'login' });
+            // lock the account after MAX_ATTEMPTS (best-effort: column may be pre-migration)
+            if (n >= MAX_ATTEMPTS) { try { await query(`UPDATE users SET locked_until = now() + interval '${LOCK_MINUTES} minutes' WHERE id=$1`, [u.id]); } catch (e) {} }
           }
           return res.status(401).json({ error: 'Invalid email or password' });
         }
