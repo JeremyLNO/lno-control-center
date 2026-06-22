@@ -1,12 +1,12 @@
-// WhatsApp alerts (CallMeBot) config + alert rules + per-type/per-role routing (admin only).
+// WhatsApp alerts (TextMeBot) config + alert rules + per-type/per-role routing (admin only).
 //   GET  -> config (+ ?log=1 -> sent-messages log)
-//   PUT  -> update enabled / thresholds / alert rules / notification matrix
+//   PUT  -> update enabled / API key / thresholds / alert rules / notification matrix
 //   POST -> {action:'test', message?}  send a test WhatsApp to the requesting admin's own number
-// Recipients are users who enabled WhatsApp in their profile (no standalone default recipient).
+// One firm-wide TextMeBot account key sends to users who enabled WhatsApp in their profile.
 import { query } from './_lib/db.js';
 import { requireAdmin } from './_lib/auth.js';
-import { decrypt } from './_lib/crypto.js';
-import { sendCallMeBot } from './_lib/notify.js';
+import { encrypt, decrypt, mask } from './_lib/crypto.js';
+import { sendTextMeBot, getApiKey } from './_lib/notify.js';
 import { DEFAULT_MATRIX, WA_ROLES, WA_MSG_TYPES } from './_lib/constants.js';
 
 async function getCfg() {
@@ -29,6 +29,8 @@ function cleanMatrix(m) {
 function pub(cfg) {
   return {
     enabled: !!cfg.enabled,
+    hasApiKey: !!(cfg.apiKeyEnc || process.env.TEXTMEBOT_APIKEY),
+    apiKeyMasked: cfg.apiKeyEnc ? mask(decrypt(cfg.apiKeyEnc)) : (process.env.TEXTMEBOT_APIKEY ? '••••' : ''),
     drawdownPct: cfg.drawdownPct ?? 10, pnlDayThreshold: cfg.pnlDayThreshold ?? -5000,
     dailyReport: cfg.dailyReport ?? true,
     alertRules: Array.isArray(cfg.alertRules) ? cfg.alertRules : [],
@@ -69,7 +71,9 @@ export default async function handler(req, res) {
         alertRules: Array.isArray(body.alertRules) ? body.alertRules : (cfg.alertRules || []),
         notifMatrix: body.notifMatrix ? cleanMatrix(body.notifMatrix) : cleanMatrix(cfg.notifMatrix),
       };
-      delete next.defaultSender; delete next.apiKeyEnc; // legacy default-recipient fields removed
+      // Firm-wide TextMeBot account key — stored encrypted; blank means "keep existing".
+      if (typeof body.apiKey === 'string' && body.apiKey.trim() !== '') next.apiKeyEnc = encrypt(body.apiKey.trim());
+      delete next.defaultSender; // legacy default-recipient field removed
       await setCfg(next);
       return res.status(200).json({ config: pub(next) });
     }
@@ -77,12 +81,15 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const cfg = await getCfg();
       if (!cfg.enabled) return res.status(400).json({ error: 'WhatsApp alerts are disabled' });
-      // test goes to the requesting admin's OWN configured WhatsApp (set in their profile)
-      const { rows } = await query('SELECT phone, wa_apikey FROM users WHERE id=$1', [a.id]);
-      const u = rows[0];
-      if (!u || !u.phone || !u.wa_apikey) return res.status(400).json({ error: 'Add your WhatsApp number + CallMeBot key in your Profile first' });
+      // test goes to the requesting admin's OWN WhatsApp number (set in their profile),
+      // sent via the firm's single TextMeBot account key.
+      const { rows } = await query('SELECT phone FROM users WHERE id=$1', [a.id]);
+      const phone = rows[0] && rows[0].phone;
+      if (!phone) return res.status(400).json({ error: 'Add your WhatsApp number in your Profile first' });
+      const apikey = getApiKey(cfg);
+      if (!apikey) return res.status(400).json({ error: 'Set the TextMeBot API key first' });
       const message = (req.body && req.body.message) || '🎉 Congratulations! You are now set up to receive LNO Control Center alerts on WhatsApp. ✅';
-      const r = await sendCallMeBot(u.phone, decrypt(u.wa_apikey), message);
+      const r = await sendTextMeBot(phone, message, apikey);
       return res.status(r.ok ? 200 : 502).json(r);
     }
     res.status(405).json({ error: 'method not allowed' });

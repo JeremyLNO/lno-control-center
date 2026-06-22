@@ -806,7 +806,7 @@ function OnboardingCard(){
   const steps=[
     {label:'Change the default admin password', done:false, to:'/profile'},
     {label:'Connect your Binance API key', done:false, to:'/admin/exchanges'},
-    {label:'Set up WhatsApp alerts (CallMeBot)', done:!!openwaOk, to:'/admin/openwa'},
+    {label:'Set up WhatsApp alerts (TextMeBot)', done:!!openwaOk, to:'/admin/openwa'},
   ];
   const left=steps.filter(s=>!s.done).length;
   return <Card className="p-4 mb-5 border border-gold/30 bg-gold/5">
@@ -1458,7 +1458,7 @@ function ExchangeModal({modal,onClose,onSave}){
 function AdminOpenWA(){
   const {user,funds,navigate}=useApp();
   const [cfg,setCfg]=useState(null);
-  const [enabled,setEnabled]=useState(false); const [matrix,setMatrix]=useState({});
+  const [enabled,setEnabled]=useState(false); const [matrix,setMatrix]=useState({}); const [apiKey,setApiKey]=useState('');
   const [ddPct,setDdPct]=useState(10); const [pnlThr,setPnlThr]=useState(-5000); const [dailyReport,setDailyReport]=useState(true);
   const [rules,setRules]=useState([]);
   const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
@@ -1477,15 +1477,18 @@ function AdminOpenWA(){
   const updateRule=(i,patch)=>setRules(rs=>rs.map((r,j)=>j===i?{...r,...patch}:r));
   const addRule=()=>setRules(rs=>[...rs,{id:'r'+Date.now(),scope:'portfolio',metric:'drawdown',value:10,enabled:true}]);
   const toggleMatrix=(type,role)=>setMatrix(m=>{ const cur=new Set(m[type]||[]); cur.has(role)?cur.delete(role):cur.add(role); return {...m,[type]:[...cur]}; });
-  async function save(){ setBusy(true); try{ const body={enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)})),notifMatrix:matrix}; const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setMatrix(r.config.notifMatrix||{}); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
+  async function save(){ setBusy(true); try{ const body={enabled,drawdownPct:Number(ddPct),pnlDayThreshold:Number(pnlThr),dailyReport,alertRules:rules.map(r=>({...r,value:Number(r.value)})),notifMatrix:matrix}; if(apiKey.trim())body.apiKey=apiKey.trim(); const r=await api('openwa',{method:'PUT',body}); setCfg(r.config); setMatrix(r.config.notifMatrix||{}); setApiKey(''); setSaved(true); setTimeout(()=>setSaved(false),1800); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
   async function sendTest(){ setTest({state:'sending'}); try{ const r=await api('openwa',{method:'POST',body:{action:'test'}}); setTest({state:r.ok?'ok':'err', msg:r.ok?'Message sent ✓':('Failed (HTTP '+(r.status||'?')+')')}); }catch(e){ setTest({state:'err',msg:e.message}); } loadLog(); }
   async function runReport(){ setReport({state:'sending'}); try{ const r=await api('cron/daily',{method:'POST'}); const n=(r.sent||[]).reduce((a,s)=>a+(s.sent||0),0); setReport({state:'ok',msg:`Ran ✓ — ${n} message(s) delivered`}); }catch(e){ setReport({state:'err',msg:e.message}); } loadLog(); }
   return <div className="max-w-2xl">
-    <PageHead title="WhatsApp Alerts" subtitle="Send alerts to WhatsApp via CallMeBot — no server to host"/>
+    <PageHead title="WhatsApp Alerts" subtitle="Send alerts to WhatsApp via TextMeBot — one firm-wide account key"/>
     <Card className="p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div><div className="font-medium text-navy">Enable WhatsApp notifications</div><div className="text-xs text-slate-400">Master switch — if off, nobody receives anything</div></div>
         <Toggle on={enabled} onChange={setEnabled}/>
+      </div>
+      <div className="border-t border-slate-100 pt-4">
+        <Field label="TextMeBot API key" hint={cfg&&cfg.hasApiKey?'Saved — leave blank to keep':'Required to send — paste your TextMeBot account key'}><Input type="password" autoComplete="new-password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={cfg&&cfg.apiKeyMasked?cfg.apiKeyMasked:'TextMeBot account key'}/></Field>
       </div>
       <div className="border-t border-slate-100 pt-4">
         <SectionTitle>Who gets notified</SectionTitle>
@@ -1540,7 +1543,7 @@ function AdminOpenWA(){
 
     <Card className="p-5 mt-4">
       <SectionTitle>How it works</SectionTitle>
-      <p className="text-sm text-slate-600 mb-4"><span className="font-mono text-xs bg-slate-100 px-1 rounded">CallMeBot</span> is a free hosted WhatsApp relay — <span className="font-medium">no server to run</span>. Each user opts in from their own profile (number + personal API key, <span className="font-medium">encrypted at rest</span>); the backend sends a simple HTTPS request. The matrix above decides which role gets each message type — there is no shared/default recipient. <span className="text-slate-400">(Send-only: acknowledge alerts from the bell; the monthly PDF stays downloadable under Reports.)</span></p>
+      <p className="text-sm text-slate-600 mb-4"><span className="font-mono text-xs bg-slate-100 px-1 rounded">TextMeBot</span> is a hosted WhatsApp relay — <span className="font-medium">no server to run</span>. One shared TextMeBot account key (set above, <span className="font-medium">encrypted at rest</span>) sends to every opted-in user's number; the backend just makes an HTTPS request. Recipients must have their WhatsApp number registered with TextMeBot. The matrix above decides which role gets each message type. <span className="text-slate-400">(Send-only: acknowledge alerts from the bell; the monthly PDF stays downloadable under Reports.)</span></p>
       <SectionTitle>Active alerts</SectionTitle>
       <ul className="text-sm text-slate-600 space-y-2">
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Login-failure alerts to admins (after 3 failed attempts)</li>
@@ -1715,7 +1718,7 @@ function ProfilePage(){
   const {user,setUser}=useApp();
   const [v,setV]=useState({firstName:user.firstName,lastName:user.lastName}); const [saved,setSaved]=useState(false);
   const [pw,setPw]=useState({cur:'',n1:'',n2:''}); const [pwMsg,setPwMsg]=useState(null);
-  const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||''); const [waKey,setWaKey]=useState('');
+  const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||'');
   const fileRef=useRef();
   async function patchSelf(patch){ try{ const r=await api('profile',{method:'PATCH',body:patch}); setUser(r.user); return true; }catch(e){ toast.error(e.message); return false; } }
   async function saveInfo(){ if(await patchSelf({firstName:v.firstName,lastName:v.lastName})){ setSaved(true); setTimeout(()=>setSaved(false),1800); } }
@@ -1763,17 +1766,13 @@ function ProfilePage(){
       <SectionTitle>WhatsApp Notifications</SectionTitle>
       <div className="flex items-center justify-between mb-3">
         <div><div className="text-sm font-medium text-navy">Receive notifications</div><div className="text-xs text-slate-400">{user.role==='shareholder'?'Get a WhatsApp when a new report is available':'WhatsApp alerts must also be enabled by an admin to deliver'}</div></div>
-        <Toggle on={notify} onChange={async x=>{setNotify(x);if(await patchSelf({notify:x})&&x&&user.hasWaApikey&&phone)toast.success('WhatsApp notifications on — welcome message sent');}}/>
+        <Toggle on={notify} onChange={async x=>{setNotify(x);if(await patchSelf({notify:x})&&x&&phone)toast.success('WhatsApp notifications on — welcome message sent');}}/>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Your phone number"><Input value={phone} onChange={e=>setPhone(e.target.value)} onBlur={()=>patchSelf({phone})} placeholder="+33 6 12 34 56 78"/></Field>
-        <Field label="Your CallMeBot API key" hint={user.hasWaApikey?'Saved (encrypted). Leave blank to keep.':'Get it once via WhatsApp — see below'}><Input type="password" value={waKey} onChange={e=>setWaKey(e.target.value)} onBlur={async()=>{ if(waKey){ const okp=await patchSelf({waApikey:waKey}); if(okp){ setNotify(true); setWaKey(''); toast.success('WhatsApp alerts enabled — check your phone'); } } }} placeholder={user.hasWaApikey?'•••••• (unchanged)':'e.g. 1234567'}/></Field>
       </div>
       <div className="text-[11px] text-slate-500 mt-2 space-y-1 bg-navy/5 border border-slate-200 rounded-lg p-3">
-        <div className="font-medium text-slate-600">Activate your WhatsApp alerts (once):</div>
-        <div><span className="font-semibold">1.</span> Add <span className="font-mono">+34 611 021 695</span> to your phone contacts (name it however you like).</div>
-        <div><span className="font-semibold">2.</span> On WhatsApp, send <span className="font-mono bg-white px-1 rounded border border-slate-200">I allow callmebot to send me messages</span> to that contact.</div>
-        <div><span className="font-semibold">3.</span> Paste the API key it replies with into the field above — you'll then get a welcome message confirming it works.</div>
+        <div>Alerts are delivered through the firm's <span className="font-medium text-slate-600">TextMeBot</span> number — there's no personal key to set up. To receive them, make sure your WhatsApp number above is registered with TextMeBot. If you don't get the welcome message after turning notifications on, ask an admin to add your number.</div>
       </div>
     </Card>
   </div>;
@@ -1885,7 +1884,7 @@ function StatusPage(){
     {label:'Database', state:dbOk?'ok':'down', sub:dbOk?(lastSnap?`Last snapshot ${lastSnap.day}`:'Connected'):'Unreachable'},
     {label:'Positions', state:data.openBots.length?'ok':'neutral', sub:`${data.openBots.length} open · ${data.bots.length} tracked`},
     {label:'Alerting', state:alerts==null?'neutral':'ok', sub:alerts==null?'Checking…':`${unacked.length} pending acknowledgement`},
-    ...(user.role==='admin'?[{label:'WhatsApp (CallMeBot)', state:openwa==null?'neutral':openwa.enabled?(openwa.hasApiKey?'ok':'warn'):'neutral', sub:openwa===undefined?'Checking…':openwa===null?'—':openwa.enabled?(openwa.hasApiKey?'Enabled & configured':'Enabled · no API key'):'Disabled (optional)'}]:[]),
+    ...(user.role==='admin'?[{label:'WhatsApp (TextMeBot)', state:openwa==null?'neutral':openwa.enabled?(openwa.hasApiKey?'ok':'warn'):'neutral', sub:openwa===undefined?'Checking…':openwa===null?'—':openwa.enabled?(openwa.hasApiKey?'Enabled & configured':'Enabled · no API key'):'Disabled (optional)'}]:[]),
   ];
   const anyDown=checks.some(c=>c.state==='down'); const anyWarn=checks.some(c=>c.state==='warn');
   const overall=anyDown?['Degraded','bg-danger','text-danger']:anyWarn?['Partial outage','bg-amber-500','text-amber-600']:['All systems operational','bg-success','text-success'];

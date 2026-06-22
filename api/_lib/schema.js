@@ -26,7 +26,8 @@ export async function migrate() {
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT`);
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
-  // per-user CallMeBot api key (encrypted) — for personal WhatsApp alerts
+  // legacy per-user WhatsApp api key column — unused since the switch to TextMeBot's single
+  // firm-wide account key; kept (not dropped) for backward compatibility.
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wa_apikey TEXT`);
   // log of every WhatsApp message sent (admin-only view on the WhatsApp page)
   await query(`CREATE TABLE IF NOT EXISTS wa_log (

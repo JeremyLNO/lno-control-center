@@ -1,5 +1,5 @@
 // Inbound webhook: a WhatsApp reply containing "ACK [code]" acknowledges an alert.
-// NOTE: CallMeBot is send-only (no inbound), so this is currently unused — alerts are
+// NOTE: TextMeBot inbound isn't wired up, so this is currently unused — alerts are
 // acknowledged from the UI (the header bell). Kept for a future inbound-capable provider.
 import { query } from './_lib/db.js';
 

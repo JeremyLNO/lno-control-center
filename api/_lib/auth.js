@@ -67,7 +67,6 @@ export function sanitizeUser(row) {
     role: row.role, active: row.active,
     permissions: row.permissions || [],
     avatar: row.avatar || null, phone: row.phone || '', notify: !!row.notify,
-    hasWaApikey: !!row.wa_apikey,
     authProvider: row.auth_provider || 'password',
     lastLoginAt: row.last_login_at || null, lastIp: row.last_ip || null, lastSeenAt: row.last_seen_at || null,
   };

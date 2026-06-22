@@ -80,7 +80,7 @@ ok('create user with non-@lno.company email rejected', r.status === 400, r.body)
 r = await call(openwa, { method: 'PUT', headers: authH, body: { enabled: true } });
 ok('openwa config has a notification matrix + no default recipient', r.status === 200 && r.body.config.notifMatrix && Array.isArray(r.body.config.notifMatrix.login) && !('defaultSender' in r.body.config), r.body.config);
 
-// ── Alerts: mock exchange klines + CallMeBot sends so the suite stays offline ──
+// ── Alerts: mock exchange klines + TextMeBot sends so the suite stays offline ──
 const sentMessages = [];
 let binancePositions = [
   { symbol: 'ADAUSDT', positionAmt: '1000',  entryPrice: '0.45', markPrice: '0.47',  unRealizedProfit: '20', leverage: '5',  notional: '470' },
@@ -96,25 +96,33 @@ globalThis.fetch = async (url, opts) => {
     if (u.includes('/fapi/v2/account')) return { ok: true, status: 200, json: async () => ({ totalMarginBalance: '125000.50', totalWalletBalance: '120000', totalUnrealizedProfit: '5000.50', availableBalance: '90000' }) };
     return { ok: true, status: 200, json: async () => ({}) };
   }
-  if (u.includes('callmebot.com')) { sentMessages.push({ text: new URL(u).searchParams.get('text') || '' }); return { ok: true, status: 200, text: async () => 'Message queued.' }; }
+  if (u.includes('textmebot.com')) { sentMessages.push({ text: new URL(u).searchParams.get('text') || '' }); return { ok: true, status: 200, text: async () => 'Success! Message Sent.' }; }
   if (u.includes('binance.com')) { const a = []; let t = 1, p = 60000; for (let i = 0; i < 365; i++) { p *= 1 + Math.sin(i / 9) * 0.012; a.push([t, '0', '0', '0', String(p), '0']); t += 86400000; } return { ok: true, json: async () => a }; }
   if (u.includes('bybit.com')) { const list = []; let t = 365 * 86400000, p = 100; for (let i = 0; i < 365; i++) { p *= 1 + Math.cos(i / 7) * 0.01; list.push([String(t), '0', '0', '0', String(p)]); t -= 86400000; } return { ok: true, json: async () => ({ result: { list } }) }; }
   const data = []; let t = 300 * 86400000, p = 600; for (let i = 0; i < 300; i++) { p *= 1 + Math.sin(i / 5) * 0.011; data.push([String(t), '0', '0', '0', String(p)]); t -= 86400000; } return { ok: true, json: async () => ({ data }) };
 };
 
-// configure WhatsApp (enabled) + give admin a phone, key & notify so type:'login'/'daily' route to admins
-await call(openwa, { method: 'PUT', headers: authH, body: { enabled: true, drawdownPct: 1, pnlDayThreshold: 99999999 } });
-r = await call(profile, { method: 'PATCH', headers: authH, body: { firstName: 'Admin', lastName: 'User', phone: '+33611111111', waApikey: 'cmb-user-key' } });
-ok('saving a CallMeBot key (encrypted) auto-enables notifications', r.status === 200 && r.body.user.hasWaApikey === true && r.body.user.notify === true, r.body.user);
-q = await db.query("SELECT wa_apikey FROM users WHERE email='admin@lno.company'");
-ok('per-user CallMeBot key encrypted in DB (no plaintext)', !String(q.rows[0].wa_apikey || '').includes('cmb-user-key') && String(q.rows[0].wa_apikey).startsWith('v1:'), { v: q.rows[0].wa_apikey });
-ok('user gets a welcome WhatsApp when they save their key', sentMessages.some(m => /Welcome to LNO Control Center/i.test(m.text)), sentMessages.map(m => m.text));
-
-// turning notifications OFF must not send a welcome; turning them back ON (key already saved) must
-await call(profile, { method: 'PATCH', headers: authH, body: { notify: false } });
+// configure WhatsApp (enabled) with the firm-wide TextMeBot account key, plus alert thresholds
+r = await call(openwa, { method: 'PUT', headers: authH, body: { enabled: true, drawdownPct: 1, pnlDayThreshold: 99999999, apiKey: 'tmb-account-key' } });
+ok('openwa config exposes hasApiKey after setting the global key, never the raw key', r.status === 200 && r.body.config.hasApiKey === true && !JSON.stringify(r.body.config).includes('tmb-account-key'), r.body.config);
+q = await db.query("SELECT value FROM app_config WHERE key='openwa'");
+ok('firm-wide TextMeBot key encrypted in DB (no plaintext)', !JSON.stringify(q.rows[0].value).includes('tmb-account-key') && String(q.rows[0].value.apiKeyEnc || '').startsWith('v1:'), { v: q.rows[0].value.apiKeyEnc });
+// give the admin a phone + name (NO per-user key) so type:'login'/'daily' route to admins.
+// (The seed admin already has notify=true; turn it off first to test the off->on welcome.)
+r = await call(profile, { method: 'PATCH', headers: authH, body: { firstName: 'Admin', lastName: 'User', phone: '+33611111111', notify: false } });
+ok('profile no longer exposes a per-user WhatsApp key', !('hasWaApikey' in r.body.user), r.body.user);
 sentMessages.length = 0;
 r = await call(profile, { method: 'PATCH', headers: authH, body: { notify: true } });
-ok('turning notifications ON (off -> on) sends a welcome without re-entering the key', r.body.user.notify === true && sentMessages.some(m => /Welcome to LNO Control Center/i.test(m.text)), sentMessages.map(m => m.text));
+ok('turning notifications ON (off -> on, phone + global key set) sends a welcome via the firm key', r.status === 200 && r.body.user.notify === true && sentMessages.some(m => /Welcome to LNO Control Center/i.test(m.text)), { user: r.body.user, sent: sentMessages.map(m => m.text) });
+
+// "Send test to me" works with a phone + the global key; errors without a phone
+sentMessages.length = 0;
+r = await call(openwa, { method: 'POST', headers: authH, body: { action: 'test' } });
+ok('Send test delivers with phone + global key', r.status === 200 && r.body.ok === true && sentMessages.some(m => /Congratulations/i.test(m.text)), { status: r.status, body: r.body });
+await call(profile, { method: 'PATCH', headers: authH, body: { phone: '' } });
+r = await call(openwa, { method: 'POST', headers: authH, body: { action: 'test' } });
+ok('Send test errors (400) when the admin has no phone', r.status === 400 && /number/i.test(r.body.error || ''), r.body);
+await call(profile, { method: 'PATCH', headers: authH, body: { phone: '+33611111111' } });
 
 // login-failure alert: 3 wrong attempts triggers a WhatsApp to admins
 sentMessages.length = 0;
@@ -142,9 +150,9 @@ sentMessages.length = 0;
 r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'all' } });
 ok('global daily-PnL threshold breach detected', r.body.breaches.some(b => /daily PnL/i.test(b)), r.body.breaches);
 ok('weekly + monthly reports sent (force=all)', r.body.sent.some(s => s.type === 'weekly') && r.body.sent.some(s => s.type === 'monthly'), r.body.sent.map(s => s.type));
-// monthly PDF is built + archived (CallMeBot can't attach files, so it's not WhatsApp-sent)
+// monthly PDF is built + archived (sent as a text summary; the PDF stays downloadable)
 const pdfPart = r.body.sent.find(s => s.type === 'monthly-pdf');
-ok('monthly PDF built + archived (not WhatsApp-attached with CallMeBot)', !!pdfPart && !pdfPart.error && pdfPart.bytes > 0, pdfPart);
+ok('monthly PDF built + archived (not WhatsApp-attached)', !!pdfPart && !pdfPart.error && pdfPart.bytes > 0, pdfPart);
 const { buildMonthlyPdf } = await import('../api/_lib/report.js');
 const pdfB64 = await buildMonthlyPdf({ equity: 1e6, pnl30: 5000, openPnl: 1200, exposure: 8e5, maxDrawdownPct: -8, ddDurationDays: 12, sharpe: 1.2, sortino: 1.5, funds: [{ name: 'Core', color: '#10B981', uPnl: 1200, notional: 8e5, bots: [{}] }], dateLabel: '2026-06-15' });
 ok('buildMonthlyPdf produces a valid %PDF', Buffer.from(pdfB64, 'base64').slice(0, 5).toString() === '%PDF-', pdfB64.slice(0, 8));
@@ -246,7 +254,7 @@ r = await call(auth, { method: 'POST', body: { action: 'login', email: 'investor
 ok('shareholder signs in with email + password', r.status === 200 && !!r.body.token, r.status);
 // shareholder opts into WhatsApp -> gets a "new report available" notice when a report is generated
 const shH = { authorization: 'Bearer ' + r.body.token };
-await call(profile, { method: 'PATCH', headers: shH, body: { phone: '+33655555555', waApikey: 'sh-cmb-key' } });
+await call(profile, { method: 'PATCH', headers: shH, body: { phone: '+33655555555', notify: true } });
 sentMessages.length = 0;
 await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
 ok('shareholder gets a "new report available" WhatsApp on report generation', sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
