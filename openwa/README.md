@@ -34,7 +34,7 @@ the raw response (truncated) is stored in the WhatsApp message log so failures a
 
 - Login-failure alerts to admins (after 3 failed attempts).
 - Threshold breaches + daily / weekly / monthly reports — by the Vercel Cron
-  (`/api/cron/daily`, 08:00 UTC). Configure thresholds under Admin ▸ WhatsApp.
+  (`/api/cron/daily`, 06:00 UTC = 08:00 Europe/Paris in summer). Configure thresholds under Admin ▸ WhatsApp.
 - A "new report available" notice to opted-in shareholders when a report is generated.
 
 ## Limitations

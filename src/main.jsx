@@ -1512,13 +1512,13 @@ function AdminOpenWA(){
     </Card>
 
     <Card className="p-5 mt-4 space-y-4">
-      <SectionTitle right={<span className="text-[11px] text-slate-400">checked daily · 08:00 UTC</span>}>Alert rules</SectionTitle>
+      <SectionTitle right={<span className="text-[11px] text-slate-400">checked daily · 08:00 Paris</span>}>Alert rules</SectionTitle>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Max drawdown alert (%)" hint="Alert when portfolio drawdown exceeds this"><Input type="number" value={ddPct} onChange={e=>setDdPct(e.target.value)} placeholder="10"/></Field>
         <Field label="Daily PnL alert ($)" hint="Alert when the day's PnL falls below this (e.g. -5000)"><Input type="number" value={pnlThr} onChange={e=>setPnlThr(e.target.value)} placeholder="-5000"/></Field>
       </div>
       <div className="flex items-center justify-between border-t border-slate-100 pt-4">
-        <div><div className="text-sm font-medium text-navy">Daily portfolio report</div><div className="text-xs text-slate-400">Automatic WhatsApp summary every day at 08:00 UTC</div></div>
+        <div><div className="text-sm font-medium text-navy">Daily portfolio report</div><div className="text-xs text-slate-400">Automatic WhatsApp summary every day at 08:00 (Europe/Paris)</div></div>
         <Toggle on={dailyReport} onChange={setDailyReport}/>
       </div>
       <div className="flex items-center gap-3 pt-1 flex-wrap">
