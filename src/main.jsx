@@ -6,8 +6,9 @@ import {
   FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard
 } from './ui.jsx'
 import {
-  ActivityPage, RealtimePage, useVirtual, ColumnPicker, PresetMenu, POS_COLS, POS_GETTERS, TradesPage, UserLoginHistory, AdminUsers, PW_RULES, passwordOk, AdminSetPassword, genPassword, AddUserModal, AdminExchanges, ExchangeModal, AdminOpenWA, ColorPicker, FundModal, FundsPage, BotsPage, ProfilePage, SupportPage, PRICE_SYMBOLS, PricesPage, StatusPage, AdminReports
-} from './pages.jsx'
+  ActivityPage, RealtimePage, TradesPage, AdminUsers, AdminExchanges, AdminOpenWA,
+  FundsPage, BotsPage, ProfilePage, SupportPage, PricesPage, StatusPage, AdminReports
+} from './pages/index.js'
 
 /* ============================================================
    ROUTER + ROOT
