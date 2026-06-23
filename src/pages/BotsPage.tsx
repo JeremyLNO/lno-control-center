@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   fmtUSD, fmtSigned, fmtNum, clsPnl, fmtAgo, api, toast, Icon, Card, SectionTitle, Btn, StatusPill,
   Select, Confirm, useApp, PageHead, Denied, EmptyState, SideTag
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    ADMIN — BOTS (auto-detected positions; assign to funds, sync)
@@ -22,7 +22,7 @@ function BotsPage(){
   const unassigned=bots.filter(b=>b.status==='open'&&!b.fundId);
   const lastSynced=data.live&&data.live.syncedAt? fmtAgo(data.live.syncedAt) : 'never';
 
-  const Row=({b})=>{ return <tr className="border-b border-slate-50 hover:bg-slate-50/60">
+  const Row = ({b}: any) =>{ return <tr className="border-b border-slate-50 hover:bg-slate-50/60">
     <td className="px-3 py-2.5 font-mono text-xs text-navy">{b.symbol}<div className="text-[10px] text-slate-400 capitalize">{b.exchange}</div></td>
     <td className="px-3 py-2.5"><SideTag side={b.side}/></td>
     <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtNum(b.qty,b.qty&&b.qty<1?4:2)}</td>

@@ -1,4 +1,6 @@
 import React from 'react'
+import type { AppContextValue, ApiError } from './types'
+export type { Role, Permission, User, Fund, Bot, Position, Snapshot, SeriesPoint, FundGroup, DashboardData, Route, DataStatus, ApiFn, AppContextValue } from './types'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 
 /* ============================================================
@@ -111,8 +113,8 @@ async function exportRows({filename,headers,rows,format}){
   const ws=XLSX.utils.aoa_to_sheet([headers,...rows]); const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Data'); XLSX.writeFile(wb,filename+'.xlsx');
 }
-async function api(path,{method='GET',body,timeoutMs=35000}={}){
-  const headers={}; const tok=getToken(); if(tok) headers['Authorization']='Bearer '+tok;
+async function api(path: string, {method='GET',body,timeoutMs=35000}: {method?: string; body?: any; timeoutMs?: number} = {}): Promise<any> {
+  const headers: Record<string,string> = {}; const tok=getToken(); if(tok) headers['Authorization']='Bearer '+tok;
   if(body!==undefined) headers['Content-Type']='application/json';
   // client-side timeout so a hung request (function timeout / network stall) never leaves a
   // button stuck "…ing" — it fails cleanly and the action can be re-run manually.
@@ -120,13 +122,13 @@ async function api(path,{method='GET',body,timeoutMs=35000}={}){
   const timer=ctrl?setTimeout(()=>ctrl.abort(),timeoutMs):null;
   let r;
   try{ r=await fetch('/api/'+path,{method,headers,body:body!==undefined?JSON.stringify(body):undefined,signal:ctrl?ctrl.signal:undefined}); }
-  catch(e){ if(ctrl&&ctrl.signal.aborted){ const t=new Error('Request timed out — please try again.'); t.status=0; t.timeout=true; throw t; } throw e; }
+  catch(e){ if(ctrl&&ctrl.signal.aborted){ const t: ApiError=new Error('Request timed out — please try again.'); t.status=0; t.timeout=true; throw t; } throw e; }
   finally{ if(timer) clearTimeout(timer); }
   let data=null; try{ data=await r.json(); }catch(e){}
   if(!r.ok){
     // a 401 while holding a token = expired/invalid session -> let the app sign out gracefully
     if(r.status===401 && tok) { try{ window.dispatchEvent(new CustomEvent('lno:unauthorized')); }catch(e){} }
-    const err=new Error((data&&data.error)||('HTTP '+r.status)); err.status=r.status; err.data=data; throw err;
+    const err: ApiError=new Error((data&&data.error)||('HTTP '+r.status)); err.status=r.status; err.data=data; throw err;
   }
   return data;
 }
@@ -134,7 +136,7 @@ async function api(path,{method='GET',body,timeoutMs=35000}={}){
 /* ============================================================
    TOASTS — imperative (toast.success/error/info), rendered by <Toaster/>
    ============================================================ */
-const _toastSubs=new Set();
+const _toastSubs=new Set<(item:any)=>void>();
 const toast={
   _emit(t){ const item={id:(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():String(Date.now()+Math.random()),...t}; _toastSubs.forEach(fn=>fn(item)); },
   success(msg){ this._emit({kind:'success',msg}); },
@@ -143,7 +145,7 @@ const toast={
 };
 function Toaster(){
   const [items,setItems]=useState([]);
-  useEffect(()=>{ const fn=(t)=>{ setItems(x=>[...x,t]); setTimeout(()=>setItems(x=>x.filter(i=>i.id!==t.id)), t.kind==='error'?6000:3500); }; _toastSubs.add(fn); return ()=>_toastSubs.delete(fn); },[]);
+  useEffect(()=>{ const fn=(t)=>{ setItems(x=>[...x,t]); setTimeout(()=>setItems(x=>x.filter(i=>i.id!==t.id)), t.kind==='error'?6000:3500); }; _toastSubs.add(fn); return ()=>{ _toastSubs.delete(fn); }; },[]);
   const sty={success:['bg-success/10 border-success/30 text-success','check'],error:['bg-danger/10 border-danger/30 text-danger','triangle'],info:['bg-navy/5 border-slate-200 text-navy','info']};
   return <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-xs w-full pointer-events-none">
     {items.map(t=>{ const [cls,ic]=sty[t.kind]||sty.info; return <div key={t.id} className={`pointer-events-auto flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl border bg-white shadow-lg slidein ${cls}`}>
@@ -205,7 +207,7 @@ const ICONS = {
   database:[['path','M12 2C7.58 2 4 3.79 4 6s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4z'],['path','M4 6v6c0 2.21 3.58 4 8 4s8-1.79 8-4V6'],['path','M4 12v6c0 2.21 3.58 4 8 4s8-1.79 8-4v-6']],
   zap:[['path','M13 2L3 14h9l-1 8 10-12h-9l1-8z']],
 };
-function Icon({name,className='w-5 h-5',sw=2,fill='none'}){
+function Icon({name,className='w-5 h-5',sw=2,fill='none'}: any){
   const items=ICONS[name]||[];
   return <svg className={className} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
     {items.map((it,i)=> it[0]==='circle'? <circle key={i} cx={it[1]} cy={it[2]} r={it[3]}/> : it[0]==='line'? <line key={i} x1={it[1]} y1={it[2]} x2={it[3]} y2={it[4]}/> : it[0]==='rect'? <rect key={i} x={it[1]} y={it[2]} width={it[3]} height={it[4]} rx={it[5]||0}/> : <path key={i} d={it[1]}/>)}
@@ -217,7 +219,7 @@ function Icon({name,className='w-5 h-5',sw=2,fill='none'}){
 // while the gold accents (#C9A24D) stay gold. Shape is identical to the source file.
 const GOLD='#C9A24D';
 const LNO_PATH='M330.156 162.232L302 190.600L414.836 190.600L414.836 162.232ZM302 21.240L302 25.897L302 152.282L330.156 123.914L330.156 25.897L330.156 21.240Z M566.202 21.240L566.202 122.644L453.577 21.240L453.577 64.003L594.358 190.600L594.358 190.388L594.358 190.177L594.358 21.240Z M732.598 21.240C709.099 21.240 689.199 29.708 672.898 46.221C656.386 62.733 647.918 82.633 647.918 105.920C647.918 129.419 656.386 149.107 672.898 165.619C689.411 182.132 709.099 190.600 732.598 190.600C756.096 190.600 775.785 182.132 792.297 165.619C809.021 149.319 817.489 129.419 817.489 105.920C817.489 82.633 809.021 62.733 792.297 46.221C775.785 29.708 756.096 21.240 732.598 21.240ZM732.598 49.608C748.052 49.608 761.389 55.112 772.397 66.120C783.406 77.129 788.910 90.466 788.910 105.920C788.910 121.374 783.617 134.711 772.397 145.931C761.389 156.940 748.052 162.232 732.598 162.232C717.144 162.232 703.595 156.940 692.586 145.931C681.578 134.923 676.286 121.374 676.286 105.920C676.286 90.466 681.578 77.129 692.586 66.120C703.807 54.900 717.144 49.608 732.598 49.608Z';
-function Logo({className='h-7'}){
+function Logo({className='h-7'}: any){
   return <svg viewBox="0 0 824 190.6" className={className} fill="none" role="img" aria-label="LNO Control Center">
     <rect fill={GOLD} x="17" y="110.6" width="36" height="80"/>
     <rect fill="currentColor" x="77" y="80.6" width="36" height="110"/>
@@ -233,10 +235,10 @@ function Logo({className='h-7'}){
 /* ============================================================
    PRIMITIVES
    ============================================================ */
-function Card({className='',children,...p}){ return <div className={'bg-white rounded-xl border border-slate-200/80 shadow-sm '+className} {...p}>{children}</div>; }
-function SectionTitle({children,right}){ return <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold text-navy tracking-tight">{children}</h3>{right}</div>; }
+function Card({className='',children,...p}: any){ return <div className={'bg-white rounded-xl border border-slate-200/80 shadow-sm '+className} {...p}>{children}</div>; }
+function SectionTitle({children,right}: any){ return <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold text-navy tracking-tight">{children}</h3>{right}</div>; }
 
-function Btn({variant='primary',size='md',className='',children,...p}){
+function Btn({variant='primary',size='md',className='',children,...p}: any){
   const base='inline-flex items-center justify-center gap-2 font-medium rounded-lg transition active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none';
   const sz= size==='sm'?'text-xs px-2.5 py-1.5':size==='icon'?'p-2':'text-sm px-3.5 py-2';
   const v={
@@ -249,14 +251,14 @@ function Btn({variant='primary',size='md',className='',children,...p}){
   }[variant];
   return <button className={`${base} ${sz} ${v} ${className}`} {...p}>{children}</button>;
 }
-function Badge({color,children,className='',onClick,dot}){
+function Badge({color,children,className='',onClick,dot}: any){
   return <span onClick={onClick} className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${onClick?'cursor-pointer hover:ring-2 hover:ring-offset-1 ring-slate-200':''} ${className}`} style={color?{background:color+'1A',color:darken(color)}:undefined}>
     {dot&&<span className="w-1.5 h-1.5 rounded-full" style={{background:color}}/>}{children}
   </span>;
 }
 function darken(hex){ return hex; }
 
-function StatusPill({status}){
+function StatusPill({status}: any){
   const map={
     active:['bg-success/10 text-success','active'], connected:['bg-success/10 text-success','Connected'],
     paused:['bg-warn/10 text-amber-600','paused'], pending:['bg-slate-200 text-slate-600','Pending'],
@@ -270,14 +272,14 @@ function StatusPill({status}){
   </span>;
 }
 
-function Toggle({on,onChange,size='md'}){
+function Toggle({on,onChange,size='md'}: any){
   const w=size==='sm'?'w-9 h-5':'w-11 h-6'; const k=size==='sm'?'w-3.5 h-3.5':'w-4 h-4'; const tr=size==='sm'?(on?'translate-x-4':'translate-x-0.5'):(on?'translate-x-5':'translate-x-1');
   return <button onClick={()=>onChange(!on)} className={`${w} rounded-full transition relative flex items-center ${on?'bg-success':'bg-slate-300'}`}>
     <span className={`${k} bg-white rounded-full shadow transition transform ${tr}`}/>
   </button>;
 }
 
-function Select({value,onChange,options,className=''}){
+function Select({value,onChange,options,className=''}: any){
   return <div className={`relative ${className}`}>
     <select value={value} onChange={e=>onChange(e.target.value)} className="appearance-none w-full bg-white border border-slate-300 rounded-lg pl-3 pr-8 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40 cursor-pointer">
       {options.map(o=> typeof o==='string'? <option key={o} value={o}>{o}</option> : <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -285,13 +287,13 @@ function Select({value,onChange,options,className=''}){
     <Icon name="chevdown" className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"/>
   </div>;
 }
-function Field({label,children,hint,className=''}){ return <label className={`block ${className}`}><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>{children}{hint&&<span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}</label>; }
+function Field({label,children,hint,className=''}: any){ return <label className={`block ${className}`}><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>{children}{hint&&<span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}</label>; }
 function Input(p){ return <input {...p} className={'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40 '+(p.className||'')}/>; }
 
 // Export-as menu (CSV / Excel). getRows() returns array-of-arrays aligned to headers,
 // resolved lazily on click so it always reflects the current filters/sort.
-function ExportMenu({getRows,headers,filename,disabled,label='Export',size='sm',variant='gold'}){
-  const [open,setOpen]=useState(false); const ref=useRef();
+function ExportMenu({getRows,headers,filename,disabled,label='Export',size='sm',variant='gold'}: any){
+  const [open,setOpen]=useState(false); const ref=useRef<any>(null);
   useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
   const run=async(format)=>{ setOpen(false); try{ const rows=getRows(); if(!rows.length){ toast.info('Nothing to export with the current filters.'); return; } await exportRows({filename,headers,rows,format}); toast.success(`Exported ${rows.length} row${rows.length===1?'':'s'} as ${format.toUpperCase()}`); }catch(e){ toast.error('Export failed: '+e.message); } };
   return <div ref={ref} className="relative">
@@ -303,7 +305,7 @@ function ExportMenu({getRows,headers,filename,disabled,label='Export',size='sm',
   </div>;
 }
 
-function Modal({open,onClose,title,children,wide}){
+function Modal({open,onClose,title,children,wide}: any){
   if(!open) return null;
   return <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
     <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm"/>
@@ -316,7 +318,7 @@ function Modal({open,onClose,title,children,wide}){
     </div>
   </div>;
 }
-function Confirm({open,title,message,onConfirm,onCancel,danger=true,confirmLabel='Delete'}){
+function Confirm({open,title,message,onConfirm,onCancel,danger=true,confirmLabel='Delete'}: any){
   return <Modal open={open} onClose={onCancel} title={title}>
     <p className="text-sm text-slate-600 mb-5">{message}</p>
     <div className="flex justify-end gap-2">
@@ -329,9 +331,9 @@ function Confirm({open,title,message,onConfirm,onCancel,danger=true,confirmLabel
 /* ============================================================
    CHARTS
    ============================================================ */
-function AreaChart({data,positive,height=260,resetKey,benchmark}){
+function AreaChart({data,positive,height=260,resetKey,benchmark}: any){
   const id=useId().replace(/:/g,'');
-  const ref=useRef();
+  const ref=useRef<any>(null);
   const [hover,setHover]=useState(null);
   const [zoom,setZoom]=useState(null);   // {a,b} indices into full data
   const [drag,setDrag]=useState(null);
@@ -385,10 +387,10 @@ function AreaChart({data,positive,height=260,resetKey,benchmark}){
 /* ============================================================
    APP CONTEXT
    ============================================================ */
-const App = createContext(null);
-const useApp = ()=>useContext(App);
+const App = createContext<AppContextValue | null>(null);
+const useApp = (): AppContextValue => useContext(App) as AppContextValue;
 
-function hasPerm(user,perm){ if(!user)return false; if(user.role==='admin')return true; return (user.permissions||[]).includes(perm); }
+function hasPerm(user: any, perm: string){ if(!user)return false; if(user.role==='admin')return true; return (user.permissions||[]).includes(perm); }
 
 // helper: the fund a bot is assigned to (or undefined). Bots carry fundId; funds carry id+color.
 function fundOf(funds,bot){ return bot&&bot.fundId? funds.find(f=>f.id===bot.fundId) : undefined; }
@@ -413,7 +415,7 @@ function riskMetrics(series){
   for(let i=0;i<eq.length;i++){ if(eq[i]>=peak){peak=eq[i];peakI=i;} else { const d=(eq[i]-peak)/peak; if(d<mdd)mdd=d; if(i-peakI>ddDur)ddDur=i-peakI; } }
   return { sharpe:sd?(mean/sd)*ann:0, sortino:dd?(mean/dd)*ann:0, maxDrawdownPct:mdd*100, ddDurationDays:ddDur };
 }
-function ExposureBars({title,items,total}){
+function ExposureBars({title,items,total}: any){
   return <div>
     <div className="text-xs font-medium text-slate-500 mb-2">{title}</div>
     <div className="space-y-2">
@@ -425,15 +427,15 @@ function ExposureBars({title,items,total}){
   </div>;
 }
 // Risk metrics from the equity series + live exposure broken down by fund and by asset.
-function RiskPanel({series,openBots,byFund}){
+function RiskPanel({series,openBots,byFund}: any){
   const m=riskMetrics(series&&series.length?series:[{equity:0}]);
-  const byAsset={};
+  const byAsset: Record<string, number>={};
   openBots.forEach(b=>{ const k=baseOf(b.symbol); byAsset[k]=(byAsset[k]||0)+Math.abs(b.notional||0); });
-  const fundItems=byFund.filter(f=>f.notional>0).map(f=>[f.name,f.notional]).sort((a,b)=>b[1]-a[1]);
+  const fundItems=byFund.filter(f=>f.notional>0).map(f=>[f.name,f.notional] as [string, number]).sort((a,b)=>b[1]-a[1]);
   const assetItems=Object.entries(byAsset).sort((a,b)=>b[1]-a[1]);
   const fundTotal=fundItems.reduce((a,x)=>a+x[1],0)||1;
   const assetTotal=assetItems.reduce((a,x)=>a+x[1],0)||1;
-  const M=({label,value,cls,tip})=><div className="bg-slate-50 rounded-lg p-3" title={tip||undefined}>
+  const M = ({label,value,cls,tip}: any) =><div className="bg-slate-50 rounded-lg p-3" title={tip||undefined}>
     <div className="text-[11px] text-slate-500 flex items-center gap-1">{label}{tip&&<Icon name="info" className="w-3 h-3 text-slate-300 cursor-help"/>}</div>
     <div className={`text-lg font-bold tnum mt-0.5 ${cls||'text-navy'}`}>{value}</div>
   </div>;
@@ -452,7 +454,7 @@ function RiskPanel({series,openBots,byFund}){
   </Card>;
 }
 // Underwater (drawdown-over-time) chart: red area from 0 down to the running drawdown.
-function Underwater({series,height=120}){
+function Underwater({series,height=120}: any){
   if(!series||series.length<2) return <div style={{height}} className="grid place-items-center text-slate-300 text-sm">No data</div>;
   let peak=-Infinity; const dd=series.map(p=>{ peak=Math.max(peak,p.equity); return (p.equity-peak)/peak*100; });
   const w=1000,h=height; const min=Math.min(-0.1,...dd);
@@ -465,7 +467,7 @@ function Underwater({series,height=120}){
   </svg>;
 }
 // GitHub-style daily-PnL heatmap (columns = weeks, rows = Mon..Sun).
-function PnlCalendar({series}){
+function PnlCalendar({series}: any){
   if(!series||series.length<2) return <div className="text-slate-300 text-sm">No data</div>;
   const pnls=[]; for(let i=1;i<series.length;i++) pnls.push({t:series[i].t, pnl:series[i].equity-series[i-1].equity});
   const max=Math.max(1,...pnls.map(p=>Math.abs(p.pnl)));
@@ -485,7 +487,7 @@ function PnlCalendar({series}){
 /* ============================================================
    LIVE-DATA UI
    ============================================================ */
-function LiveBadge({status}){
+function LiveBadge({status}: any){
   if(status==='live') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-success" data-tip="Connected to an exchange"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>LIVE</span>;
   if(status==='partial') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-amber-600" data-tip="Sync error on last run"><span className="w-2 h-2 rounded-full bg-amber-500"/>PARTIAL</span>;
   if(status==='offline') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400" data-tip="No exchange connected"><span className="w-2 h-2 rounded-full bg-slate-400"/>OFFLINE</span>;
@@ -523,7 +525,7 @@ function Login(){
   const [busy,setBusy]=useState(false); const attemptsRef=useRef(0);
   const clientId=GOOGLE_CLIENT_ID;
   const [showPw,setShowPw]=useState(!clientId); // when Google is available it's the primary path
-  const gref=useRef();
+  const gref=useRef<any>(null);
   useEffect(()=>{
     if(!clientId) return; let cancelled=false;
     const init=()=>{
@@ -602,7 +604,7 @@ const ACCT_NAV=[
   ['lifebuoy','Support','/support'],
 ];
 
-function NavItem({icon,label,path,active,onClick}){
+function NavItem({icon,label,path,active,onClick}: any){
   return <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${active?'bg-gold text-navy font-semibold':'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
     <Icon name={icon} className="w-[18px] h-[18px]"/>{label}
   </button>;
@@ -637,7 +639,7 @@ function Sidebar(){
 // Global search over detected bots (by symbol / exchange / assigned fund).
 function GlobalSearch(){
   const {navigate,data,funds,user}=useApp();
-  const [q,setQ]=useState(''); const [open,setOpen]=useState(false); const ref=useRef();
+  const [q,setQ]=useState(''); const [open,setOpen]=useState(false); const ref=useRef<any>(null);
   useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
   const res=useMemo(()=>{
     if(!q.trim())return null; const s=q.toLowerCase();
@@ -659,7 +661,7 @@ function Header(){
   const {user,navigate,logout,dataStatus}=useApp();
   const [bell,setBell]=useState(false); const [menu,setMenu]=useState(false);
   const [alerts,setAlerts]=useState([]);
-  const bref=useRef(), mref=useRef();
+  const bref=useRef<any>(null), mref=useRef<any>(null);
   useEffect(()=>{ const h=e=>{ if(bref.current&&!bref.current.contains(e.target))setBell(false); if(mref.current&&!mref.current.contains(e.target))setMenu(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
   const loadAlerts=()=>api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>{});
   useEffect(()=>{ loadAlerts(); const iv=setInterval(loadAlerts,60000); return ()=>clearInterval(iv); },[]);
@@ -719,7 +721,7 @@ function MobileNav(){
   </>;
 }
 
-function PageHead({title,subtitle,actions}){
+function PageHead({title,subtitle,actions}: any){
   return <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
     <div><h1 className="text-xl font-bold text-navy tracking-tight">{title}</h1>{subtitle&&<p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}</div>
     {actions&&<div className="flex items-center gap-2">{actions}</div>}
@@ -730,7 +732,7 @@ function Denied(){ return <div className="grid place-items-center h-full"><Card 
 /* ============================================================
    KPI CARD + shared bits
    ============================================================ */
-function KpiCard({label,value,badge,icon,accent}){
+function KpiCard({label,value,badge,icon,accent}: any){
   return <Card className="p-4">
     <div className="flex items-center justify-between">
       <span className="text-xs font-medium text-slate-500">{label}</span>
@@ -740,13 +742,13 @@ function KpiCard({label,value,badge,icon,accent}){
     {badge!=null&&<div className="mt-1">{badge}</div>}
   </Card>;
 }
-function TrendBadge({pct}){
+function TrendBadge({pct}: any){
   const up=pct>=0;
   return <span className={`inline-flex items-center gap-1 text-xs font-medium ${up?'text-success':'text-danger'}`}>
     <Icon name="trendup" className={'w-3.5 h-3.5 '+(up?'':'rotate-180')}/>{fmtPct(pct)}
   </span>;
 }
-function SortHeader({label,col,sort,setSort,align='left',className=''}){
+function SortHeader({label,col,sort,setSort,align='left',className=''}: any){
   const active=sort.col===col;
   return <th className={`px-3 py-2.5 text-${align} font-medium text-slate-500 ${className}`}>
     <button onClick={()=>setSort({col,dir:active&&sort.dir==='asc'?'desc':'asc'})} className={`inline-flex items-center gap-1 hover:text-navy ${active?'text-navy':''}`}>
@@ -764,7 +766,7 @@ function sortRows(rows,sort,getters){
    ACTIVITY DASHBOARD
    ============================================================ */
 // Reusable empty-state card shown when a list/table has no rows yet.
-function EmptyState({icon='database',title,hint,action}){
+function EmptyState({icon='database',title,hint,action}: any){
   return <Card className="p-10 text-center">
     <Icon name={icon} className="w-10 h-10 mx-auto text-slate-200 mb-2"/>
     <div className="text-sm font-medium text-navy">{title}</div>
@@ -773,15 +775,15 @@ function EmptyState({icon='database',title,hint,action}){
   </Card>;
 }
 // Coloured side label for a position (green LONG / red SHORT).
-function SideTag({side}){ return <span className={side==='LONG'?'text-success font-medium':'text-danger font-medium'}>{side}</span>; }
+function SideTag({side}: any){ return <span className={side==='LONG'?'text-success font-medium':'text-danger font-medium'}>{side}</span>; }
 // A fund's colour dot + name (or a muted "Unassigned").
-function FundTag({fund,onClick}){
+function FundTag({fund,onClick}: any){
   if(!fund) return <span className="text-xs text-slate-400">Unassigned</span>;
   return <Badge color={fund.color} dot onClick={onClick}>{fund.name}</Badge>;
 }
 
 // Period selector operating on the real equity history (data.series).
-function PeriodControls({period,setPeriod,custom,setCustom}){
+function PeriodControls({period,setPeriod,custom,setCustom}: any){
   return <div className="flex flex-wrap items-center gap-2">
     <Select value={period} onChange={setPeriod} className="w-40" options={[{value:'7',label:'Last 7 days'},{value:'30',label:'Last 30 days'},{value:'90',label:'Last 90 days'},{value:'365',label:'Last 365 days'},{value:'all',label:'All time'},{value:'custom',label:'Custom range'}]}/>
     {period==='custom'&&<div className="flex items-center gap-1.5">
@@ -824,14 +826,14 @@ function OnboardingCard(){
 /* ============================================================
    PASSWORD POLICY (shared: Admin·Users + Profile)
    ============================================================ */
-const PW_RULES=[
+const PW_RULES: [string, (pw: string) => boolean][] = [
   ['At least 12 characters', pw=>pw.length>=12],
   ['An uppercase letter', pw=>/[A-Z]/.test(pw)],
   ['A lowercase letter', pw=>/[a-z]/.test(pw)],
   ['A number', pw=>/[0-9]/.test(pw)],
   ['A special character', pw=>/[^A-Za-z0-9]/.test(pw)],
 ];
-const passwordOk=(pw)=>PW_RULES.every(([,fn])=>fn(pw||''));
+const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {

@@ -4,7 +4,7 @@ import {
   fmtUSD, fmtSigned, fmtPct, clsPnl, fmtDate, PREF, Icon, Card, SectionTitle, Btn, AreaChart, useApp,
   hasPerm, fundOf, sliceByPeriod, RiskPanel, Underwater, PnlCalendar, MarketTicker, PageHead, Denied, KpiCard, TrendBadge, EmptyState,
   SideTag, FundTag, PeriodControls, OnboardingCard
-} from '../ui.jsx'
+} from '../ui'
 
 function ActivityPage(){
   const {funds,navigate,user,data}=useApp();

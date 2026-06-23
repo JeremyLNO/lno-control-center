@@ -4,13 +4,13 @@ import {
   PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge,
   StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, useApp, PageHead, Denied, PW_RULES,
   passwordOk
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    ADMIN — USERS
    ============================================================ */
 // Recent sign-in audit for one user (timestamp · method · IP), loaded on expand.
-function UserLoginHistory({userId}){
+function UserLoginHistory({userId}: any){
   const [rows,setRows]=useState(null);
   useEffect(()=>{ let alive=true; api('users?logins='+encodeURIComponent(userId)).then(r=>{ if(alive)setRows(r.logins||[]); }).catch(()=>{ if(alive)setRows([]); }); return ()=>{alive=false;}; },[userId]);
   if(rows===null) return <div className="text-xs text-slate-400">Loading…</div>;
@@ -122,7 +122,7 @@ function AdminUsers(){
   </div>;
 }
 // Password policy for shareholder accounts — mirrors api/_lib/auth.js passwordIssues().
-function AdminSetPassword({user}){
+function AdminSetPassword({user}: any){
   const [pw,setPw]=useState(''); const [show,setShow]=useState(false); const [busy,setBusy]=useState(false); const [msg,setMsg]=useState(null);
   async function save(){
     if(!passwordOk(pw)) return setMsg({err:'Password does not meet all the requirements below.'});
@@ -157,7 +157,7 @@ function genPassword(){
   for(let i=arr.length-1;i>0;i--){ const j=rnd(i+1); [arr[i],arr[j]]=[arr[j],arr[i]]; }
   return arr.join('');
 }
-function AddUserModal({open,onClose,onCreated}){
+function AddUserModal({open,onClose,onCreated}: any){
   const [v,setV]=useState({email:'',firstName:'',lastName:'',role:'viewer',password:''}); const [err,setErr]=useState(''); const [busy,setBusy]=useState(false); const [showPw,setShowPw]=useState(false);
   useEffect(()=>{ if(open){setV({email:'',firstName:'',lastName:'',role:'viewer',password:''});setErr('');setShowPw(false);} },[open]);
   const isShareholder=v.role==='shareholder';
@@ -167,7 +167,7 @@ function AddUserModal({open,onClose,onCreated}){
       if(!passwordOk(v.password))return setErr('Password does not meet all the requirements below.');
     } else if(!v.email.endsWith('@lno.company')) return setErr('Email must end with @lno.company');
     setBusy(true);
-    try{ const body={email:v.email.trim(),firstName:v.firstName,lastName:v.lastName,role:v.role}; if(isShareholder) body.password=v.password; const r=await api('users',{method:'POST',body}); onCreated(r.user); }
+    try{ const body: any={email:v.email.trim(),firstName:v.firstName,lastName:v.lastName,role:v.role}; if(isShareholder) body.password=v.password; const r=await api('users',{method:'POST',body}); onCreated(r.user); }
     catch(e){ setErr(e.message); } finally{ setBusy(false); }
   }
   return <Modal open={open} onClose={onClose} title="Add User">

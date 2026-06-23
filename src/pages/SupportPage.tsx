@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   Icon, Card, PageHead
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    SUPPORT

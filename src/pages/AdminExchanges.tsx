@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   fmtDT, api, toast, Icon, Card, Btn, StatusPill, Select, Field, Input, Modal, Confirm,
   useApp, PageHead, Denied
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    ADMIN — EXCHANGES
@@ -46,7 +46,7 @@ function AdminExchanges(){
     </div>
     <ExchangeModal modal={modal} onClose={()=>setModal(null)} onSave={async(d)=>{
       try{
-        const body={name:(d.name||'binance'),label:d.label,apiKey:d.apiKey,note:d.note}; if(d.secret) body.apiSecret=d.secret;
+        const body: any={name:(d.name||'binance'),label:d.label,apiKey:d.apiKey,note:d.note}; if(d.secret) body.apiSecret=d.secret;
         if(modal.mode==='add') await api('exchanges',{method:'POST',body});
         else await api('exchanges',{method:'PATCH',body:{id:d.id,...body}});
         setModal(null); await runSync(); // kick off a first sync so it doesn't sit at "pending"
@@ -55,8 +55,8 @@ function AdminExchanges(){
     <Confirm open={!!del} title="Delete exchange" message={`Remove ${del?.label}? Bots using this connection will lose API access.`} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('exchanges',{method:'DELETE',body:{id:del.id}});await reload();toast.success('Exchange removed');}catch(e){toast.error(e.message);}setDel(null);}}/>
   </div>;
 }
-function ExchangeModal({modal,onClose,onSave}){
-  const [v,setV]=useState({}); useEffect(()=>{ if(modal)setV(modal.data); },[modal]);
+function ExchangeModal({modal,onClose,onSave}: any){
+  const [v,setV]=useState<any>({}); useEffect(()=>{ if(modal)setV(modal.data); },[modal]);
   if(!modal)return null;
   return <Modal open={true} onClose={onClose} title={modal.mode==='add'?'Add Exchange':'Edit Exchange'}>
     <div className="space-y-3">

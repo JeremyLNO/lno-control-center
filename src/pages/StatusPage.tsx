@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   fmtPctPlain, fmtAgo, fmtDur, api, toast, Icon, Card, SectionTitle, Btn, Confirm, useApp, hasPerm,
   LiveBadge, PageHead, Denied
-} from '../ui.jsx'
+} from '../ui'
 
 function StatusPage(){
   const {user,data,dataStatus,reloadData}=useApp();
@@ -24,7 +24,7 @@ function StatusPage(){
   const dbOk=dbErr==null;
   const unacked=(alerts||[]).filter(a=>!a.ackedAt);
   const acked=(alerts||[]).filter(a=>a.ackedAt);
-  const mttaMin=acked.length? acked.reduce((s,a)=>s+(new Date(a.ackedAt)-new Date(a.createdAt)),0)/acked.length/60000 : null;
+  const mttaMin=acked.length? acked.reduce((s,a)=>s+(+new Date(a.ackedAt)-+new Date(a.createdAt)),0)/acked.length/60000 : null;
   const ackRate=(alerts&&alerts.length)? acked.length/alerts.length*100 : null;
 
   const checks=[

@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtPrice, fmtAgo, baseOf, PREF, Card, useApp, hasPerm, PageHead, Denied
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    SYSTEM STATUS

@@ -3,14 +3,14 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, PREF, toast, Icon, Card, Btn, Badge, StatusPill,
   Select, ExportMenu, useApp, hasPerm, fundOf, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    TABLE PRODUCTIVITY HELPERS — virtual rows, column picker, presets
    ============================================================ */
 // Windowed row virtualization for a fixed-row-height scroll container.
 function useVirtual({count,rowH,overscan=10,resetKey}){
-  const ref=useRef(null);
+  const ref=useRef<any>(null);
   const [scrollTop,setScrollTop]=useState(0);
   const [h,setH]=useState(640);
   useEffect(()=>{ const el=ref.current; if(!el)return; const onScroll=()=>setScrollTop(el.scrollTop); const measure=()=>setH(el.clientHeight||640); measure(); el.addEventListener('scroll',onScroll,{passive:true}); window.addEventListener('resize',measure); return ()=>{ el.removeEventListener('scroll',onScroll); window.removeEventListener('resize',measure); }; },[]);
@@ -20,8 +20,8 @@ function useVirtual({count,rowH,overscan=10,resetKey}){
   return {ref,start,end,padTop:start*rowH,padBottom:Math.max(0,(count-end)*rowH)};
 }
 // Show/hide columns; order always follows the canonical `columns` array.
-function ColumnPicker({columns,visible,onChange}){
-  const [open,setOpen]=useState(false); const ref=useRef();
+function ColumnPicker({columns,visible,onChange}: any){
+  const [open,setOpen]=useState(false); const ref=useRef<any>(null);
   useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
   const toggle=(k)=>{ const set=new Set(visible); set.has(k)?set.delete(k):set.add(k); if(set.size===0)return; onChange(columns.filter(c=>set.has(c.key)).map(c=>c.key)); };
   return <div ref={ref} className="relative">
@@ -35,9 +35,9 @@ function ColumnPicker({columns,visible,onChange}){
   </div>;
 }
 // Saved views: persists named snapshots (filters/sort/columns) to localStorage.
-function PresetMenu({storeKey,current,onApply}){
+function PresetMenu({storeKey,current,onApply}: any){
   const [presets,setPresets]=useState(()=>PREF.get(storeKey,[]));
-  const [open,setOpen]=useState(false); const [name,setName]=useState(''); const ref=useRef();
+  const [open,setOpen]=useState(false); const [name,setName]=useState(''); const ref=useRef<any>(null);
   useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
   const persist=(next)=>{ setPresets(next); PREF.set(storeKey,next); };
   const save=()=>{ const n=name.trim(); if(!n)return; persist([...presets.filter(p=>p.name!==n),{name:n,state:current}]); setName(''); toast.success(`View “${n}” saved`); };

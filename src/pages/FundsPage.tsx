@@ -3,13 +3,13 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   FUND_PALETTE, api, toast, Icon, Card, Btn, Field, Input, Modal, Confirm, useApp, hasPerm,
   PageHead, Denied, EmptyState
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    FUNDS — global CRUD (admins) / read-only list (operators, viewers)
    ============================================================ */
 // Row of clickable colour chips from FUND_PALETTE.
-function ColorPicker({value,onChange}){
+function ColorPicker({value,onChange}: any){
   return <div className="flex flex-wrap gap-1.5">
     {FUND_PALETTE.map(c=><button key={c} type="button" onClick={()=>onChange(c)} title={c}
       className={`w-7 h-7 rounded-full transition ${value===c?'ring-2 ring-offset-2 ring-navy':'hover:scale-110'}`} style={{background:c}}>
@@ -17,7 +17,7 @@ function ColorPicker({value,onChange}){
     </button>)}
   </div>;
 }
-function FundModal({open,initial,onClose,onSave}){
+function FundModal({open,initial,onClose,onSave}: any){
   const [name,setName]=useState(''); const [color,setColor]=useState(FUND_PALETTE[0]); const [busy,setBusy]=useState(false);
   useEffect(()=>{ if(open){ setName(initial?.name||''); setColor(initial?.color||FUND_PALETTE[0]); setBusy(false); } },[open,initial]);
   if(!open) return null;

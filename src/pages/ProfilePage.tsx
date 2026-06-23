@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   initialsOf, api, toast, Icon, Card, SectionTitle, Btn, Toggle, Field, Input, Confirm, useApp,
   PageHead, PW_RULES, passwordOk
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    PROFILE
@@ -13,7 +13,7 @@ function ProfilePage(){
   const [v,setV]=useState({firstName:user.firstName,lastName:user.lastName}); const [saved,setSaved]=useState(false);
   const [pw,setPw]=useState({cur:'',n1:'',n2:''}); const [pwMsg,setPwMsg]=useState(null);
   const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||'');
-  const fileRef=useRef();
+  const fileRef=useRef<any>(null);
   async function patchSelf(patch){ try{ const r=await api('profile',{method:'PATCH',body:patch}); setUser(r.user); return true; }catch(e){ toast.error(e.message); return false; } }
   async function saveInfo(){ if(await patchSelf({firstName:v.firstName,lastName:v.lastName})){ setSaved(true); setTimeout(()=>setSaved(false),1800); } }
   async function changePw(){ if(!passwordOk(pw.n1))return setPwMsg({err:'New password does not meet all the requirements.'}); if(pw.n1!==pw.n2)return setPwMsg({err:'Confirmation must match'}); try{ await api('auth',{method:'POST',body:{action:'changePassword',current:pw.cur,next:pw.n1}}); setPw({cur:'',n1:'',n2:''}); setPwMsg({ok:'Password updated'}); }catch(e){ setPwMsg({err:e.message||'Could not update password'}); } }

@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   fmtUSD, fmtSigned, clsPnl, fmtDT, downloadBlob, b64ToBlob, api, toast, Icon, Card, Btn, useApp,
   hasPerm, PageHead, Denied
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    ADMIN — REPORT ARCHIVE

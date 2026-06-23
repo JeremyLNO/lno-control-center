@@ -1,14 +1,15 @@
 import React from 'react'
 import * as ReactDOM from 'react-dom/client'
 import './index.css'
+import type { DataStatus } from './types'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard
-} from './ui.jsx'
+} from './ui'
 import {
   ActivityPage, RealtimePage, TradesPage, AdminUsers, AdminExchanges, AdminOpenWA,
   FundsPage, BotsPage, ProfilePage, SupportPage, PricesPage, StatusPage, AdminReports
-} from './pages/index.js'
+} from './pages/index'
 
 /* ============================================================
    ROUTER + ROOT
@@ -61,7 +62,7 @@ function useData(authed){
     return { bots, live, series, equity, openBots, unassigned, byFund, loading, error };
   },[raw,funds,snaps,loading,error]);
 
-  const dataStatus = error? 'partial' : (raw&&raw.live&&raw.live.connected>0)? (raw.live.errors? 'partial':'live') : 'offline';
+  const dataStatus: DataStatus = error? 'partial' : (raw&&raw.live&&raw.live.connected>0)? (raw.live.errors? 'partial':'live') : 'offline';
   return { data, funds, setFunds, reloadData, reloadFunds:loadFunds, dataStatus };
 }
 
@@ -75,10 +76,10 @@ function useKeyboardNav(navigate,user){
     const onKey=(e)=>{
       if(e.metaKey||e.ctrlKey||e.altKey) return;
       const typing=isTyping(document.activeElement);
-      if(e.key==='Escape'){ setHelp(false); if(typing)document.activeElement.blur(); return; }
+      if(e.key==='Escape'){ setHelp(false); if(typing)(document.activeElement as HTMLElement).blur(); return; }
       if(typing) return;
       if(e.key==='?'){ e.preventDefault(); setHelp(h=>!h); return; }
-      if(e.key==='/'){ e.preventDefault(); const s=document.querySelector('input[placeholder^="Search positions"]'); if(s)s.focus(); return; }
+      if(e.key==='/'){ e.preventDefault(); const s=document.querySelector('input[placeholder^="Search positions"]'); if(s)(s as HTMLElement).focus(); return; }
       if(gPending){
         gPending=false; clearTimeout(gTimer); const k=e.key.toLowerCase();
         const go={a:'/activity',r:'/realtime',t:'/trades',f:'/funds',s:'/status'}[k];
@@ -94,7 +95,7 @@ function useKeyboardNav(navigate,user){
   },[navigate,user]);
   return {help,setHelp};
 }
-function ShortcutsModal({open,onClose,isAdmin}){
+function ShortcutsModal({open,onClose,isAdmin}: any){
   const rows=[
     ['g a','Activity Dashboard'],['g r','Live'],['g t','Positions'],['g f','Funds'],['g s','System Status'],
     ...(isAdmin?[['g b','Admin · Bots'],['g u','Admin · Users'],['g e','Admin · Exchanges'],['g w','Admin · WhatsApp']]:[]),

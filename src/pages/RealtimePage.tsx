@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, fmtAgo, api, Card, SectionTitle, Badge, Select, useApp,
   hasPerm, fundOf, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag
-} from '../ui.jsx'
+} from '../ui'
 
 /* ============================================================
    REAL-TIME OPERATIONS
@@ -13,7 +13,7 @@ function RealtimePage(){
   const [fund,setFund]=useState('all');
   const [sort,setSort]=useState({col:'uPnl',dir:'desc'});
   const [incidents,setIncidents]=useState(null);
-  useEffect(()=>{ if(!hasPerm(user,'view_realtime'))return; api('alerts').then(r=>setIncidents((r.alerts||[]).slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,6))).catch(()=>setIncidents([])); },[]);
+  useEffect(()=>{ if(!hasPerm(user,'view_realtime'))return; api('alerts').then(r=>setIncidents((r.alerts||[]).slice().sort((a,b)=>+new Date(b.createdAt)-+new Date(a.createdAt)).slice(0,6))).catch(()=>setIncidents([])); },[]);
   if(!hasPerm(user,'view_realtime')) return <Denied/>;
 
   const selFund=fund!=='all'?(fund==='unassigned'?'unassigned':funds.find(f=>f.id===fund)):null;
