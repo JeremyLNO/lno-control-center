@@ -79,6 +79,8 @@ export async function migrate() {
   )`);
   // last sync error message (shown on the Exchanges page when status='error')
   await query(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS last_error TEXT`);
+  // public wallet/deposit addresses shown on the Exchanges page (not secret — no encryption)
+  await query(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS wallets JSONB NOT NULL DEFAULT '[]'::jsonb`);
   await query(`CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
     value JSONB NOT NULL DEFAULT '{}'

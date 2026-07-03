@@ -12,7 +12,15 @@ function pub(r) {
     lastError: r.last_error || null,
     hasSecret: !!r.api_secret_enc,
     secretMasked: r.api_secret_enc ? mask(decrypt(r.api_secret_enc)) : '',
+    wallets: Array.isArray(r.wallets) ? r.wallets : [],
   };
+}
+// Public deposit addresses (not secret) — keep only {network,address} pairs, drop empty rows.
+function cleanWallets(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter(w => w && (w.network || w.address))
+    .map(w => ({ network: String(w.network || '').slice(0, 60), address: String(w.address || '').slice(0, 200) }));
 }
 
 export default async function handler(req, res) {
@@ -26,8 +34,8 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const id = 'e' + Date.now();
-      await query('INSERT INTO exchanges (id,name,label,api_key,api_secret_enc,status,note) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-        [id, body.name || '', body.label || '', body.apiKey || '', body.apiSecret ? encrypt(body.apiSecret) : null, 'pending', body.note || '']);
+      await query('INSERT INTO exchanges (id,name,label,api_key,api_secret_enc,status,note,wallets) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)',
+        [id, body.name || '', body.label || '', body.apiKey || '', body.apiSecret ? encrypt(body.apiSecret) : null, 'pending', body.note || '', JSON.stringify(cleanWallets(body.wallets))]);
       await audit(req, a, 'exchange.create', id, { name: body.name || '', hasSecret: !!body.apiSecret });
       const { rows } = await query('SELECT * FROM exchanges WHERE id=$1', [id]);
       return res.status(201).json({ exchange: pub(rows[0]) });
@@ -40,6 +48,7 @@ export default async function handler(req, res) {
       const sets = [], vals = []; let i = 1;
       for (const k of Object.keys(m)) { if (k in body) { sets.push(`${m[k]}=$${i}`); vals.push(body[k]); i++; } }
       if (body.apiSecret) { sets.push(`api_secret_enc=$${i}`); vals.push(encrypt(body.apiSecret)); i++; } // re-encrypt only when provided
+      if (Array.isArray(body.wallets)) { sets.push(`wallets=$${i}::jsonb`); vals.push(JSON.stringify(cleanWallets(body.wallets))); i++; }
       if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
       vals.push(id);
       await query(`UPDATE exchanges SET ${sets.join(',')} WHERE id=$${i}`, vals);

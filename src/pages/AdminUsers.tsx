@@ -28,6 +28,7 @@ function AdminUsers(){
   const [users,setUsers]=useState([]);
   const [exp,setExp]=useState(null); const [add,setAdd]=useState(false); const [del,setDel]=useState(null);
   const [sel,setSel]=useState(()=>new Set()); const [bulkDel,setBulkDel]=useState(false);
+  const [roleFilter,setRoleFilter]=useState('all');
   // refetch periodically so the online lights + last-seen stay current
   useEffect(()=>{ if(user.role!=='admin') return; const load=()=>api('users').then(r=>setUsers(r.users||[])).catch(()=>{}); load(); const iv=setInterval(load,30000); return ()=>clearInterval(iv); },[]);
   if(user.role!=='admin') return <Denied/>;
@@ -45,14 +46,18 @@ function AdminUsers(){
     await Promise.all(targets.map(async id=>{ try{ await api('users',{method:'DELETE',body:{id}}); ok++; }catch(e){} }));
     setUsers(us=>us.filter(u=>!targets.includes(u.id))); toast.success(`Deleted ${ok} user${ok===1?'':'s'}`); setSel(new Set()); setBulkDel(false); setExp(null);
   }
-  const allSel=users.length>0&&sel.size===users.length;
+  const filteredUsers=roleFilter==='all'?users:users.filter(u=>u.role===roleFilter);
+  const allSel=filteredUsers.length>0&&filteredUsers.every(u=>sel.has(u.id));
   return <div>
     <PageHead title="Users" subtitle={`${users.length} accounts`} actions={<Btn onClick={()=>setAdd(true)}><Icon name="plus" className="w-4 h-4"/>Add User</Btn>}/>
     <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-      <label className="flex items-center gap-2 text-sm text-slate-500 cursor-pointer select-none">
-        <input type="checkbox" checked={allSel} ref={el=>{ if(el) el.indeterminate=sel.size>0&&!allSel; }} onChange={e=>setSel(e.target.checked?new Set(users.map(u=>u.id)):new Set())} className="accent-navy w-4 h-4"/>
-        {sel.size>0?`${sel.size} selected`:'Select all'}
-      </label>
+      <div className="flex items-center gap-3 flex-wrap">
+        <label className="flex items-center gap-2 text-sm text-slate-500 cursor-pointer select-none">
+          <input type="checkbox" checked={allSel} ref={el=>{ if(el) el.indeterminate=sel.size>0&&!allSel; }} onChange={e=>setSel(e.target.checked?new Set(filteredUsers.map(u=>u.id)):new Set())} className="accent-navy w-4 h-4"/>
+          {sel.size>0?`${sel.size} selected`:'Select all'}
+        </label>
+        <Select value={roleFilter} onChange={setRoleFilter} className="w-36" options={[{value:'all',label:'All roles'},...ROLE_OPTIONS]}/>
+      </div>
       <div className="flex items-center gap-2 flex-wrap">
         {sel.size>0&&<>
           <Btn size="sm" variant="outline" onClick={()=>bulkPatch({active:true},{verb:'Activated'})}><Icon name="power" className="w-3.5 h-3.5"/>Activate</Btn>
@@ -61,11 +66,12 @@ function AdminUsers(){
           <Btn size="sm" variant="danger" onClick={()=>setBulkDel(true)}><Icon name="trash" className="w-3.5 h-3.5"/>Delete</Btn>
         </>}
         <ExportMenu filename="lno_users" size="sm" variant="outline" headers={['Email','First name','Last name','Role','Active','Permissions']}
-          getRows={()=>(sel.size?users.filter(u=>sel.has(u.id)):users).map(u=>[u.email,u.firstName||'',u.lastName||'',u.role,u.active?'yes':'no',(u.role==='admin'?ALL_PERMS:u.permissions||[]).join(' ')])}/>
+          getRows={()=>(sel.size?filteredUsers.filter(u=>sel.has(u.id)):filteredUsers).map(u=>[u.email,u.firstName||'',u.lastName||'',u.role,u.active?'yes':'no',(u.role==='admin'?ALL_PERMS:u.permissions||[]).join(' ')])}/>
       </div>
     </div>
+    {filteredUsers.length===0 && <div className="text-sm text-slate-400 text-center py-10">No users match this filter.</div>}
     <div className="space-y-3">
-      {users.map(u=><Card key={u.id} className={`overflow-hidden ${sel.has(u.id)?'ring-1 ring-gold/40':''}`}>
+      {filteredUsers.map(u=><Card key={u.id} className={`overflow-hidden ${sel.has(u.id)?'ring-1 ring-gold/40':''}`}>
         <div className="flex items-center">
         <label className="pl-4 flex items-center shrink-0"><input type="checkbox" checked={sel.has(u.id)} onChange={()=>toggleSel(u.id)} className="accent-navy w-4 h-4"/></label>
         <button onClick={()=>setExp(exp===u.id?null:u.id)} className="flex-1 min-w-0 flex items-center gap-3 p-4 text-left hover:bg-slate-50/60">

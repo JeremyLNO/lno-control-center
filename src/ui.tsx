@@ -36,7 +36,7 @@ const ROLE_OPTIONS = [
 // WhatsApp notification matrix — message types (rows) × roles (columns)
 const WA_MSG_TYPES = [
   {key:'login',label:'Login-failure alerts'},
-  {key:'breach',label:'Threshold breaches'},
+  {key:'breach',label:'Alert rules'},
   {key:'daily',label:'Daily report'},
   {key:'weekly',label:'Weekly report'},
   {key:'monthly',label:'Monthly report'},
@@ -631,7 +631,7 @@ function Sidebar(){
       {ACCT_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
     </nav>
     <div className="p-3 border-t border-white/10">
-      <div className="text-[11px] text-slate-400 px-2">LNO Trading Systems<br/>Internal Use Only</div>
+      <div className="text-[11px] text-slate-400 px-2">LNO Control Center<br/>Internal Use Only</div>
     </div>
   </aside>;
 }
@@ -661,32 +661,36 @@ function Header(){
   const {user,navigate,logout,dataStatus}=useApp();
   const [bell,setBell]=useState(false); const [menu,setMenu]=useState(false);
   const [alerts,setAlerts]=useState([]);
+  const [readIds,setReadIds]=useState<Set<any>>(()=>new Set(PREF.get('read_alerts',[])));
   const bref=useRef<any>(null), mref=useRef<any>(null);
   useEffect(()=>{ const h=e=>{ if(bref.current&&!bref.current.contains(e.target))setBell(false); if(mref.current&&!mref.current.contains(e.target))setMenu(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
   const loadAlerts=()=>api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>{});
   useEffect(()=>{ loadAlerts(); const iv=setInterval(loadAlerts,60000); return ()=>clearInterval(iv); },[]);
-  const unacked=alerts.filter(a=>!a.ackedAt).length;
+  const unread=alerts.filter(a=>!readIds.has(a.id)).length;
   async function ack(id){ try{ await api('alerts',{method:'POST',body:{id}}); loadAlerts(); }catch(e){ toast.error(e.message); } }
+  function markRead(id){ setReadIds(s=>{ const n=new Set(s); n.add(id); PREF.set('read_alerts',[...n].slice(-300)); return n; }); }
+  function markAllRead(){ setReadIds(s=>{ const n=new Set(s); alerts.forEach(a=>n.add(a.id)); PREF.set('read_alerts',[...n].slice(-300)); return n; }); }
   return <header className="h-16 shrink-0 bg-white border-b border-slate-200 flex items-center gap-4 px-4 lg:px-6">
     <Logo className="lg:hidden h-6 text-navy"/>
     <GlobalSearch/>
     {user.firstName&&<div className="hidden md:block text-sm text-slate-500">Hello, <span className="font-semibold text-navy">{user.firstName}</span></div>}
     <LiveBadge status={dataStatus}/>
     <div ref={bref} className="relative">
-      <button onClick={()=>setBell(!bell)} className="relative p-2 rounded-lg hover:bg-slate-100"><Icon name="bell" className="w-5 h-5 text-slate-600"/>{unacked>0&&<span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-danger text-white text-[10px] rounded-full grid place-items-center">{unacked}</span>}</button>
+      <button onClick={()=>setBell(!bell)} className="relative p-2 rounded-lg hover:bg-slate-100"><Icon name="bell" className="w-5 h-5 text-slate-600"/>{unread>0&&<span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-danger text-white text-[10px] rounded-full grid place-items-center">{unread}</span>}</button>
       {bell&&<div className="absolute right-0 mt-1.5 w-80 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-40 fadein max-h-96 overflow-y-auto">
-        <div className="text-xs font-semibold text-navy px-2 py-1.5 flex items-center justify-between">Alerts {unacked>0&&<span className="text-[10px] text-danger font-normal">{unacked} pending ack</span>}</div>
+        <div className="text-xs font-semibold text-navy px-2 py-1.5 flex items-center justify-between">Alerts {unread>0&&<button onClick={markAllRead} className="text-[11px] text-gold hover:underline font-normal">Mark all as read</button>}</div>
         {alerts.length===0 && <div className="text-xs text-slate-400 px-2 py-4 text-center">No alerts.</div>}
-        {alerts.map(a=><div key={a.id} className="px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5">
+        {alerts.map(a=>{ const isRead=readIds.has(a.id); return <div key={a.id} className={`px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5 ${isRead?'opacity-60':''}`}>
           <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${a.ackedAt?'bg-success':'bg-danger'}`}/>
           <div className="flex-1 min-w-0">
-            <div className="text-xs text-navy leading-snug">{a.summary}</div>
+            <div className={`text-xs leading-snug ${isRead?'text-slate-500':'text-navy font-medium'}`}>{a.summary}</div>
             <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
               <span className="font-mono">{a.code}</span><span>{fmtDT(a.createdAt)}</span>
               {a.ackedAt? <span className="text-success">✓ acked{a.ackedBy?' · '+a.ackedBy:''}</span> : (user.role==='admin'&&<button onClick={()=>ack(a.id)} className="text-gold hover:underline">acknowledge</button>)}
+              {!isRead&&<button onClick={()=>markRead(a.id)} className="text-slate-400 hover:text-navy hover:underline">mark as read</button>}
             </div>
           </div>
-        </div>)}
+        </div>; })}
       </div>}
     </div>
     <div ref={mref} className="relative">
