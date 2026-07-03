@@ -14,6 +14,17 @@ import {
 /* ============================================================
    ROUTER + ROOT
    ============================================================ */
+// Mobile app bridge: the iOS Control Center app opens this site inside an
+// ASWebAuthenticationSession with ?mobile_redirect=<scheme>://<path> so it can reuse
+// this exact login page (incl. the real Google Sign-In button) with zero extra Google
+// Cloud config. On a successful login we hand the fresh JWT to that custom scheme
+// instead of rendering the dashboard; a plain browser visit (no param) is unaffected.
+function mobileHandoff(token: string){
+  const redirect=new URLSearchParams(window.location.search).get('mobile_redirect');
+  if(!redirect) return false;
+  window.location.href = redirect+(redirect.includes('?')?'&':'?')+'token='+encodeURIComponent(token);
+  return true;
+}
 function useHashRoute(){
   const parse=()=>{ let h=window.location.hash.replace(/^#/,'')||'/activity'; const [path,query]=h.split('?'); const parts=path.split('/').filter(Boolean); const params=Object.fromEntries(new URLSearchParams(query||'')); return {parts,params}; };
   const [route,setRoute]=useState(parse);
@@ -178,11 +189,11 @@ function Root(){
 
   async function login(email,password){
     const r=await api('auth',{method:'POST',body:{action:'login',email,password}});
-    setToken(r.token); setUser(r.user); return r.user;
+    setToken(r.token); setUser(r.user); mobileHandoff(r.token); return r.user;
   }
   async function loginGoogle(credential){
     const r=await api('auth',{method:'POST',body:{action:'google',credential}});
-    setToken(r.token); setUser(r.user); return r.user;
+    setToken(r.token); setUser(r.user); mobileHandoff(r.token); return r.user;
   }
   function logout(){ api('auth',{method:'POST',body:{action:'logout'}}).catch(()=>{}); setToken(null); setUser(null); window.location.hash='#/activity'; }
   function navigate(to){ window.location.hash='#'+to; }
