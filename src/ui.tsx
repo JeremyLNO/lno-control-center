@@ -37,6 +37,7 @@ const ROLE_OPTIONS = [
 const WA_MSG_TYPES = [
   {key:'login',label:'Login-failure alerts'},
   {key:'breach',label:'Alert rules'},
+  {key:'stale',label:'Dormant bot alerts'},
   {key:'daily',label:'Daily report'},
   {key:'weekly',label:'Weekly report'},
   {key:'monthly',label:'Monthly report'},
@@ -411,6 +412,15 @@ function liqInfo(b){
 function marginUsagePct(b){
   if(b.initialMargin==null||!b.initialMargin) return null;
   return (b.maintMargin||0)/b.initialMargin*100;
+}
+// Dormant bot: an open position whose side/qty/entry hasn't changed in DORMANT_HOURS — the
+// sync still "sees" it (last_seen keeps bumping) but nothing has actually traded, which may
+// mean the strategy behind it has gone silent while the position just sits there.
+const DORMANT_HOURS=48;
+function dormantInfo(b){
+  if(b.status!=='open'||!b.lastChanged) return {dormant:false,hours:null};
+  const hours=(Date.now()-new Date(b.lastChanged).getTime())/3600000;
+  return {dormant:hours>=DORMANT_HOURS, hours};
 }
 function sliceByPeriod(series,period,custom){
   if(period==='all') return series;
@@ -864,5 +874,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };

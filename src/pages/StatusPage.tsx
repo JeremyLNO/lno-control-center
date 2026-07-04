@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtPctPlain, fmtAgo, fmtDur, api, toast, Icon, Card, SectionTitle, Btn, Confirm, useApp, hasPerm,
-  LiveBadge, PageHead, Denied
+  dormantInfo, LiveBadge, PageHead, Denied
 } from '../ui'
 
 function StatusPage(){
@@ -26,11 +26,13 @@ function StatusPage(){
   const acked=(alerts||[]).filter(a=>a.ackedAt);
   const mttaMin=acked.length? acked.reduce((s,a)=>s+(+new Date(a.ackedAt)-+new Date(a.createdAt)),0)/acked.length/60000 : null;
   const ackRate=(alerts&&alerts.length)? acked.length/alerts.length*100 : null;
+  const dormantCount=data.openBots.filter(b=>dormantInfo(b).dormant).length;
 
   const checks=[
     {label:'Exchange sync', state:connected>0?(syncErr?'warn':'ok'):'neutral', sub:connected>0?(syncErr?'Connected · last sync had errors':`${connected} exchange${connected===1?'':'s'} connected`):'No exchange connected'},
     {label:'Database', state:dbOk?'ok':'down', sub:dbOk?(lastSnap?`Last snapshot ${lastSnap.day}`:'Connected'):'Unreachable'},
     {label:'Positions', state:data.openBots.length?'ok':'neutral', sub:`${data.openBots.length} open · ${data.bots.length} tracked`},
+    {label:'Bot activity', state:dormantCount>0?'warn':data.openBots.length?'ok':'neutral', sub:dormantCount>0?`${dormantCount} dormant (48h+ no change)`:'All positions active'},
     {label:'Alerting', state:alerts==null?'neutral':'ok', sub:alerts==null?'Checking…':`${unacked.length} pending acknowledgement`},
     ...(user.role==='admin'?[{label:'WhatsApp (TextMeBot)', state:openwa==null?'neutral':openwa.enabled?(openwa.hasApiKey?'ok':'warn'):'neutral', sub:openwa===undefined?'Checking…':openwa===null?'—':openwa.enabled?(openwa.hasApiKey?'Enabled & configured':'Enabled · no API key'):'Disabled (optional)'}]:[]),
   ];

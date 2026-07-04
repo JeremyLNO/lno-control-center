@@ -1,8 +1,8 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, fmtAgo, api, Card, SectionTitle, Badge, Select, useApp,
-  hasPerm, fundOf, liqInfo, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag
+  fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, fmtAgo, api, Icon, Card, SectionTitle, Badge, Select, useApp,
+  hasPerm, fundOf, liqInfo, dormantInfo, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag
 } from '../ui'
 
 /* ============================================================
@@ -65,8 +65,8 @@ function RealtimePage(){
             <th className="px-3 py-2.5 text-left font-medium">Exchange</th>
           </tr></thead>
           <tbody>
-            {rows.map(r=>{ const {pct,level}=liqInfo(r); return <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
-              <td className="px-3 py-2.5 font-mono text-xs text-navy">{r.symbol}</td>
+            {rows.map(r=>{ const {pct,level}=liqInfo(r); const {dormant}=dormantInfo(r); return <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+              <td className="px-3 py-2.5 font-mono text-xs text-navy">{r.symbol}{dormant&&<Icon name="clock" className="w-3.5 h-3.5 text-amber-500 inline-block ml-1.5 -mt-0.5" data-tip="Dormant — no activity in 48h+"/>}</td>
               <td className="px-3 py-2.5"><SideTag side={r.side}/></td>
               <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtNum(r.qty,r.qty<1?4:2)}</td>
               <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtPrice(r.entry)}</td>
@@ -83,10 +83,11 @@ function RealtimePage(){
       </div>
       {/* mobile cards */}
       <div className="md:hidden p-3 space-y-2">
-        {rows.map(r=>{ const {pct,level}=liqInfo(r); return <div key={r.id} className="border border-slate-100 rounded-lg p-3">
-          <div className="flex items-center justify-between"><div className="font-mono text-sm text-navy">{r.symbol} <SideTag side={r.side}/></div><span className={`font-medium tnum ${clsPnl(r.unrealizedPnl)}`}>{fmtSigned(r.unrealizedPnl)}</span></div>
+        {rows.map(r=>{ const {pct,level}=liqInfo(r); const {dormant}=dormantInfo(r); return <div key={r.id} className="border border-slate-100 rounded-lg p-3">
+          <div className="flex items-center justify-between"><div className="font-mono text-sm text-navy">{r.symbol} <SideTag side={r.side}/>{dormant&&<Icon name="clock" className="w-3.5 h-3.5 text-amber-500 inline-block ml-1"/>}</div><span className={`font-medium tnum ${clsPnl(r.unrealizedPnl)}`}>{fmtSigned(r.unrealizedPnl)}</span></div>
           <div className="flex items-center justify-between mt-2 text-xs text-slate-500"><FundTag fund={r.fund}/><span className="tnum">{fmtUSD(Math.abs(r.notional))} · {r.leverage?r.leverage+'×':'—'}</span></div>
           {pct!=null&&<div className={`mt-1.5 text-xs font-medium ${level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-400'}`}>Liq. distance {pct.toFixed(1)}%</div>}
+          {dormant&&<div className="mt-1 text-xs font-medium text-amber-600">Dormant — no activity in 48h+</div>}
         </div>; })}
       </div>
       </>}

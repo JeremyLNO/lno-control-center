@@ -18,6 +18,10 @@ function authorized(req) {
   return false;
 }
 
+// Must match DORMANT_HOURS in src/ui.tsx (frontend's dormantInfo()) so the "dormant" badge
+// shown in the UI and this alert agree on the same threshold.
+const DORMANT_HOURS = 48;
+
 const grp  = (n) => Math.round(Math.abs(n)).toLocaleString('en-US').replace(/,/g, ' ');
 const fmt  = (n) => (n >= 0 ? '+' : '-') + grp(n) + ' USDT';
 const fUSD = (n) => grp(n) + ' USDT';
@@ -73,6 +77,14 @@ export default async function handler(req, res) {
       await query('INSERT INTO alerts (code,summary) VALUES ($1,$2)', [code, breaches.join(' · ')]);
       const msg = `🚨 LNO ALERT\n${breaches.join('\n')}\nEquity ${fUSD(port.equity)} · PnL day ${fmt(port.pnlDay)}\n\nReply *ACK ${code}* to acknowledge.`;
       sent.push({ type: 'alert', code, ...(await notify(msg, { type: 'breach' })) });
+    }
+
+    // 3b) dormant bots: an open position whose side/qty/entry hasn't changed in DORMANT_HOURS
+    const dormant = port.bots.filter(b => b.last_changed && (Date.now() - new Date(b.last_changed).getTime()) / 3600000 >= DORMANT_HOURS);
+    if (dormant.length && cfg.enabled) {
+      const lines = dormant.map(b => `${b.symbol}${b.side ? ' ' + b.side : ''} — no activity in ${Math.round((Date.now() - new Date(b.last_changed).getTime()) / 3600000)}h`);
+      const msg = `🕒 LNO DORMANT BOT ALERT\n${lines.join('\n')}\n\nCheck whether the strategy behind ${dormant.length === 1 ? 'this position' : 'these positions'} is still running.`;
+      sent.push({ type: 'stale', ...(await notify(msg, { type: 'stale' })) });
     }
 
     // 4) reports — global + per-fund, grouped by fund

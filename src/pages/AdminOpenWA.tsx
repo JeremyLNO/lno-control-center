@@ -101,6 +101,7 @@ function AdminOpenWA(){
       <ul className="text-sm text-slate-600 space-y-2">
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Login-failure alerts to admins (after 3 failed attempts)</li>
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Drawdown &amp; daily-PnL breaches — portfolio, per fund, or per bot</li>
+        <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Dormant bot alerts — a position untouched for 48h+</li>
         <li className="flex gap-2"><Icon name="check" className="w-4 h-4 text-success mt-0.5"/>Daily report, plus weekly (Mondays) &amp; monthly (1st) summaries</li>
       </ul>
     </Card>

@@ -1,8 +1,8 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, PREF, toast, Icon, Card, Btn, Badge, StatusPill,
-  Select, ExportMenu, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag
+  fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, fmtAgo, PREF, toast, Icon, Card, Btn, Badge, StatusPill,
+  Select, ExportMenu, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag
 } from '../ui'
 
 /* ============================================================
@@ -76,9 +76,10 @@ const POS_COLS=[
   {key:'leverage',label:'Lev',align:'right',cell:b=><span className="tnum text-slate-500">{b.leverage?b.leverage+'×':'—'}</span>,csv:b=>b.leverage,def:false},
   {key:'liqDist',label:'Liq. Dist',align:'right',cell:b=>{ const {pct,level}=liqInfo(b); return pct==null? <span className="text-slate-300">—</span> : <span className={`tnum font-medium ${level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-500'}`}>{pct.toFixed(1)}%</span>; },csv:b=>{ const {pct}=liqInfo(b); return pct==null?'':Number(pct.toFixed(1)); },def:true},
   {key:'marginUsage',label:'Margin Use',align:'right',cell:b=>{ const p=marginUsagePct(b); return p==null? <span className="text-slate-300">—</span> : <span className={`tnum ${p>80?'text-danger':p>50?'text-amber-600':'text-slate-500'}`}>{p.toFixed(0)}%</span>; },csv:b=>{ const p=marginUsagePct(b); return p==null?'':Number(p.toFixed(1)); },def:false},
+  {key:'dormant',label:'Last Activity',cell:b=>{ const {dormant,hours}=dormantInfo(b); return hours==null? <span className="text-slate-300">—</span> : dormant? <span className="text-amber-600 font-medium flex items-center gap-1"><Icon name="clock" className="w-3.5 h-3.5"/>Dormant · {b.lastChanged?fmtAgo(b.lastChanged):''}</span> : <span className="text-slate-400">{b.lastChanged?fmtAgo(b.lastChanged):'—'}</span>; },csv:b=>{ const {hours}=dormantInfo(b); return hours==null?'':Math.round(hours)+'h'; },def:false},
   {key:'status',label:'Status',cell:b=><StatusPill status={b.status==='open'?'active':'inactive'}/>,csv:b=>b.status,def:true},
 ];
-const POS_GETTERS={symbol:r=>r.symbol,exchange:r=>r.exchange,fund:r=>r.fund?.name||'',side:r=>r.side,qty:r=>r.qty,entry:r=>r.entry,mark:r=>r.mark,uPnl:r=>r.unrealizedPnl,notional:r=>Math.abs(r.notional),leverage:r=>r.leverage,liqDist:r=>{const {pct}=liqInfo(r);return pct==null?Infinity:pct;},marginUsage:r=>marginUsagePct(r)??-1,status:r=>r.status};
+const POS_GETTERS={symbol:r=>r.symbol,exchange:r=>r.exchange,fund:r=>r.fund?.name||'',side:r=>r.side,qty:r=>r.qty,entry:r=>r.entry,mark:r=>r.mark,uPnl:r=>r.unrealizedPnl,notional:r=>Math.abs(r.notional),leverage:r=>r.leverage,liqDist:r=>{const {pct}=liqInfo(r);return pct==null?Infinity:pct;},marginUsage:r=>marginUsagePct(r)??-1,dormant:r=>{const {hours}=dormantInfo(r);return hours??-1;},status:r=>r.status};
 
 function TradesPage(){
   const {user,data,funds}=useApp();

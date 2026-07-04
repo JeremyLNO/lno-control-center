@@ -54,6 +54,7 @@ export interface Bot {
   liquidationPrice?: number | null;
   maintMargin?: number | null;
   initialMargin?: number | null;
+  lastChanged?: string | null;
   [k: string]: any;
 }
 export type Position = Bot;

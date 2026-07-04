@@ -15,6 +15,7 @@ const pub = (r) => ({
   liquidationPrice: r.liquidation_price != null ? Number(r.liquidation_price) : null,
   maintMargin: r.maint_margin != null ? Number(r.maint_margin) : null,
   initialMargin: r.initial_margin != null ? Number(r.initial_margin) : null,
+  lastChanged: r.last_changed,
 });
 
 export default async function handler(req, res) {

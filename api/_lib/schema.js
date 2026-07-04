@@ -72,6 +72,10 @@ export async function migrate() {
   await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS liquidation_price DOUBLE PRECISION`);
   await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS maint_margin DOUBLE PRECISION`);
   await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS initial_margin DOUBLE PRECISION`);
+  // last time this position's side/qty/entry actually changed (vs. just being re-seen by a
+  // sync) — powers "dormant bot" detection (a position sitting untouched for too long may
+  // mean the strategy behind it has gone silent).
+  await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS last_changed TIMESTAMPTZ DEFAULT now()`);
   await query(`CREATE TABLE IF NOT EXISTS exchanges (
     id TEXT PRIMARY KEY,
     name TEXT,

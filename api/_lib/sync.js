@@ -36,11 +36,13 @@ export async function syncExchanges() {
       const id = `binance:${p.symbol}`; seen.push(id);
       const m = acct.margins[p.symbol] || {};
       await query(
-        `INSERT INTO bots (id,exchange,symbol,side,qty,entry,mark,unrealized_pnl,notional,leverage,status,first_seen,last_seen,liquidation_price,maint_margin,initial_margin)
-         VALUES ($1,'binance',$2,$3,$4,$5,$6,$7,$8,$9,'open',now(),now(),$10,$11,$12)
+        `INSERT INTO bots (id,exchange,symbol,side,qty,entry,mark,unrealized_pnl,notional,leverage,status,first_seen,last_seen,liquidation_price,maint_margin,initial_margin,last_changed)
+         VALUES ($1,'binance',$2,$3,$4,$5,$6,$7,$8,$9,'open',now(),now(),$10,$11,$12,now())
          ON CONFLICT (id) DO UPDATE SET
            side=$3, qty=$4, entry=$5, mark=$6, unrealized_pnl=$7, notional=$8, leverage=$9, status='open', last_seen=now(),
-           liquidation_price=$10, maint_margin=$11, initial_margin=$12`,
+           liquidation_price=$10, maint_margin=$11, initial_margin=$12,
+           last_changed = CASE WHEN bots.side IS DISTINCT FROM $3 OR bots.qty IS DISTINCT FROM $4 OR bots.entry IS DISTINCT FROM $5
+                           THEN now() ELSE bots.last_changed END`,
         [id, p.symbol, p.side, p.qty, p.entry, p.mark, p.unrealizedPnl, p.notional, p.leverage,
          p.liquidationPrice, m.maintMargin ?? null, m.initialMargin ?? null]
       );
