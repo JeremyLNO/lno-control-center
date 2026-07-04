@@ -10,12 +10,12 @@ import {
    ============================================================ */
 function MyEquityPage(){
   const {user}=useApp();
-  const [data,setData]=useState(null);
-  const [summary,setSummary]=useState(null);
+  const [data,setData]=useState(null); const [dataErr,setDataErr]=useState(null);
+  const [summary,setSummary]=useState(null); const [summaryErr,setSummaryErr]=useState(null);
   useEffect(()=>{
     if(user.role==='shareholder') return;
-    api('funds?myEquity=1').then(setData).catch(()=>setData({fund:null,mine:null}));
-    if(user.role==='admin') api('funds?employeeSummary=1').then(setSummary).catch(()=>setSummary(null));
+    api('funds?myEquity=1').then(setData).catch(e=>setDataErr(e.message||'Failed to load'));
+    if(user.role==='admin') api('funds?employeeSummary=1').then(setSummary).catch(e=>setSummaryErr(e.message||'Failed to load'));
   },[]);
   if(user.role==='shareholder') return <Denied/>;
 
@@ -25,7 +25,8 @@ function MyEquityPage(){
   return <div className="max-w-3xl">
     <PageHead title="My Equity" subtitle="Your share of the Employee Fund"/>
 
-    {data===null? <Card className="p-8 text-center text-slate-400">Loading…</Card>
+    {dataErr? <Card className="p-8 text-center text-danger text-sm">Couldn't load your Employee Fund share: {dataErr}</Card>
+    : data===null? <Card className="p-8 text-center text-slate-400">Loading…</Card>
     : !mine? <Card className="p-8 text-center text-slate-400">Your Employee Fund share hasn't been set up yet — check back soon, or ask an admin.</Card>
     : <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -42,7 +43,8 @@ function MyEquityPage(){
 
     {user.role==='admin'&&<Card className="p-5 mt-5">
       <div className="flex items-center justify-between mb-1"><SectionTitle>Fund Summary (admin)</SectionTitle></div>
-      {summary===null? <div className="text-sm text-slate-400">Loading…</div>
+      {summaryErr? <div className="text-sm text-danger">Couldn't load the fund summary: {summaryErr}</div>
+      : summary===null? <div className="text-sm text-slate-400">Loading…</div>
       : <>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">Total Value</div><div className="text-lg font-bold text-navy mt-0.5">{fmtUSD(summary.value)}</div></div>

@@ -8,6 +8,7 @@
 // an approximation: nobody has an unfair head start because nothing has traded yet.
 import { query } from './db.js';
 import { FUND_PALETTE } from './constants.js';
+import { migrate } from './schema.js';
 
 const GRANT_AMOUNT = 1000;
 const FUND_NAME = 'Employee Fund';
@@ -62,6 +63,7 @@ async function fundValue(fundId) {
 // one-time backfill of pre-existing employees — for the backfill, joinedAt is their real
 // account-creation date even though the grant is priced at today's NAV; see file header).
 export async function grantShare(userId, joinedAt) {
+  await migrate(); // same self-heal as getEmployeeFundSummary() — this can run on its own via users.js
   const fundId = await getEmployeeFundId();
   const { navPerUnit } = await fundValue(fundId);
   const units = GRANT_AMOUNT / navPerUnit;
@@ -96,6 +98,11 @@ async function getNotEnrolled() {
 }
 
 export async function getEmployeeFundSummary() {
+  // Self-heal: employee_shares/income_events are only created by migrate(), which otherwise
+  // only runs from syncExchanges() (Sync now / the daily cron). If nobody has ever synced an
+  // exchange yet, those tables wouldn't exist and every query below would throw a raw SQL
+  // error — silently surfaced as an endless "Loading…" by the frontend's catch(->null).
+  await migrate();
   await backfillEmployeeShares();
   const fundId = await getEmployeeFundId();
   const { totalContributed, totalUnits, openUPnl, value, navPerUnit } = await fundValue(fundId);
