@@ -10,6 +10,7 @@ export type AuthProvider = 'password' | 'google';
 export type DataStatus = 'live' | 'partial' | 'offline';
 export type Side = string;
 export type BotStatus = 'open' | 'closed';
+export type Lang = 'en' | 'fr' | 'de' | 'es';
 
 export interface User {
   id: string;
@@ -26,6 +27,7 @@ export interface User {
   active?: boolean;
   lastSeen?: string | null;
   lockedUntil?: string | null;
+  language?: Lang | null;
   [k: string]: any;
 }
 
@@ -143,4 +145,7 @@ export interface AppContextValue {
   reloadData: () => Promise<void>;
   data: DashboardData | null;
   dataStatus: DataStatus;
+  lang: Lang;
+  setLang: (lang: Lang) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }

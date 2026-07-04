@@ -1,6 +1,8 @@
 import React from 'react'
 import type { AppContextValue, ApiError } from './types'
-export type { Role, Permission, User, Fund, Bot, Position, Snapshot, SeriesPoint, FundGroup, DashboardData, Route, DataStatus, ApiFn, AppContextValue } from './types'
+export type { Role, Permission, User, Fund, Bot, Position, Snapshot, SeriesPoint, FundGroup, DashboardData, Route, DataStatus, ApiFn, AppContextValue, Lang } from './types'
+import { SUPPORTED_LANGS, LANG_LABELS } from './i18n'
+export { SUPPORTED_LANGS, LANG_LABELS } from './i18n'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 
 /* ============================================================
@@ -531,9 +533,10 @@ function PnlCalendar({series}: any){
    LIVE-DATA UI
    ============================================================ */
 function LiveBadge({status}: any){
-  if(status==='live') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-success" data-tip="Connected to an exchange"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>LIVE</span>;
-  if(status==='partial') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-amber-600" data-tip="Sync error on last run"><span className="w-2 h-2 rounded-full bg-amber-500"/>PARTIAL</span>;
-  if(status==='offline') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400" data-tip="No exchange connected"><span className="w-2 h-2 rounded-full bg-slate-400"/>OFFLINE</span>;
+  const {t}=useApp();
+  if(status==='live') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-success" data-tip="Connected to an exchange"><span className="w-2 h-2 rounded-full bg-success pulse-dot"/>{t('liveBadge.live')}</span>;
+  if(status==='partial') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-amber-600" data-tip="Sync error on last run"><span className="w-2 h-2 rounded-full bg-amber-500"/>{t('liveBadge.partial')}</span>;
+  if(status==='offline') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400" data-tip="No exchange connected"><span className="w-2 h-2 rounded-full bg-slate-400"/>{t('liveBadge.offline')}</span>;
   return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400"><span className="w-2 h-2 rounded-full bg-slate-300 animate-pulse"/>…</span>;
 }
 // Ticker tape of open positions: base asset + unrealized PnL. Hidden when there are none.
@@ -548,12 +551,13 @@ function MarketTicker(){
   </div>;
 }
 function LoadingScreen(){
+  const {t}=useApp();
   return <div className="h-full grid place-items-center bg-bg">
     <div className="text-center">
       <Logo className="h-8 text-navy mx-auto mb-3"/>
       <div className="flex items-center justify-center gap-2 text-slate-500 text-sm">
         <span className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-gold animate-spin"/>
-        Loading your portfolio…
+        {t('loading.portfolio')}
       </div>
     </div>
   </div>;
@@ -563,7 +567,7 @@ function LoadingScreen(){
    LOGIN
    ============================================================ */
 function Login(){
-  const {login,loginGoogle}=useApp();
+  const {login,loginGoogle,lang,t}=useApp();
   const [u,setU]=useState(''); const [p,setP]=useState(''); const [err,setErr]=useState(''); const [warn,setWarn]=useState(false);
   const [busy,setBusy]=useState(false); const attemptsRef=useRef(0);
   const clientId=GOOGLE_CLIENT_ID;
@@ -580,10 +584,20 @@ function Login(){
       }});
       window.google.accounts.id.renderButton(gref.current,{ theme:'outline', size:'large', text:'signin_with', shape:'pill', width:300 });
     };
-    if(window.google?.accounts?.id) init();
-    else { const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client'; s.async=true; s.defer=true; s.onload=init; document.head.appendChild(s); }
+    // Google renders its own button text in whatever language its script was loaded with
+    // (the `hl` query param) — it doesn't follow our app's language automatically. The
+    // Login page has no language switcher of its own (that lives in the signed-in sidebar),
+    // so `lang` here is just whatever was cached/detected before landing here — safe to
+    // bake into the one-time script load.
+    const existing=document.getElementById('gsi-client') as HTMLScriptElement|null;
+    if(window.google?.accounts?.id&&existing?.dataset.hl===lang) init();
+    else {
+      existing?.remove();
+      const s=document.createElement('script'); s.id='gsi-client'; s.dataset.hl=lang;
+      s.src=`https://accounts.google.com/gsi/client?hl=${lang}`; s.async=true; s.defer=true; s.onload=init; document.head.appendChild(s);
+    }
     return ()=>{ cancelled=true; };
-  },[clientId]);
+  },[clientId,lang]);
   async function submit(e){
     e.preventDefault(); if(busy) return; setBusy(true); setErr('');
     try{ await login(u.trim(),p); attemptsRef.current=0; }
@@ -598,24 +612,24 @@ function Login(){
     <div className="relative w-full max-w-sm">
       <div className="text-center mb-7">
         <Logo className="h-11 text-white mx-auto"/>
-        <div className="text-slate-300 text-sm mt-1">Control Center</div>
+        <div className="text-slate-300 text-sm mt-1">{t('login.controlCenter')}</div>
       </div>
       <div className="bg-white rounded-2xl shadow-2xl p-6 space-y-4">
-        <h1 className="text-lg font-semibold text-navy">Sign in</h1>
+        <h1 className="text-lg font-semibold text-navy">{t('login.signIn')}</h1>
         {clientId&&<>
           <div className="flex justify-center min-h-[44px]" ref={gref}/>
-          <p className="text-[11px] text-slate-400 text-center">Use your <span className="font-medium text-slate-500">@lno.company</span> Google account.</p>
+          <p className="text-[11px] text-slate-400 text-center">{t('login.googleHint',{domain:'@lno.company'})}</p>
         </>}
         {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4 shrink-0"/>{err}</div>}
-        {clientId&&!showPw&&<button onClick={()=>setShowPw(true)} className="w-full text-xs text-slate-400 hover:text-navy">Sign in with a password instead</button>}
+        {clientId&&!showPw&&<button onClick={()=>setShowPw(true)} className="w-full text-xs text-slate-400 hover:text-navy">{t('login.passwordInstead')}</button>}
         {showPw&&<form onSubmit={submit} className="space-y-4">
-          {clientId&&<div className="flex items-center gap-2 pt-1"><div className="flex-1 border-t border-slate-200"/><span className="text-[10px] uppercase tracking-wide text-slate-400">email sign-in</span><div className="flex-1 border-t border-slate-200"/></div>}
-          <Field label="Email"><Input type="email" value={u} onChange={e=>setU(e.target.value)} placeholder="you@example.com" autoFocus={!clientId}/></Field>
-          <Field label="Password"><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="••••••"/></Field>
-          <Btn className="w-full" type="submit" disabled={busy}>{busy?'Signing in…':'Sign in'}</Btn>
+          {clientId&&<div className="flex items-center gap-2 pt-1"><div className="flex-1 border-t border-slate-200"/><span className="text-[10px] uppercase tracking-wide text-slate-400">{t('login.emailSignIn')}</span><div className="flex-1 border-t border-slate-200"/></div>}
+          <Field label={t('login.email')}><Input type="email" value={u} onChange={e=>setU(e.target.value)} placeholder="you@example.com" autoFocus={!clientId}/></Field>
+          <Field label={t('login.password')}><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="••••••"/></Field>
+          <Btn className="w-full" type="submit" disabled={busy}>{busy?t('login.signingIn'):t('login.signIn')}</Btn>
         </form>}
-        {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>Multiple failed attempts detected. A security alert has been dispatched to the operations team.</span></div>}
-        {!clientId&&<div className="text-[11px] text-slate-400 text-center">Default admin: <span className="font-mono">admin@lno.company / admin</span></div>}
+        {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>{t('login.securityWarning')}</span></div>}
+        {!clientId&&<div className="text-[11px] text-slate-400 text-center">{t('login.defaultAdmin')}: <span className="font-mono">admin@lno.company / admin</span></div>}
       </div>
     </div>
   </div>;
@@ -625,38 +639,52 @@ function Login(){
    LAYOUT — SIDEBAR / HEADER
    ============================================================ */
 // Nav entries: [icon, label, path, shortLabel, perm]. perm gates visibility (admins have all).
+// nav tuples store translation KEYS (not literal labels) — [icon, labelKey, path, shortKey?, perm?]
 const MAIN_NAV=[
-  ['activity','Activity Dashboard','/activity','Activity','view_activity'],
-  ['radio','Live','/realtime','Live','view_realtime'],
-  ['briefcase','Positions','/trades','Positions','view_trades'],
-  ['trendup','Prices','/prices','Prices','view_activity'],
+  ['activity','nav.activity','/activity','nav.activity.short','view_activity'],
+  ['radio','nav.live','/realtime','nav.live','view_realtime'],
+  ['briefcase','nav.positions','/trades','nav.positions','view_trades'],
+  ['trendup','nav.prices','/prices','nav.prices','view_activity'],
 ];
 const TOOLS_NAV=[
-  ['layers','Funds','/funds','Funds','view_trades'],
-  ['database','System Status','/status','Status','view_activity'],
-  ['filetext','Reports','/admin/reports','Reports','view_reports'],
+  ['layers','nav.funds','/funds','nav.funds','view_trades'],
+  ['database','nav.status','/status','nav.status.short','view_activity'],
+  ['filetext','nav.reports','/admin/reports','nav.reports','view_reports'],
 ];
 const ADMIN_NAV=[
-  ['list','Bots','/admin/bots'],
-  ['users','Users','/admin/users'],
-  ['link','Exchanges','/admin/exchanges'],
-  ['msg','WhatsApp','/admin/openwa'],
+  ['list','nav.bots','/admin/bots'],
+  ['users','nav.users','/admin/users'],
+  ['link','nav.exchanges','/admin/exchanges'],
+  ['msg','nav.whatsapp','/admin/openwa'],
 ];
 const ACCT_NAV=[
-  ['usercircle','Profile','/profile'],
-  ['lifebuoy','Support','/support'],
+  ['usercircle','nav.profile','/profile'],
+  ['lifebuoy','nav.support','/support'],
 ];
 // Employee Fund — every internal role (admin/operator/viewer) has a share; shareholders are
 // external investors, not staff, so they don't see this.
-const MY_EQUITY_NAV=['dollar','My Equity','/equity'];
+const MY_EQUITY_NAV=['dollar','nav.myEquity','/equity'];
 
 function NavItem({icon,label,path,active,onClick}: any){
   return <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${active?'bg-gold text-navy font-semibold':'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
     <Icon name={icon} className="w-[18px] h-[18px]"/>{label}
   </button>;
 }
+// Language switcher — 4 codes, active one highlighted. Shown at the very bottom of the
+// sidebar (desktop) and in the mobile "More" sheet. Persists via useApp().setLang (local
+// cache immediately, server-side too when logged in, so it's the account's default
+// everywhere — including the iOS app, which reads the same user record).
+function LangSwitcher({className=''}: any){
+  const {lang,setLang}=useApp();
+  return <div className={`flex items-center gap-1 ${className}`}>
+    {SUPPORTED_LANGS.map(l=><button key={l} onClick={()=>setLang(l)} title={LANG_LABELS[l]}
+      className={`px-1.5 py-1 rounded text-[10px] font-semibold tracking-wide transition ${lang===l?'bg-gold text-navy':'text-slate-400 hover:opacity-70'}`}>
+      {l.toUpperCase()}
+    </button>)}
+  </div>;
+}
 function Sidebar(){
-  const {route,navigate,user}=useApp();
+  const {route,navigate,user,t}=useApp();
   const cur='/'+route.parts.join('/');
   const isAct=(p)=> cur===p || cur.startsWith(p+'/');
   return <aside className="hidden lg:flex flex-col w-60 shrink-0 bg-navy text-white h-full">
@@ -665,27 +693,28 @@ function Sidebar(){
       <div className="text-[10px] text-slate-400 leading-tight mt-1.5">Control<br/>Center</div>
     </div>
     <nav className="flex-1 overflow-y-auto px-3 space-y-1">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-2 pb-1">Main</div>
-      {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Tools</div>
-      {TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-2 pb-1">{t('nav.section.main')}</div>
+      {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">{t('nav.section.tools')}</div>
+      {TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
       {user.role==='admin'&&<>
-        <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Administration</div>
-        {ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">{t('nav.section.admin')}</div>
+        {ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
       </>}
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Account</div>
-      {user.role!=='shareholder'&&<NavItem icon={MY_EQUITY_NAV[0]} label={MY_EQUITY_NAV[1]} path={MY_EQUITY_NAV[2]} active={isAct(MY_EQUITY_NAV[2])} onClick={()=>navigate(MY_EQUITY_NAV[2])}/>}
-      {ACCT_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">{t('nav.section.account')}</div>
+      {user.role!=='shareholder'&&<NavItem icon={MY_EQUITY_NAV[0]} label={t(MY_EQUITY_NAV[1])} path={MY_EQUITY_NAV[2]} active={isAct(MY_EQUITY_NAV[2])} onClick={()=>navigate(MY_EQUITY_NAV[2])}/>}
+      {ACCT_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
     </nav>
     <div className="p-3 border-t border-white/10">
-      <div className="text-[11px] text-slate-400 px-2">LNO Control Center<br/>Internal Use Only</div>
+      <LangSwitcher className="px-2 mb-2"/>
+      <div className="text-[11px] text-slate-400 px-2">{t('sidebar.footer')}<br/>{t('sidebar.footerSub')}</div>
     </div>
   </aside>;
 }
 
 // Global search over detected bots (by symbol / exchange / assigned fund).
 function GlobalSearch(){
-  const {navigate,data,funds,user}=useApp();
+  const {navigate,data,funds,user,t}=useApp();
   const [q,setQ]=useState(''); const [open,setOpen]=useState(false); const ref=useRef<any>(null);
   useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
   const res=useMemo(()=>{
@@ -696,16 +725,16 @@ function GlobalSearch(){
   const go=user&&user.role==='admin'?'/admin/bots':'/trades';
   return <div ref={ref} className="relative flex-1 max-w-md">
     <Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-    <input value={q} onFocus={()=>setOpen(true)} onChange={e=>{setQ(e.target.value);setOpen(true);}} placeholder="Search positions by symbol…" className="w-full bg-slate-100 focus:bg-white border border-transparent focus:border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none"/>
+    <input value={q} onFocus={()=>setOpen(true)} onChange={e=>{setQ(e.target.value);setOpen(true);}} placeholder={t('header.searchPlaceholder')} className="w-full bg-slate-100 focus:bg-white border border-transparent focus:border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none"/>
     {open&&res&&<div className="absolute z-40 mt-1.5 w-full bg-white rounded-xl shadow-xl border border-slate-200 p-2 max-h-96 overflow-y-auto fadein">
-      {res.bots.length===0&&<div className="text-sm text-slate-400 px-3 py-4 text-center">No results</div>}
-      {res.bots.length>0&&<div><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">Positions</div>{res.bots.map(b=>{ const f=fundOf(funds,b); return <button key={b.id} onClick={()=>{navigate(go);setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center justify-between gap-2"><span className="flex items-center gap-2"><span className="font-mono text-xs text-navy">{b.symbol}</span>{f&&<span className="w-2 h-2 rounded-full" style={{background:f.color}}/>}<span className="text-[11px] text-slate-400">{b.exchange}</span></span><span className={'font-mono text-xs '+clsPnl(b.unrealizedPnl)}>{fmtSigned(b.unrealizedPnl)}</span></button>; })}</div>}
+      {res.bots.length===0&&<div className="text-sm text-slate-400 px-3 py-4 text-center">{t('header.noResults')}</div>}
+      {res.bots.length>0&&<div><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">{t('header.positions')}</div>{res.bots.map(b=>{ const f=fundOf(funds,b); return <button key={b.id} onClick={()=>{navigate(go);setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center justify-between gap-2"><span className="flex items-center gap-2"><span className="font-mono text-xs text-navy">{b.symbol}</span>{f&&<span className="w-2 h-2 rounded-full" style={{background:f.color}}/>}<span className="text-[11px] text-slate-400">{b.exchange}</span></span><span className={'font-mono text-xs '+clsPnl(b.unrealizedPnl)}>{fmtSigned(b.unrealizedPnl)}</span></button>; })}</div>}
     </div>}
   </div>;
 }
 
 function Header(){
-  const {user,navigate,logout,dataStatus}=useApp();
+  const {user,navigate,logout,dataStatus,t}=useApp();
   const [bell,setBell]=useState(false); const [menu,setMenu]=useState(false);
   const [alerts,setAlerts]=useState([]);
   const [readIds,setReadIds]=useState<Set<any>>(()=>new Set(PREF.get('read_alerts',[])));
@@ -720,21 +749,21 @@ function Header(){
   return <header className="h-16 shrink-0 bg-white border-b border-slate-200 flex items-center gap-4 px-4 lg:px-6">
     <Logo className="lg:hidden h-6 text-navy"/>
     <GlobalSearch/>
-    {user.firstName&&<div className="hidden md:block text-sm text-slate-500">Hello, <span className="font-semibold text-navy">{user.firstName}</span></div>}
+    {user.firstName&&<div className="hidden md:block text-sm text-slate-500">{t('common.hello')}, <span className="font-semibold text-navy">{user.firstName}</span></div>}
     <LiveBadge status={dataStatus}/>
     <div ref={bref} className="relative">
       <button onClick={()=>setBell(!bell)} className="relative p-2 rounded-lg hover:bg-slate-100"><Icon name="bell" className="w-5 h-5 text-slate-600"/>{unread>0&&<span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-danger text-white text-[10px] rounded-full grid place-items-center">{unread}</span>}</button>
       {bell&&<div className="absolute right-0 mt-1.5 w-80 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-40 fadein max-h-96 overflow-y-auto">
-        <div className="text-xs font-semibold text-navy px-2 py-1.5 flex items-center justify-between">Alerts {unread>0&&<button onClick={markAllRead} className="text-[11px] text-gold hover:underline font-normal">Mark all as read</button>}</div>
-        {alerts.length===0 && <div className="text-xs text-slate-400 px-2 py-4 text-center">No alerts.</div>}
+        <div className="text-xs font-semibold text-navy px-2 py-1.5 flex items-center justify-between">{t('header.alerts')} {unread>0&&<button onClick={markAllRead} className="text-[11px] text-gold hover:underline font-normal">{t('header.markAllRead')}</button>}</div>
+        {alerts.length===0 && <div className="text-xs text-slate-400 px-2 py-4 text-center">{t('header.noAlerts')}</div>}
         {alerts.map(a=>{ const isRead=readIds.has(a.id); return <div key={a.id} className={`px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5 ${isRead?'opacity-60':''}`}>
           <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${a.ackedAt?'bg-success':'bg-danger'}`}/>
           <div className="flex-1 min-w-0">
             <div className={`text-xs leading-snug ${isRead?'text-slate-500':'text-navy font-medium'}`}>{a.summary}</div>
             <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
               <span className="font-mono">{a.code}</span><span>{fmtDT(a.createdAt)}</span>
-              {a.ackedAt? <span className="text-success">✓ acked{a.ackedBy?' · '+a.ackedBy:''}</span> : (user.role==='admin'&&<button onClick={()=>ack(a.id)} className="text-gold hover:underline">acknowledge</button>)}
-              {!isRead&&<button onClick={()=>markRead(a.id)} className="text-slate-400 hover:text-navy hover:underline">mark as read</button>}
+              {a.ackedAt? <span className="text-success">✓ {t('header.acked')}{a.ackedBy?' · '+a.ackedBy:''}</span> : (user.role==='admin'&&<button onClick={()=>ack(a.id)} className="text-gold hover:underline">{t('header.acknowledge')}</button>)}
+              {!isRead&&<button onClick={()=>markRead(a.id)} className="text-slate-400 hover:text-navy hover:underline">{t('header.markAsRead')}</button>}
             </div>
           </div>
         </div>; })}
@@ -749,25 +778,26 @@ function Header(){
           <div className="text-sm font-semibold text-navy truncate">{user.firstName||user.email}</div>
           <div className="text-xs text-slate-400 truncate">{user.email}</div>
         </div>
-        <button onClick={()=>{navigate('/profile');setMenu(false);}} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2"><Icon name="usercircle" className="w-4 h-4"/>Profile</button>
-        <button onClick={()=>{navigate('/support');setMenu(false);}} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2"><Icon name="lifebuoy" className="w-4 h-4"/>Support</button>
-        <button onClick={logout} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-danger/10 text-danger text-sm flex items-center gap-2"><Icon name="logout" className="w-4 h-4"/>Sign out</button>
+        <button onClick={()=>{navigate('/profile');setMenu(false);}} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2"><Icon name="usercircle" className="w-4 h-4"/>{t('nav.profile')}</button>
+        <button onClick={()=>{navigate('/support');setMenu(false);}} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2"><Icon name="lifebuoy" className="w-4 h-4"/>{t('nav.support')}</button>
+        <button onClick={logout} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-danger/10 text-danger text-sm flex items-center gap-2"><Icon name="logout" className="w-4 h-4"/>{t('common.signOut')}</button>
       </div>}
     </div>
   </header>;
 }
 
 function MobileNav(){
-  const {route,navigate,user}=useApp();
+  const {route,navigate,user,t}=useApp();
   const cur='/'+route.parts.join('/');
   const [more,setMore]=useState(false);
   return <>
     <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex z-30">
-      {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p,s])=><button key={p} onClick={()=>navigate(p)} className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] ${cur===p||cur.startsWith(p+'/')?'text-gold':'text-slate-500'}`}><Icon name={i} className="w-5 h-5"/>{s||l.split(' ')[0]}</button>)}
-      <button onClick={()=>setMore(!more)} className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] text-slate-500"><Icon name="menu" className="w-5 h-5"/>More</button>
+      {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p,s])=><button key={p} onClick={()=>navigate(p)} className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] ${cur===p||cur.startsWith(p+'/')?'text-gold':'text-slate-500'}`}><Icon name={i} className="w-5 h-5"/>{t(s||l)}</button>)}
+      <button onClick={()=>setMore(!more)} className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] text-slate-500"><Icon name="menu" className="w-5 h-5"/>{t('common.more')}</button>
     </nav>
     {more&&<div className="lg:hidden fixed inset-0 z-40" onClick={()=>setMore(false)}><div className="absolute bottom-14 inset-x-3 bg-white rounded-xl shadow-xl border border-slate-200 p-2" onClick={e=>e.stopPropagation()}>
-      {[...TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)),...(user.role==='admin'?ADMIN_NAV:[]),...(user.role!=='shareholder'?[MY_EQUITY_NAV]:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{l}</button>)}
+      {[...TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)),...(user.role==='admin'?ADMIN_NAV:[]),...(user.role!=='shareholder'?[MY_EQUITY_NAV]:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{t(l)}</button>)}
+      <div className="border-t border-slate-100 mt-1 pt-2 px-1"><LangSwitcher/></div>
     </div></div>}
   </>;
 }
@@ -778,7 +808,7 @@ function PageHead({title,subtitle,actions}: any){
     {actions&&<div className="flex items-center gap-2">{actions}</div>}
   </div>;
 }
-function Denied(){ return <div className="grid place-items-center h-full"><Card className="p-8 text-center max-w-sm"><Icon name="shield" className="w-10 h-10 mx-auto text-slate-300"/><h2 className="font-semibold text-navy mt-3">Access denied</h2><p className="text-sm text-slate-500 mt-1">You don't have permission to view this section.</p></Card></div>; }
+function Denied(){ const {t}=useApp(); return <div className="grid place-items-center h-full"><Card className="p-8 text-center max-w-sm"><Icon name="shield" className="w-10 h-10 mx-auto text-slate-300"/><h2 className="font-semibold text-navy mt-3">{t('denied.title')}</h2><p className="text-sm text-slate-500 mt-1">{t('denied.message')}</p></Card></div>; }
 
 /* ============================================================
    KPI CARD + shared bits
@@ -835,8 +865,9 @@ function FundTag({fund,onClick}: any){
 
 // Period selector operating on the real equity history (data.series).
 function PeriodControls({period,setPeriod,custom,setCustom}: any){
+  const {t}=useApp();
   return <div className="flex flex-wrap items-center gap-2">
-    <Select value={period} onChange={setPeriod} className="w-40" options={[{value:'7',label:'Last 7 days'},{value:'30',label:'Last 30 days'},{value:'90',label:'Last 90 days'},{value:'365',label:'Last 365 days'},{value:'all',label:'All time'},{value:'custom',label:'Custom range'}]}/>
+    <Select value={period} onChange={setPeriod} className="w-40" options={[{value:'7',label:t('period.7')},{value:'30',label:t('period.30')},{value:'90',label:t('period.90')},{value:'365',label:t('period.365')},{value:'all',label:t('period.all')},{value:'custom',label:t('period.custom')}]}/>
     {period==='custom'&&<div className="flex items-center gap-1.5">
       <input type="date" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" onChange={e=>setCustom({...custom,start:e.target.value?new Date(e.target.value).getTime():null})}/>
       <span className="text-slate-400 text-sm">→</span>
@@ -851,21 +882,21 @@ function PeriodControls({period,setPeriod,custom,setCustom}: any){
 const IOS_APP_URL = '';
 
 function OnboardingCard(){
-  const {user,navigate}=useApp();
+  const {user,navigate,t}=useApp();
   const [dismissed,setDismissed]=useState(()=>PREF.get('onboarding_dismissed_v2',false));
   const [iosDone,setIosDone]=useState(()=>PREF.get('onboarding_ios_done',false));
   if(dismissed) return null;
   const steps=[
-    {label:'Add your WhatsApp phone number', icon:'msg', done:!!(user.phone&&user.phone.trim()), onClick:()=>navigate('/profile')},
-    {label:'Add a profile photo', icon:'camera', done:!!user.avatar, onClick:()=>navigate('/profile')},
-    {label:'Download the iOS app', icon:'smartphone', done:iosDone, onClick:()=>{ if(IOS_APP_URL) window.open(IOS_APP_URL,'_blank','noopener'); setIosDone(true); PREF.set('onboarding_ios_done',true); }},
+    {label:t('onboarding.whatsapp'), icon:'msg', done:!!(user.phone&&user.phone.trim()), onClick:()=>navigate('/profile')},
+    {label:t('onboarding.photo'), icon:'camera', done:!!user.avatar, onClick:()=>navigate('/profile')},
+    {label:t('onboarding.ios'), icon:'smartphone', done:iosDone, onClick:()=>{ if(IOS_APP_URL) window.open(IOS_APP_URL,'_blank','noopener'); setIosDone(true); PREF.set('onboarding_ios_done',true); }},
   ];
   const left=steps.filter(s=>!s.done).length;
   if(!left) return null;
   return <Card className="p-4 mb-5 border border-gold/30 bg-gold/5">
     <div className="flex items-start justify-between gap-3">
-      <div className="flex items-center gap-2"><Icon name="shield" className="w-4 h-4 text-gold"/><span className="text-sm font-semibold text-navy">Finish setting up your account</span><span className="text-[11px] text-slate-400">{left} step{left>1?'s':''} left</span></div>
-      <button onClick={()=>{setDismissed(true);PREF.set('onboarding_dismissed_v2',true);}} className="text-slate-400 hover:text-navy text-xs flex items-center gap-1"><Icon name="x" className="w-3.5 h-3.5"/>Dismiss</button>
+      <div className="flex items-center gap-2"><Icon name="shield" className="w-4 h-4 text-gold"/><span className="text-sm font-semibold text-navy">{t('onboarding.title')}</span><span className="text-[11px] text-slate-400">{t(left>1?'onboarding.stepsLeft':'onboarding.stepLeft',{n:left})}</span></div>
+      <button onClick={()=>{setDismissed(true);PREF.set('onboarding_dismissed_v2',true);}} className="text-slate-400 hover:text-navy text-xs flex items-center gap-1"><Icon name="x" className="w-3.5 h-3.5"/>{t('common.dismiss')}</button>
     </div>
     <div className="mt-3 grid sm:grid-cols-3 gap-2">
       {steps.map((s,i)=><button key={i} onClick={s.onClick} className="flex items-center gap-2 text-left p-2 rounded-lg border border-transparent hover:border-slate-200 hover:bg-white transition text-sm">
@@ -893,5 +924,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };

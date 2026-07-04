@@ -3,6 +3,7 @@
 import { query } from './_lib/db.js';
 import { requireAuth, sanitizeUser } from './_lib/auth.js';
 import { getOpenWAConfig, getApiKey, sendTextMeBot } from './_lib/notify.js';
+import { SUPPORTED_LANGS } from './_lib/constants.js';
 
 const WELCOME = '🎉 Welcome to LNO Control Center alerts! Your WhatsApp is set up — you\'ll receive your alerts right here.';
 
@@ -11,9 +12,10 @@ export default async function handler(req, res) {
   if (req.method !== 'PATCH') return res.status(405).json({ error: 'method not allowed' });
   try {
     const body = req.body || {};
+    if ('language' in body && !SUPPORTED_LANGS.includes(body.language)) return res.status(400).json({ error: 'unsupported language' });
     // snapshot BEFORE the update so we can detect a notify OFF -> ON transition
     const before = (await query('SELECT notify FROM users WHERE id=$1', [a.id])).rows[0] || {};
-    const map = { firstName: 'first_name', lastName: 'last_name', phone: 'phone', notify: 'notify', avatar: 'avatar' };
+    const map = { firstName: 'first_name', lastName: 'last_name', phone: 'phone', notify: 'notify', avatar: 'avatar', language: 'language' };
     const sets = [], vals = []; let i = 1;
     for (const k of Object.keys(map)) {
       if (k in body) { sets.push(`${map[k]}=$${i}`); vals.push(body[k]); i++; }

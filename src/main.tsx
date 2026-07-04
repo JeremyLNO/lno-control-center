@@ -1,7 +1,8 @@
 import React from 'react'
 import * as ReactDOM from 'react-dom/client'
 import './index.css'
-import type { DataStatus } from './types'
+import type { DataStatus, Lang } from './types'
+import { SUPPORTED_LANGS, detectBrowserLang, translate } from './i18n'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard
@@ -161,6 +162,18 @@ function Root(){
   const [booting,setBooting]=useState(true);
   const {data,funds,setFunds,reloadData,reloadFunds,dataStatus}=useData(!!user);
 
+  // Language: defaults to the browser's language; once a user explicitly picks one (the
+  // sidebar switcher), it's persisted both locally (instant on next visit, incl. logged out)
+  // and server-side on their account (users.language) — so it's also their default on any
+  // other client reading the same account, e.g. the iOS app.
+  const [lang,setLangState]=useState<Lang>(()=>(PREF.get('lang',null) as Lang)||detectBrowserLang());
+  useEffect(()=>{ if(user&&user.language&&SUPPORTED_LANGS.includes(user.language)&&user.language!==lang){ setLangState(user.language); PREF.set('lang',user.language); } },[user]);
+  async function setLang(l: Lang){
+    setLangState(l); PREF.set('lang',l);
+    if(user){ try{ const r=await api('profile',{method:'PATCH',body:{language:l}}); setUser(r.user); }catch(e){ toast.error(e.message); } }
+  }
+  const t=useCallback((key: string, vars?: Record<string,string|number>)=>translate(lang,key,vars),[lang]);
+
   // restore session from the JWT on load
   useEffect(()=>{
     let alive=true;
@@ -199,7 +212,7 @@ function Root(){
   function logout(){ api('auth',{method:'POST',body:{action:'logout'}}).catch(()=>{}); setToken(null); setUser(null); window.location.hash='#/activity'; }
   function navigate(to){ window.location.hash='#'+to; }
 
-  const ctx={route,navigate,user,setUser,login,loginGoogle,logout,api,funds,setFunds,reloadFunds,reloadData,data,dataStatus};
+  const ctx={route,navigate,user,setUser,login,loginGoogle,logout,api,funds,setFunds,reloadFunds,reloadData,data,dataStatus,lang,setLang,t};
 
   const content = booting ? <LoadingScreen/>
     : !user ? <Login/>

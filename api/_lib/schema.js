@@ -40,6 +40,11 @@ export async function migrate() {
   await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
   // brute-force lockout: account is locked from password login until this time
   await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`);
+  // UI language ('en'|'fr'|'de'|'es'); NULL = not chosen yet, client falls back to the
+  // browser's language. Once set (via Profile or the sidebar switcher) it's the user's
+  // default everywhere they sign in — the Control Center web app and the iOS app both read
+  // this same field from the shared account, and reports/WhatsApp alerts are sent in it.
+  await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT`);
   // legacy per-user WhatsApp api key column — unused since the switch to TextMeBot's single
   // firm-wide account key; kept (not dropped) for backward compatibility.
   await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wa_apikey TEXT`);

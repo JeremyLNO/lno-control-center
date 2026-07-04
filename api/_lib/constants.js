@@ -11,6 +11,8 @@ export const ROLE_PERMS = {
   shareholder: ['view_activity','view_reports'],
 };
 export const FUND_PALETTE = ['#C9A24D','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444','#EC4899','#6366F1'];
+// Supported UI / notification languages. Mirrored in src/i18n.ts (SUPPORTED_LANGS).
+export const SUPPORTED_LANGS = ['en', 'fr', 'de', 'es'];
 
 export const DEFAULT_USERS = [
   { id:'u1', username:'admin',       email:'admin@lno.company',       firstName:'',     lastName:'',        role:'admin',    active:true,  phone:'', notify:true,  password:'admin' },

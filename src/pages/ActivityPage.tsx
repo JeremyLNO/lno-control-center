@@ -7,7 +7,7 @@ import {
 } from '../ui'
 
 function ActivityPage(){
-  const {funds,navigate,user,data}=useApp();
+  const {funds,navigate,user,data,t}=useApp();
   const [period,setPeriod]=useState(()=>PREF.get('activity_period2','90'));
   const [custom,setCustom]=useState({start:null,end:null});
   useEffect(()=>{ PREF.set('activity_period2',period); },[period]);
@@ -31,44 +31,44 @@ function ActivityPage(){
   const empty = !hasHistory && !openBots.length;
 
   return <div>
-    <PageHead title="Activity Dashboard" subtitle="Portfolio performance across all funds"
+    <PageHead title={t('activity.title')} subtitle={t('activity.subtitle')}
       actions={hasHistory&&<PeriodControls {...{period,setPeriod,custom,setCustom}}/>}/>
 
     <OnboardingCard/>
     <MarketTicker/>
 
-    {empty? <EmptyState icon="dollar" title="No positions yet"
-        hint="Connect an exchange and run a sync — your account equity, positions and funds will appear here automatically."
-        action={user.role==='admin'&&<Btn onClick={()=>navigate('/admin/exchanges')}><Icon name="link" className="w-4 h-4"/>Connect an exchange</Btn>}/>
+    {empty? <EmptyState icon="dollar" title={t('activity.emptyTitle')}
+        hint={t('activity.emptyHint')}
+        action={user.role==='admin'&&<Btn onClick={()=>navigate('/admin/exchanges')}><Icon name="link" className="w-4 h-4"/>{t('activity.connectExchange')}</Btn>}/>
     : <>
       {/* Hero: account equity + KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
-        <KpiCard label="Account Equity" value={fmtUSD(equity)} icon="dollar"/>
-        <KpiCard label="PnL Day" value={<span className={clsPnl(pnlDay)}>{fmtSigned(pnlDay)}</span>} badge={equity?<TrendBadge pct={pnlDay/equity*100}/>:null}/>
-        <KpiCard label="Open PnL" value={<span className={clsPnl(openPnl)}>{fmtSigned(openPnl)}</span>}/>
-        <KpiCard label="Exposure" value={fmtUSD(exposure)} icon="briefcase"/>
-        <KpiCard label="Open / Funds" value={`${openBots.length} / ${fundsWithExposure.length||funds.length}`} icon="layers"/>
+        <KpiCard label={t('activity.equity')} value={fmtUSD(equity)} icon="dollar"/>
+        <KpiCard label={t('activity.pnlDay')} value={<span className={clsPnl(pnlDay)}>{fmtSigned(pnlDay)}</span>} badge={equity?<TrendBadge pct={pnlDay/equity*100}/>:null}/>
+        <KpiCard label={t('activity.openPnl')} value={<span className={clsPnl(openPnl)}>{fmtSigned(openPnl)}</span>}/>
+        <KpiCard label={t('activity.exposure')} value={fmtUSD(exposure)} icon="briefcase"/>
+        <KpiCard label={t('activity.openFunds')} value={`${openBots.length} / ${fundsWithExposure.length||funds.length}`} icon="layers"/>
       </div>
 
       {/* Equity curve */}
       <Card className="p-5 mb-5">
-        <SectionTitle right={hasHistory&&<span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} <span className="tnum">({fmtPct(periodPnlPct)})</span> this period</span>}>Equity Curve</SectionTitle>
+        <SectionTitle right={hasHistory&&<span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} <span className="tnum">({fmtPct(periodPnlPct)})</span> {t('activity.thisPeriod')}</span>}>{t('activity.equityCurve')}</SectionTitle>
         {hasHistory? <>
           <AreaChart data={view} positive={positive} resetKey={`${period}|${custom.start||''}`}/>
           <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{view.length?fmtDate(view[0].t):''}</span><span>{view.length?fmtDate(view[view.length-1].t):''}</span></div>
-        </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">No equity history yet — the daily sync records one snapshot per day.</div>}
+        </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noHistory')}</div>}
       </Card>
 
       {/* By-fund breakdown */}
       <Card className="overflow-hidden mb-5">
-        <div className="p-5 pb-3"><SectionTitle>By Fund</SectionTitle></div>
-        {byFund.length===0? <div className="px-5 pb-5 text-sm text-slate-400">No funds yet.</div>
+        <div className="p-5 pb-3"><SectionTitle>{t('activity.byFund')}</SectionTitle></div>
+        {byFund.length===0? <div className="px-5 pb-5 text-sm text-slate-400">{t('activity.noFunds')}</div>
         : <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-            <th className="px-4 py-2.5 text-left font-medium">Fund</th>
-            <th className="px-4 py-2.5 text-right font-medium">Open PnL</th>
-            <th className="px-4 py-2.5 text-right font-medium">Exposure</th>
-            <th className="px-4 py-2.5 text-right font-medium">Positions</th>
+            <th className="px-4 py-2.5 text-left font-medium">{t('activity.fund')}</th>
+            <th className="px-4 py-2.5 text-right font-medium">{t('activity.openPnl')}</th>
+            <th className="px-4 py-2.5 text-right font-medium">{t('activity.exposure')}</th>
+            <th className="px-4 py-2.5 text-right font-medium">{t('activity.positions')}</th>
           </tr></thead>
           <tbody>
             {byFund.map(f=><tr key={f.id||'unassigned'} className="border-b border-slate-50 hover:bg-slate-50/60">
@@ -86,20 +86,20 @@ function ActivityPage(){
 
       {/* Drawdown + PnL calendar (need history) */}
       {hasHistory&&<div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">underwater</span>}>Drawdown</SectionTitle><Underwater series={view}/></Card>
-        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">daily</span>}>PnL Calendar</SectionTitle><PnlCalendar series={view}/></Card>
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.underwater')}</span>}>{t('activity.drawdown')}</SectionTitle><Underwater series={view}/></Card>
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.daily')}</span>}>{t('activity.pnlCalendar')}</SectionTitle><PnlCalendar series={view}/></Card>
       </div>}
 
       {/* Open positions snapshot */}
       <Card className="overflow-hidden">
-        <div className="p-5 pb-0"><SectionTitle right={<button onClick={()=>navigate(hasPerm(user,'view_realtime')?'/realtime':'/trades')} className="text-xs text-gold hover:underline">View all</button>}>Open Positions</SectionTitle></div>
-        {openBots.length===0? <div className="p-8 text-center text-slate-400 text-sm">No open positions.</div>
+        <div className="p-5 pb-0"><SectionTitle right={<button onClick={()=>navigate(hasPerm(user,'view_realtime')?'/realtime':'/trades')} className="text-xs text-gold hover:underline">{t('common.viewAll')}</button>}>{t('activity.openPositions')}</SectionTitle></div>
+        {openBots.length===0? <div className="p-8 text-center text-slate-400 text-sm">{t('activity.noOpenPositions')}</div>
         : <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-            <th className="px-3 py-2.5 text-left font-medium">Symbol</th><th className="px-3 py-2.5 text-left font-medium">Side</th>
-            <th className="px-3 py-2.5 text-left font-medium">Fund</th>
-            <th className="px-3 py-2.5 text-right font-medium">Open PnL</th><th className="px-3 py-2.5 text-right font-medium hidden sm:table-cell">Notional</th>
-            <th className="px-3 py-2.5 text-right font-medium hidden md:table-cell">Lev</th>
+            <th className="px-3 py-2.5 text-left font-medium">{t('activity.symbol')}</th><th className="px-3 py-2.5 text-left font-medium">{t('activity.side')}</th>
+            <th className="px-3 py-2.5 text-left font-medium">{t('activity.fund')}</th>
+            <th className="px-3 py-2.5 text-right font-medium">{t('activity.openPnl')}</th><th className="px-3 py-2.5 text-right font-medium hidden sm:table-cell">{t('activity.notional')}</th>
+            <th className="px-3 py-2.5 text-right font-medium hidden md:table-cell">{t('activity.lev')}</th>
           </tr></thead>
           <tbody>
             {openBots.slice(0,10).map(b=>{ const f=fundOf(funds,b); return <tr key={b.id} className="border-b border-slate-50 hover:bg-slate-50/60">
