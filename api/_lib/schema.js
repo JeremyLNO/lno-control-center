@@ -3,8 +3,20 @@ import { query } from './db.js';
 import { hashPassword } from './auth.js';
 import { ROLE_PERMS, DEFAULT_USERS, DEFAULT_OPENWA } from './constants.js';
 
+// migrate() can be called from several concurrent requests (e.g. My Equity fires two API
+// calls in parallel, each of which self-heals the schema). On a real multi-connection
+// Postgres (Neon — unlike the single-process PGlite used in local dev/tests), two
+// concurrent "CREATE TABLE IF NOT EXISTS <same table>" can both pass the existence check
+// before either commits, then collide on Postgres's internal pg_type catalog (error 23505,
+// unique_violation). That collision means the object was already being created by the other
+// concurrent call — i.e. the schema ends up fine either way — so it's safe to ignore.
+async function ddl(sql) {
+  try { await query(sql); }
+  catch (e) { if (e && e.code === '23505') return; throw e; }
+}
+
 export async function migrate() {
-  await query(`CREATE TABLE IF NOT EXISTS users (
+  await ddl(`CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,
     email TEXT NOT NULL,
@@ -21,18 +33,18 @@ export async function migrate() {
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
   // how each account authenticates ('password' | 'google'); added idempotently for existing DBs
-  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'password'`);
+  await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'password'`);
   // login audit: last sign-in time + IP, last-seen (for the online indicator)
-  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
-  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT`);
-  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
+  await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
+  await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT`);
+  await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
   // brute-force lockout: account is locked from password login until this time
-  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`);
+  await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`);
   // legacy per-user WhatsApp api key column — unused since the switch to TextMeBot's single
   // firm-wide account key; kept (not dropped) for backward compatibility.
-  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wa_apikey TEXT`);
+  await ddl(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wa_apikey TEXT`);
   // log of every WhatsApp message sent (admin-only view on the WhatsApp page)
-  await query(`CREATE TABLE IF NOT EXISTS wa_log (
+  await ddl(`CREATE TABLE IF NOT EXISTS wa_log (
     id BIGSERIAL PRIMARY KEY,
     phone TEXT,
     message TEXT,
@@ -42,7 +54,7 @@ export async function migrate() {
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
   // funds are GLOBAL entities (name + colour); a bot is assigned to a fund via bots.fund_id
-  await query(`CREATE TABLE IF NOT EXISTS funds (
+  await ddl(`CREATE TABLE IF NOT EXISTS funds (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     color TEXT NOT NULL,
@@ -51,7 +63,7 @@ export async function migrate() {
   )`);
   // a bot = one (exchange, symbol) pair, created automatically when a position is detected.
   // It must be assigned to a fund (fund_id). Position fields reflect the latest sync.
-  await query(`CREATE TABLE IF NOT EXISTS bots (
+  await ddl(`CREATE TABLE IF NOT EXISTS bots (
     id TEXT PRIMARY KEY,
     exchange TEXT NOT NULL,
     symbol TEXT NOT NULL,
@@ -69,14 +81,14 @@ export async function migrate() {
   )`);
   // liquidation price + maintenance/initial margin (from Binance positionRisk + account
   // endpoints) — power the "distance to liquidation" / margin-health risk view.
-  await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS liquidation_price DOUBLE PRECISION`);
-  await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS maint_margin DOUBLE PRECISION`);
-  await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS initial_margin DOUBLE PRECISION`);
+  await ddl(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS liquidation_price DOUBLE PRECISION`);
+  await ddl(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS maint_margin DOUBLE PRECISION`);
+  await ddl(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS initial_margin DOUBLE PRECISION`);
   // last time this position's side/qty/entry actually changed (vs. just being re-seen by a
   // sync) — powers "dormant bot" detection (a position sitting untouched for too long may
   // mean the strategy behind it has gone silent).
-  await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS last_changed TIMESTAMPTZ DEFAULT now()`);
-  await query(`CREATE TABLE IF NOT EXISTS exchanges (
+  await ddl(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS last_changed TIMESTAMPTZ DEFAULT now()`);
+  await ddl(`CREATE TABLE IF NOT EXISTS exchanges (
     id TEXT PRIMARY KEY,
     name TEXT,
     label TEXT,
@@ -87,10 +99,10 @@ export async function migrate() {
     note TEXT DEFAULT ''
   )`);
   // last sync error message (shown on the Exchanges page when status='error')
-  await query(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS last_error TEXT`);
+  await ddl(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS last_error TEXT`);
   // public wallet/deposit addresses shown on the Exchanges page (not secret — no encryption)
-  await query(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS wallets JSONB NOT NULL DEFAULT '[]'::jsonb`);
-  await query(`CREATE TABLE IF NOT EXISTS app_config (
+  await ddl(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS wallets JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  await ddl(`CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
     value JSONB NOT NULL DEFAULT '{}'
   )`);
@@ -98,7 +110,7 @@ export async function migrate() {
   // "did this trade win or lose" record, distinct from a currently-open position's unrealized
   // PnL. Powers per-bot performance attribution + funding/fee drag analytics. tran_id dedupes
   // (income events are immutable once recorded, so ON CONFLICT DO NOTHING is enough).
-  await query(`CREATE TABLE IF NOT EXISTS income_events (
+  await ddl(`CREATE TABLE IF NOT EXISTS income_events (
     tran_id TEXT PRIMARY KEY,
     exchange TEXT NOT NULL,
     symbol TEXT,
@@ -106,11 +118,11 @@ export async function migrate() {
     income DOUBLE PRECISION NOT NULL,
     occurred_at TIMESTAMPTZ NOT NULL
   )`);
-  await query(`CREATE INDEX IF NOT EXISTS income_events_symbol_idx ON income_events (symbol)`);
+  await ddl(`CREATE INDEX IF NOT EXISTS income_events_symbol_idx ON income_events (symbol)`);
   // Employee Fund: each employee's capital contribution, recorded as a number of "units"
   // (mutual-fund-style unitisation — see api/_lib/employeeFund.js) rather than a flat euro
   // amount, so joining after the fund has already gained/lost value is priced fairly.
-  await query(`CREATE TABLE IF NOT EXISTS employee_shares (
+  await ddl(`CREATE TABLE IF NOT EXISTS employee_shares (
     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     fund_id TEXT NOT NULL,
     contributed_amount DOUBLE PRECISION NOT NULL DEFAULT 1000,
@@ -118,7 +130,7 @@ export async function migrate() {
     joined_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
   // one row per day — real recorded equity history (written by the daily cron)
-  await query(`CREATE TABLE IF NOT EXISTS equity_snapshots (
+  await ddl(`CREATE TABLE IF NOT EXISTS equity_snapshots (
     day DATE PRIMARY KEY,
     equity BIGINT NOT NULL,
     pnl_day BIGINT NOT NULL DEFAULT 0,
@@ -126,7 +138,7 @@ export async function migrate() {
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
   // critical alerts that can be acknowledged (via WhatsApp reply or the UI)
-  await query(`CREATE TABLE IF NOT EXISTS alerts (
+  await ddl(`CREATE TABLE IF NOT EXISTS alerts (
     id BIGSERIAL PRIMARY KEY,
     code TEXT NOT NULL,
     summary TEXT NOT NULL,
@@ -135,7 +147,7 @@ export async function migrate() {
     acked_by TEXT
   )`);
   // sign-in audit trail (one row per successful login, with IP + method)
-  await query(`CREATE TABLE IF NOT EXISTS login_events (
+  await ddl(`CREATE TABLE IF NOT EXISTS login_events (
     id BIGSERIAL PRIMARY KEY,
     user_id TEXT NOT NULL,
     username TEXT NOT NULL,
@@ -144,7 +156,7 @@ export async function migrate() {
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
   // admin-action audit trail (sensitive mutations: user/role/account, exchange + WhatsApp config)
-  await query(`CREATE TABLE IF NOT EXISTS audit_log (
+  await ddl(`CREATE TABLE IF NOT EXISTS audit_log (
     id BIGSERIAL PRIMARY KEY,
     actor_id TEXT,
     actor_email TEXT,
@@ -155,7 +167,7 @@ export async function migrate() {
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
   // generated report archive (PDF kept as base64 so it can be re-downloaded)
-  await query(`CREATE TABLE IF NOT EXISTS reports (
+  await ddl(`CREATE TABLE IF NOT EXISTS reports (
     id BIGSERIAL PRIMARY KEY,
     kind TEXT NOT NULL DEFAULT 'monthly',
     period_label TEXT NOT NULL,
