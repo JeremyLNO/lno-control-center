@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtPctPlain, fmtAgo, fmtDur, api, toast, Icon, Card, SectionTitle, Btn, Confirm, useApp, hasPerm,
+  fmtPctPlain, fmtSigned, fmtAgo, fmtDur, api, toast, Icon, Card, SectionTitle, Btn, Confirm, useApp, hasPerm,
   dormantInfo, LiveBadge, PageHead, Denied
 } from '../ui'
 
@@ -28,11 +28,21 @@ function StatusPage(){
   const ackRate=(alerts&&alerts.length)? acked.length/alerts.length*100 : null;
   const dormantCount=data.openBots.filter(b=>dormantInfo(b).dormant).length;
 
+  // Reconciliation: equity should equal walletBalance + sum(open bots' unrealized PnL) —
+  // both recorded from the same sync pass. A gap beyond a small tolerance means the stored
+  // bots table drifted from the account-level snapshot (e.g. a partial sync failure).
+  const openUpnl=data.openBots.reduce((a,b)=>a+(b.unrealizedPnl||0),0);
+  const computedEquity=live&&live.walletBalance!=null? live.walletBalance+openUpnl : null;
+  const reconcileDiff=computedEquity!=null? computedEquity-live.equity : null;
+  const reconcileTol=live? Math.max(1,Math.abs(live.equity)*0.001) : 1;
+  const reconcileOk=reconcileDiff==null||Math.abs(reconcileDiff)<=reconcileTol;
+
   const checks=[
     {label:'Exchange sync', state:connected>0?(syncErr?'warn':'ok'):'neutral', sub:connected>0?(syncErr?'Connected · last sync had errors':`${connected} exchange${connected===1?'':'s'} connected`):'No exchange connected'},
     {label:'Database', state:dbOk?'ok':'down', sub:dbOk?(lastSnap?`Last snapshot ${lastSnap.day}`:'Connected'):'Unreachable'},
     {label:'Positions', state:data.openBots.length?'ok':'neutral', sub:`${data.openBots.length} open · ${data.bots.length} tracked`},
     {label:'Bot activity', state:dormantCount>0?'warn':data.openBots.length?'ok':'neutral', sub:dormantCount>0?`${dormantCount} dormant (48h+ no change)`:'All positions active'},
+    ...(connected>0?[{label:'Balance reconciliation', state:reconcileOk?'ok':'warn', sub:reconcileDiff==null?'—':reconcileOk?'Matches exchange balance':`Off by ${fmtSigned(reconcileDiff)} vs. exchange`}]:[]),
     {label:'Alerting', state:alerts==null?'neutral':'ok', sub:alerts==null?'Checking…':`${unacked.length} pending acknowledgement`},
     ...(user.role==='admin'?[{label:'WhatsApp (TextMeBot)', state:openwa==null?'neutral':openwa.enabled?(openwa.hasApiKey?'ok':'warn'):'neutral', sub:openwa===undefined?'Checking…':openwa===null?'—':openwa.enabled?(openwa.hasApiKey?'Enabled & configured':'Enabled · no API key'):'Disabled (optional)'}]:[]),
   ];

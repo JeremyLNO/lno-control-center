@@ -62,6 +62,7 @@ export type Position = Bot;
 /** Live snapshot from the exchange-sync layer. */
 export interface LiveData {
   equity?: number | null;
+  walletBalance?: number | null;
   connected?: number;
   errors?: number;
   [k: string]: any;

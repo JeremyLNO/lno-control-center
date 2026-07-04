@@ -38,6 +38,10 @@ await db.query(`INSERT INTO bots (id,exchange,symbol,side,qty,entry,mark,unreali
     ('binance:ETHUSDT','binance','ETHUSDT','SHORT',5,3200,3100,500,15500,20,'open',3720,80,780,now()),
     ('binance:SOLUSDT','binance','SOLUSDT','LONG',100,145,150,500,15000,5,'open',100,900,1000,now() - interval '72 hours')
   ON CONFLICT (id) DO NOTHING`);
+// dev-only fixture: a "live" snapshot with a deliberate walletBalance/equity mismatch, to
+// exercise the balance-reconciliation warning locally (real Binance data would rarely drift).
+await db.query(`INSERT INTO app_config (key,value) VALUES ('live','{"equity":50000,"walletBalance":45000,"positions":3,"connected":1,"syncedAt":0}'::jsonb)
+  ON CONFLICT (key) DO NOTHING`);
 
 const MIME = { '.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.ico':'image/x-icon','.png':'image/png','.woff2':'font/woff2' };
 const DIST = new URL('../dist/', import.meta.url);

@@ -15,7 +15,7 @@ export async function syncExchanges() {
   );
   const existing = new Set((await query('SELECT id FROM bots')).rows.map(r => r.id));
   const seen = [];
-  let connected = 0, created = 0, updated = 0, positions = 0, totalEquity = 0, errors = 0;
+  let connected = 0, created = 0, updated = 0, positions = 0, totalEquity = 0, totalWallet = 0, errors = 0;
   const errorMsgs = [];
   // record the failure on the exchange (status + message) and collect it for the caller
   const fail = async (ex, msg) => {
@@ -29,7 +29,7 @@ export async function syncExchanges() {
     try { [pos, acct] = await Promise.all([getPositions(ex.api_key, secret), getAccountEquity(ex.api_key, secret)]); }
     catch (e) { await fail(ex, (e && e.code ? `[${e.code}] ` : '') + String((e && e.message) || e)); continue; }
 
-    connected++; totalEquity += acct.equity; positions += pos.length;
+    connected++; totalEquity += acct.equity; totalWallet += acct.walletBalance; positions += pos.length;
     await query('UPDATE exchanges SET status=$2, last_sync=$3, last_error=NULL WHERE id=$1', [ex.id, 'connected', Date.now()]);
 
     for (const p of pos) {
@@ -58,8 +58,12 @@ export async function syncExchanges() {
                       WHERE exchange='binance' AND status='open'`);
   }
 
-  // cache a "live" summary for the dashboard (current equity without recomputation)
-  const live = { equity: Math.round(totalEquity), positions, connected, syncedAt: Date.now() };
+  // cache a "live" summary for the dashboard (current equity without recomputation).
+  // walletBalance is kept alongside equity so the Status page can reconcile: equity should
+  // equal walletBalance + the sum of open bots' unrealized PnL (both stored from this same
+  // sync pass) — a mismatch beyond a small tolerance means the two drifted apart (e.g. a
+  // partial sync failure on one exchange in a multi-exchange setup).
+  const live = { equity: Math.round(totalEquity), walletBalance: Math.round(totalWallet), positions, connected, syncedAt: Date.now() };
   await query(`INSERT INTO app_config (key,value) VALUES ('live',$1::jsonb)
                ON CONFLICT (key) DO UPDATE SET value=$1::jsonb`, [JSON.stringify(live)]);
 
