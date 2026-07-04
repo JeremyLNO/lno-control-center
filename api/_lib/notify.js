@@ -6,11 +6,14 @@
 import { query } from './db.js';
 import { decrypt } from './crypto.js';
 import { DEFAULT_MATRIX, WA_ROLES } from './constants.js';
+import { reportAvailableText } from './notifyText.js';
 
 const TEXTMEBOT_URL = 'https://api.textmebot.com/send.php';
 
-// "new report" notice sent to opted-in shareholders (text-only — they download the PDF)
-export const REPORT_AVAILABLE = '📄 A new LNO report is available. Open the Control Center ▸ Reports to download it.';
+// "new report" notice sent to opted-in shareholders (text-only — they download the PDF).
+// A function of (lang) so notify() can render it in each recipient's own language —
+// pass it straight through, same as any other notify() message builder.
+export const REPORT_AVAILABLE = reportAvailableText;
 
 export async function getOpenWAConfig() {
   const { rows } = await query("SELECT value FROM app_config WHERE key='openwa'");
@@ -61,25 +64,28 @@ export async function rolesForType(cfg, type) {
 
 // Recipients for a message type = active opted-in users (with a phone) whose role is
 // enabled for that type in the matrix. The firm's single key sends to all of them.
-// Returns an array of phone strings, deduped by digits.
+// Returns an array of {phone, language}, deduped by phone digits.
 export async function getRecipientsForType(cfg, type) {
   const roles = await rolesForType(cfg, type);
   if (!roles.length) return [];
   const ph = roles.map((_, i) => `$${i + 1}`).join(',');
   const { rows } = await query(
-    `SELECT phone FROM users WHERE active=true AND notify=true AND phone IS NOT NULL AND phone <> ''
+    `SELECT phone, language FROM users WHERE active=true AND notify=true AND phone IS NOT NULL AND phone <> ''
        AND role IN (${ph})`, roles);
   const out = []; const seen = new Set();
   for (const r of rows) {
     const k = String(r.phone || '').replace(/[^0-9]/g, '');
     if (!k || seen.has(k)) continue;
-    seen.add(k); out.push(r.phone);
+    seen.add(k); out.push({ phone: r.phone, language: r.language || 'en' });
   }
   return out;
 }
 
 // Send a message of `type` to every role enabled for it in the matrix. Never throws.
-export async function notify(message, { type } = {}) {
+// `messageOrFn` is either a plain string (sent as-is to everyone) or a function of
+// (language) => string, called once per recipient so each gets it in their own
+// users.language — see api/_lib/notifyText.js for the builders.
+export async function notify(messageOrFn, { type } = {}) {
   try {
     const cfg = await getOpenWAConfig();
     if (!cfg.enabled) return { sent: 0, skipped: 'disabled' };
@@ -88,7 +94,10 @@ export async function notify(message, { type } = {}) {
     if (!apikey) return { sent: 0, skipped: 'no-apikey' };
     const tos = await getRecipientsForType(cfg, type);
     let sent = 0;
-    for (const phone of tos) { const r = await sendTextMeBot(phone, message, apikey); if (r.ok) sent++; }
+    for (const { phone, language } of tos) {
+      const message = typeof messageOrFn === 'function' ? messageOrFn(language) : messageOrFn;
+      const r = await sendTextMeBot(phone, message, apikey); if (r.ok) sent++;
+    }
     return { sent, total: tos.length };
   } catch (e) {
     return { sent: 0, error: String(e.message || e) };

@@ -1,10 +1,12 @@
 // Daily cron (Vercel Cron, see vercel.json): sync positions from connected exchanges,
 // record the equity snapshot, fire threshold alerts, and send the WhatsApp reports
 // (global + per-fund, grouped by fund with a colour emoji). Secured by CRON_SECRET or an admin JWT.
+// Every WhatsApp message is rendered per-recipient in their own users.language (see
+// api/_lib/notifyText.js) — notify() calls the builder once per recipient's language.
 import { riskMetrics } from '../_lib/metrics.js';
 import { buildPortfolio } from '../_lib/portfolio.js';
-import { colorToEmoji } from '../_lib/colors.js';
 import { getOpenWAConfig, notify, REPORT_AVAILABLE } from '../_lib/notify.js';
+import { reportText, breachAlertText, dormantAlertText } from '../_lib/notifyText.js';
 import { syncExchanges } from '../_lib/sync.js';
 import { recordDailyFundSnapshot } from '../_lib/employeeFund.js';
 import { buildMonthlyPdf } from '../_lib/report.js';
@@ -23,26 +25,12 @@ function authorized(req) {
 // shown in the UI and this alert agree on the same threshold.
 const DORMANT_HOURS = 48;
 
-const grp  = (n) => Math.round(Math.abs(n)).toLocaleString('en-US').replace(/,/g, ' ');
-const fmt  = (n) => (n >= 0 ? '+' : '-') + grp(n) + ' USDT';
-const fUSD = (n) => grp(n) + ' USDT';
-const fPct = (n) => (n >= 0 ? '+' : '-') + Math.abs(n).toFixed(1) + '%';
+const grp = (n) => Math.round(Math.abs(n)).toLocaleString('en-US').replace(/,/g, ' ');
+const fmt = (n) => (n >= 0 ? '+' : '-') + grp(n) + ' USDT';
 
 async function equitySeries() {
   const { rows } = await query('SELECT day, equity FROM equity_snapshots ORDER BY day ASC');
   return rows.map(r => ({ t: (r.day instanceof Date ? r.day.getTime() : new Date(r.day).getTime()), equity: Number(r.equity) }));
-}
-
-// WhatsApp report: global header, then open positions grouped under their fund (colour emoji).
-function reportText(title, port, period) {
-  let out = `*${title}*\n\nEquity ${fUSD(port.equity)}\nPnL ${period.label} ${fmt(period.pnl)} • ${fPct(period.pct)}`;
-  if (port.bots.length) out += `\nOpen PnL ${fmt(port.openPnl)} · Exposure ${fUSD(port.exposure)}`;
-  const groups = port.funds.filter(f => f.bots.length).concat(port.unassigned.bots.length ? [port.unassigned] : []);
-  for (const g of groups) {
-    out += `\n\n${g.id ? colorToEmoji(g.color) : '⚪'} *${g.name}*\nPnL ${fmt(g.uPnl)} · Exposure ${fUSD(g.notional)}`;
-    for (const b of g.bots) out += `\n  • ${b.symbol}${b.side ? ' ' + b.side : ''} ${fmt(Number(b.unrealized_pnl || 0))}`;
-  }
-  return out;
 }
 
 export default async function handler(req, res) {
@@ -66,27 +54,34 @@ export default async function handler(req, res) {
       [today, JSON.stringify({ sharpe: m.sharpe, sortino: m.sortino, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays })]);
     try { await recordDailyFundSnapshot(); } catch (e) { /* best-effort, doesn't block the rest of the cron */ }
 
-    // 3) threshold alerts (global portfolio): drawdown from history, daily PnL from the sync
+    // 3) threshold alerts (global portfolio): drawdown from history, daily PnL from the sync.
+    // Structured (not pre-formatted English) so breachAlertText() can render them per language;
+    // breachSummaries stays English — it's only ever stored in the admin-only alerts.summary column.
     const breaches = [];
+    const breachSummaries = [];
     const ddLimit = Math.abs(cfg.drawdownPct ?? 10);
     const pnlLimit = cfg.pnlDayThreshold ?? -5000;
-    if (m.maxDrawdownPct <= -ddLimit) breaches.push(`Portfolio: drawdown ${m.maxDrawdownPct.toFixed(1)}% (limit -${ddLimit}%)`);
-    if (port.pnlDay <= pnlLimit) breaches.push(`Portfolio: daily PnL ${fmt(port.pnlDay)} (limit ${fmt(pnlLimit)})`);
+    if (m.maxDrawdownPct <= -ddLimit) {
+      breaches.push({ kind: 'drawdown', pct: m.maxDrawdownPct, limit: ddLimit });
+      breachSummaries.push(`Portfolio: drawdown ${m.maxDrawdownPct.toFixed(1)}% (limit -${ddLimit}%)`);
+    }
+    if (port.pnlDay <= pnlLimit) {
+      breaches.push({ kind: 'pnlDay', pnl: port.pnlDay, limit: pnlLimit });
+      breachSummaries.push(`Portfolio: daily PnL ${fmt(port.pnlDay)} (limit ${fmt(pnlLimit)})`);
+    }
 
     const sent = [];
     if (breaches.length && cfg.enabled) {
       const code = Math.random().toString(36).slice(2, 6).toUpperCase();
-      await query('INSERT INTO alerts (code,summary) VALUES ($1,$2)', [code, breaches.join(' · ')]);
-      const msg = `🚨 LNO ALERT\n${breaches.join('\n')}\nEquity ${fUSD(port.equity)} · PnL day ${fmt(port.pnlDay)}\n\nReply *ACK ${code}* to acknowledge.`;
-      sent.push({ type: 'alert', code, ...(await notify(msg, { type: 'breach' })) });
+      await query('INSERT INTO alerts (code,summary) VALUES ($1,$2)', [code, breachSummaries.join(' · ')]);
+      sent.push({ type: 'alert', code, ...(await notify((lang) => breachAlertText(lang, breaches, port, code), { type: 'breach' })) });
     }
 
     // 3b) dormant bots: an open position whose side/qty/entry hasn't changed in DORMANT_HOURS
     const dormant = port.bots.filter(b => b.last_changed && (Date.now() - new Date(b.last_changed).getTime()) / 3600000 >= DORMANT_HOURS);
     if (dormant.length && cfg.enabled) {
-      const lines = dormant.map(b => `${b.symbol}${b.side ? ' ' + b.side : ''} — no activity in ${Math.round((Date.now() - new Date(b.last_changed).getTime()) / 3600000)}h`);
-      const msg = `🕒 LNO DORMANT BOT ALERT\n${lines.join('\n')}\n\nCheck whether the strategy behind ${dormant.length === 1 ? 'this position' : 'these positions'} is still running.`;
-      sent.push({ type: 'stale', ...(await notify(msg, { type: 'stale' })) });
+      const dormantData = dormant.map(b => ({ symbol: b.symbol, side: b.side, hours: Math.round((Date.now() - new Date(b.last_changed).getTime()) / 3600000) }));
+      sent.push({ type: 'stale', ...(await notify((lang) => dormantAlertText(lang, dormantData), { type: 'stale' })) });
     }
 
     // 4) reports — global + per-fund, grouped by fund
@@ -95,19 +90,16 @@ export default async function handler(req, res) {
     const pctOver = (d) => { const base = eqv[Math.max(0, eqv.length - 1 - d)] || 0; return base ? (pnlOver(d) / base) * 100 : 0; };
 
     if ((cfg.dailyReport ?? true) && cfg.enabled) {
-      const txt = reportText('📊 LNO DAILY REPORT', port, { pnl: port.pnlDay, pct: port.pnlPct, label: 'day' });
-      sent.push({ type: 'report', ...(await notify(txt, { type: 'daily' })) });
+      sent.push({ type: 'report', ...(await notify((lang) => reportText(lang, 'daily', port, { pnl: port.pnlDay, pct: port.pnlPct, labelKey: 'periodDay' }), { type: 'daily' })) });
     }
     const force = req.query?.force;
     const dt = new Date();
     if (cfg.enabled && (dt.getUTCDay() === 1 || force === 'weekly' || force === 'all')) {
-      const txt = reportText('📅 LNO WEEKLY REPORT', port, { pnl: pnlOver(7), pct: pctOver(7), label: '7d' });
-      sent.push({ type: 'weekly', ...(await notify(txt, { type: 'weekly' })) });
+      sent.push({ type: 'weekly', ...(await notify((lang) => reportText(lang, 'weekly', port, { pnl: pnlOver(7), pct: pctOver(7), labelKey: 'period7d' }), { type: 'weekly' })) });
     }
     if (cfg.enabled && (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all')) {
       const pnl30 = pnlOver(30);
-      const txt = reportText('🗓️ LNO MONTHLY REPORT', port, { pnl: pnl30, pct: pctOver(30), label: '30d' }) + '\n\nFull PDF: Control Center ▸ Reports';
-      sent.push({ type: 'monthly', ...(await notify(txt, { type: 'monthly' })) });
+      sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
       try {
         const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: today });
         try { await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5)', ['monthly', today, Math.round(port.equity), Math.round(pnl30), b64]); } catch (e) {}

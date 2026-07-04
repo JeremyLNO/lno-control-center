@@ -7,6 +7,7 @@ import { query } from './_lib/db.js';
 import { requireAdmin } from './_lib/auth.js';
 import { encrypt, decrypt, mask } from './_lib/crypto.js';
 import { sendTextMeBot, getApiKey } from './_lib/notify.js';
+import { welcomeText } from './_lib/notifyText.js';
 import { DEFAULT_MATRIX, WA_ROLES, WA_MSG_TYPES } from './_lib/constants.js';
 import { audit } from './_lib/audit.js';
 
@@ -86,12 +87,12 @@ export default async function handler(req, res) {
       if (!cfg.enabled) return res.status(400).json({ error: 'WhatsApp alerts are disabled' });
       // test goes to the requesting admin's OWN WhatsApp number (set in their profile),
       // sent via the firm's single TextMeBot account key.
-      const { rows } = await query('SELECT phone FROM users WHERE id=$1', [a.id]);
+      const { rows } = await query('SELECT phone, language FROM users WHERE id=$1', [a.id]);
       const phone = rows[0] && rows[0].phone;
       if (!phone) return res.status(400).json({ error: 'Add your WhatsApp number in your Profile first' });
       const apikey = getApiKey(cfg);
       if (!apikey) return res.status(400).json({ error: 'Set the TextMeBot API key first' });
-      const message = (req.body && req.body.message) || '🎉 Congratulations! You are now set up to receive LNO Control Center alerts on WhatsApp. ✅';
+      const message = (req.body && req.body.message) || welcomeText(rows[0] && rows[0].language);
       const r = await sendTextMeBot(phone, message, apikey);
       return res.status(r.ok ? 200 : 502).json(r);
     }

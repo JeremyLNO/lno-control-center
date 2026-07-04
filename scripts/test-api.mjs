@@ -118,7 +118,7 @@ ok('turning notifications ON (off -> on, phone + global key set) sends a welcome
 // "Send test to me" works with a phone + the global key; errors without a phone
 sentMessages.length = 0;
 r = await call(openwa, { method: 'POST', headers: authH, body: { action: 'test' } });
-ok('Send test delivers with phone + global key', r.status === 200 && r.body.ok === true && sentMessages.some(m => /Congratulations/i.test(m.text)), { status: r.status, body: r.body });
+ok('Send test delivers with phone + global key', r.status === 200 && r.body.ok === true && sentMessages.some(m => /Welcome to LNO Control Center/i.test(m.text)), { status: r.status, body: r.body });
 await call(profile, { method: 'PATCH', headers: authH, body: { phone: '' } });
 r = await call(openwa, { method: 'POST', headers: authH, body: { action: 'test' } });
 ok('Send test errors (400) when the admin has no phone', r.status === 400 && /number/i.test(r.body.error || ''), r.body);
@@ -140,6 +140,17 @@ ok('daily report uses the new format (bold title, USDT, PnL day • %)',
   daily.startsWith('*📊 LNO DAILY REPORT*') && /Equity [\d ]+ USDT/.test(daily) && /PnL day [+-][\d ]+ USDT • [+-][\d.]+%/.test(daily),
   daily.slice(0, 120));
 ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { method: 'POST' })).status === 401);
+
+// per-recipient localization: the same cron run renders the report in the RECIPIENT's own
+// users.language, not a single fixed locale — switch the admin to French and confirm.
+await call(profile, { method: 'PATCH', headers: authH, body: { language: 'fr' } });
+sentMessages.length = 0;
+await call(cronDaily, { method: 'POST', headers: authH });
+const dailyFr = sentMessages.find(m => /RAPPORT QUOTIDIEN LNO/i.test(m.text))?.text || '';
+ok('daily report renders in the recipient\'s own language (fr)',
+  dailyFr.startsWith('*📊 RAPPORT QUOTIDIEN LNO*') && /Equity [\d ]+ USDT/.test(dailyFr) && /PnL jour [+-][\d ]+ USDT • [+-][\d.]+%/.test(dailyFr),
+  dailyFr.slice(0, 120));
+await call(profile, { method: 'PATCH', headers: authH, body: { language: 'en' } });
 // every WhatsApp send is recorded in the admin-only message log
 r = await call(openwa, { method: 'GET', headers: authH, query: { log: '1' } });
 ok('admin WhatsApp log records sent messages', r.status === 200 && Array.isArray(r.body.log) && r.body.log.length >= 1 && typeof r.body.log[0].message === 'string', r.body.log && r.body.log.length);
@@ -148,7 +159,7 @@ ok('WhatsApp log resolves the recipient name from the phone', r.body.log.some(l 
 // global daily-PnL threshold breach (pnlDayThreshold set very high above) + weekly/monthly via force
 sentMessages.length = 0;
 r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'all' } });
-ok('global daily-PnL threshold breach detected', r.body.breaches.some(b => /daily PnL/i.test(b)), r.body.breaches);
+ok('global daily-PnL threshold breach detected', r.body.breaches.some(b => b.kind === 'pnlDay'), r.body.breaches);
 ok('weekly + monthly reports sent (force=all)', r.body.sent.some(s => s.type === 'weekly') && r.body.sent.some(s => s.type === 'monthly'), r.body.sent.map(s => s.type));
 // monthly PDF is built + archived (sent as a text summary; the PDF stays downloadable)
 const pdfPart = r.body.sent.find(s => s.type === 'monthly-pdf');

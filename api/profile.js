@@ -3,9 +3,8 @@
 import { query } from './_lib/db.js';
 import { requireAuth, sanitizeUser } from './_lib/auth.js';
 import { getOpenWAConfig, getApiKey, sendTextMeBot } from './_lib/notify.js';
+import { welcomeText } from './_lib/notifyText.js';
 import { SUPPORTED_LANGS } from './_lib/constants.js';
-
-const WELCOME = '🎉 Welcome to LNO Control Center alerts! Your WhatsApp is set up — you\'ll receive your alerts right here.';
 
 export default async function handler(req, res) {
   const a = requireAuth(req, res); if (!a) return;
@@ -29,7 +28,7 @@ export default async function handler(req, res) {
     // the firm's TextMeBot account key configured to actually deliver. Best-effort.
     const turnedOn = !before.notify && u.notify;
     if (turnedOn && u.phone) {
-      try { const apikey = getApiKey(await getOpenWAConfig()); if (apikey) await sendTextMeBot(u.phone, WELCOME, apikey); } catch (e) {}
+      try { const apikey = getApiKey(await getOpenWAConfig()); if (apikey) await sendTextMeBot(u.phone, welcomeText(u.language), apikey); } catch (e) {}
     }
     res.status(200).json({ user: sanitizeUser(u) });
   } catch (e) {

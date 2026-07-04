@@ -4,6 +4,7 @@ import { verifyPassword, signToken, hashPassword, requireAuth, sanitizeUser, pas
 import { verifyGoogleToken, ALLOWED_DOMAIN } from './_lib/google.js';
 import { ROLE_PERMS } from './_lib/constants.js';
 import { notify } from './_lib/notify.js';
+import { loginFailureText } from './_lib/notifyText.js';
 
 // record a successful sign-in: reset failures, stamp last login/seen/IP, append an audit row
 async function recordLogin(u, req, method) {
@@ -45,7 +46,7 @@ export default async function handler(req, res) {
             const up = await query('UPDATE users SET failed_attempts=failed_attempts+1 WHERE id=$1 RETURNING failed_attempts', [u.id]);
             const n = up.rows[0]?.failed_attempts || 0;
             // alert admins on the 3rd consecutive failure (spec: after 3 failed attempts)
-            if (n === 3) await notify(`⚠️ LNO Control Center — 3 failed login attempts for "${u.email}".`, { type: 'login' });
+            if (n === 3) await notify((lang) => loginFailureText(lang, u.email), { type: 'login' });
             // lock the account after MAX_ATTEMPTS (best-effort: column may be pre-migration)
             if (n >= MAX_ATTEMPTS) { try { await query(`UPDATE users SET locked_until = now() + interval '${LOCK_MINUTES} minutes' WHERE id=$1`, [u.id]); } catch (e) {} }
           }
