@@ -805,7 +805,7 @@ const IOS_APP_URL = '';
 
 function OnboardingCard(){
   const {user,navigate}=useApp();
-  const [dismissed,setDismissed]=useState(()=>PREF.get('onboarding_dismissed',false));
+  const [dismissed,setDismissed]=useState(()=>PREF.get('onboarding_dismissed_v2',false));
   const [iosDone,setIosDone]=useState(()=>PREF.get('onboarding_ios_done',false));
   if(dismissed) return null;
   const steps=[
@@ -818,7 +818,7 @@ function OnboardingCard(){
   return <Card className="p-4 mb-5 border border-gold/30 bg-gold/5">
     <div className="flex items-start justify-between gap-3">
       <div className="flex items-center gap-2"><Icon name="shield" className="w-4 h-4 text-gold"/><span className="text-sm font-semibold text-navy">Finish setting up your account</span><span className="text-[11px] text-slate-400">{left} step{left>1?'s':''} left</span></div>
-      <button onClick={()=>{setDismissed(true);PREF.set('onboarding_dismissed',true);}} className="text-slate-400 hover:text-navy text-xs flex items-center gap-1"><Icon name="x" className="w-3.5 h-3.5"/>Dismiss</button>
+      <button onClick={()=>{setDismissed(true);PREF.set('onboarding_dismissed_v2',true);}} className="text-slate-400 hover:text-navy text-xs flex items-center gap-1"><Icon name="x" className="w-3.5 h-3.5"/>Dismiss</button>
     </div>
     <div className="mt-3 grid sm:grid-cols-3 gap-2">
       {steps.map((s,i)=><button key={i} onClick={s.onClick} className="flex items-center gap-2 text-left p-2 rounded-lg border border-transparent hover:border-slate-200 hover:bg-white transition text-sm">
