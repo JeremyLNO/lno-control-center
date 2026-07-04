@@ -73,6 +73,7 @@ ok('create user without token -> 401', r.status === 401);
 // 7. create user (admin) — email is the identity, no username
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'nina.test@lno.company', role: 'operator' } });
 ok('admin creates user', r.status === 201 && r.body.user.email === 'nina.test@lno.company' && r.body.user.role === 'operator', r.body);
+const ninaId = r.body.user.id;
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'bad@gmail.com' } });
 ok('create user with non-@lno.company email rejected', r.status === 400, r.body);
 
@@ -88,12 +89,13 @@ let binancePositions = [
   { symbol: 'BTCUSDT', positionAmt: '0',     entryPrice: '0',    markPrice: '67000', unRealizedProfit: '0',  leverage: '10', notional: '0' },
 ];
 let binanceFail = false; // when true, Binance returns the classic -2015 (key/IP/permissions) error
+let walletBalance = '120000'; // mutable so tests can simulate a real capital addition between syncs
 globalThis.fetch = async (url, opts) => {
   const u = String(url);
   if (u.includes('fapi.binance.com')) { // signed Binance USDⓈ-M futures (read-only)
     if (binanceFail) return { ok: false, status: 401, json: async () => ({ code: -2015, msg: 'Invalid API-key, IP, or permissions for action.' }) };
     if (u.includes('/fapi/v2/positionRisk')) return { ok: true, status: 200, json: async () => binancePositions };
-    if (u.includes('/fapi/v2/account')) return { ok: true, status: 200, json: async () => ({ totalMarginBalance: '125000.50', totalWalletBalance: '120000', totalUnrealizedProfit: '5000.50', availableBalance: '90000' }) };
+    if (u.includes('/fapi/v2/account')) return { ok: true, status: 200, json: async () => ({ totalMarginBalance: '125000.50', totalWalletBalance: walletBalance, totalUnrealizedProfit: '5000.50', availableBalance: '90000' }) };
     return { ok: true, status: 200, json: async () => ({}) };
   }
   if (u.includes('textmebot.com')) { sentMessages.push({ text: new URL(u).searchParams.get('text') || '' }); return { ok: true, status: 200, text: async () => 'Success! Message Sent.' }; }
@@ -232,6 +234,40 @@ ok('the sync error is stored on the exchange (status=error + lastError)', !!exEr
 binanceFail = false;
 await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } }); // restore good state (clears lastError)
 ok('a successful re-sync clears the stored error', ((await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId) || {}).lastError == null);
+
+// ── Employee Fund: contributions are detected live from the synced wallet balance, never
+// auto-granted on hire, and only become a share once an admin assigns them to someone ──
+r = await call(funds, { method: 'GET', headers: authH, query: { employeeSummary: '1' } });
+ok('new user (nina) has NOT been auto-granted a share — no more auto-credit on hire', r.status === 200 && !r.body.employees.some(e => e.userId === ninaId) && r.body.notEnrolled.some(u => u.userId === ninaId), { employees: r.body.employees.map(e => e.userId), notEnrolled: r.body.notEnrolled.map(u => u.userId) });
+ok('no pending contribution yet (wallet balance unchanged across all syncs so far)', r.body.pendingContributions.length === 0, r.body.pendingContributions);
+
+// a normal trading swing (no real capital added) must NOT be mistaken for a contribution
+walletBalance = '120400'; // +400 — well under the $1000 detection band
+await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } });
+r = await call(funds, { method: 'GET', headers: authH, query: { employeeSummary: '1' } });
+ok('a sub-$1000 wallet swing is NOT flagged as a contribution', r.body.pendingContributions.length === 0, r.body.pendingContributions);
+
+// a real ~$1000 capital addition IS detected on the next sync, live, with no deposit/transfer API involved
+walletBalance = '121400'; // +1000 more on top of the prior 120400 baseline
+await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } });
+r = await call(funds, { method: 'GET', headers: authH, query: { employeeSummary: '1' } });
+ok('a real +1000 USDT wallet jump is detected as a pending contribution', r.body.pendingContributions.length === 1 && r.body.pendingContributions[0].amount === 1000, r.body.pendingContributions);
+const contribId = r.body.pendingContributions[0].id;
+
+ok('non-admin cannot assign a contribution', [401, 403].includes((await call(funds, { method: 'POST', body: { action: 'assignEmployeeContribution', contributionId: contribId, userId: ninaId } })).status));
+r = await call(funds, { method: 'POST', headers: authH, body: { action: 'assignEmployeeContribution', contributionId: contribId, userId: ninaId } });
+const ninaShare = r.body.employees.find(e => e.userId === ninaId);
+ok('admin assigns the detected contribution to a specific employee — that INITIATES their personal share', r.status === 200 && !!ninaShare && ninaShare.contributedAmount === 1000 && r.body.pendingContributions.length === 0, r.body);
+ok('assigning the same contribution twice is rejected (already assigned)', (await call(funds, { method: 'POST', headers: authH, body: { action: 'assignEmployeeContribution', contributionId: contribId, userId: ninaId } })).status === 400);
+
+// a second $1000 addition, assigned to the SAME employee, tops up rather than duplicating
+walletBalance = '122400'; // +1000 again
+await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } });
+r = await call(funds, { method: 'GET', headers: authH, query: { employeeSummary: '1' } });
+const contribId2 = r.body.pendingContributions[0].id;
+r = await call(funds, { method: 'POST', headers: authH, body: { action: 'assignEmployeeContribution', contributionId: contribId2, userId: ninaId } });
+const ninaShare2 = r.body.employees.find(e => e.userId === ninaId);
+ok('assigning a second contribution to the same employee tops up (2000 total), not a duplicate row', r.status === 200 && r.body.employees.filter(e => e.userId === ninaId).length === 1 && ninaShare2.contributedAmount === 2000, r.body.employees.filter(e => e.userId === ninaId));
 
 // ── Funds: global CRUD with colour + colour→emoji mapping ──
 r = await call(funds, { method: 'POST', headers: authH, body: { name: 'Growth Fund', color: '#3B82F6' } });

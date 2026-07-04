@@ -134,6 +134,20 @@ export async function migrate() {
     units DOUBLE PRECISION NOT NULL,
     joined_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
+  // A real, unexplained ~1000 USDT jump in the synced wallet balance (i.e. not accounted for
+  // by realized PnL/funding/commission over the same sync) — detected during syncExchanges(),
+  // queued here for an admin to assign to the specific employee it funds (see
+  // api/_lib/employeeFund.js detectFundContributions()/assignContribution()).
+  await ddl(`CREATE TABLE IF NOT EXISTS employee_fund_contributions (
+    id BIGSERIAL PRIMARY KEY,
+    detected_at TIMESTAMPTZ DEFAULT now(),
+    amount DOUBLE PRECISION NOT NULL DEFAULT 1000,
+    raw_delta DOUBLE PRECISION,
+    status TEXT NOT NULL DEFAULT 'pending',
+    assigned_user_id TEXT REFERENCES users(id),
+    assigned_at TIMESTAMPTZ,
+    assigned_by TEXT
+  )`);
   // one row per day — real recorded equity history (written by the daily cron)
   await ddl(`CREATE TABLE IF NOT EXISTS equity_snapshots (
     day DATE PRIMARY KEY,

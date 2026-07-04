@@ -4,14 +4,14 @@
 // resolves/creates its own (see employeeFund.js's getEmployeeFundId()).
 //   GET                    -> funds (+ bot counts, isEmployeeFund flag) (any auth)
 //   GET ?myEquity=1        -> the caller's Employee Fund share  (any auth)
-//   GET ?employeeSummary=1 -> Employee Fund totals + all shares (admin)
-//   POST   -> create a fund                     (admin)
+//   GET ?employeeSummary=1 -> Employee Fund totals + all shares + pending contributions (admin)
+//   POST   -> create a fund, OR {action:'assignEmployeeContribution', contributionId, userId} (admin)
 //   PATCH  -> rename / recolour / reorder       (admin)
 //   DELETE -> remove a fund (unassigns its bots)(admin)
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
 import { FUND_PALETTE } from './_lib/constants.js';
-import { getMyShare, getEmployeeFundSummary, peekEmployeeFundId } from './_lib/employeeFund.js';
+import { getMyShare, getEmployeeFundSummary, peekEmployeeFundId, assignContribution } from './_lib/employeeFund.js';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -46,6 +46,14 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const a = requireAdmin(req, res); if (!a) return;
+      if (body.action === 'assignEmployeeContribution') {
+        const contributionId = Number(body.contributionId);
+        const userId = String(body.userId || '');
+        if (!contributionId || !userId) return res.status(400).json({ error: 'contributionId and userId required' });
+        try { await assignContribution(contributionId, userId, a.id); }
+        catch (e) { return res.status(400).json({ error: String(e.message || e) }); }
+        return res.status(200).json(await getEmployeeFundSummary());
+      }
       const name = String(body.name || '').trim();
       if (!name) return res.status(400).json({ error: 'name required' });
       if (await nameTaken(name)) return res.status(409).json({ error: 'A fund with this name already exists' });

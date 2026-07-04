@@ -577,6 +577,14 @@ const en: Record<string, string> = {
   'equity.accountCountOne': '{n} account',
   'equity.accountCountMany': '{n} accounts',
   'equity.notInFundHint': "Existing Control Center accounts with an internal role that don't have a share yet — most often a deactivated account.",
+  'equity.pendingContributionsTitle': 'Pending Employee Fund Contributions',
+  'equity.pendingContributionsHint': "Detected additions to the fund not yet tied to a specific employee — assign each to the employee it's meant to fund.",
+  'equity.noPendingContributions': 'No pending contributions.',
+  'equity.detectedOn': 'Detected {date}',
+  'equity.assignTo': 'Assign to…',
+  'equity.assign': 'Assign',
+  'equity.assigning': 'Assigning…',
+  'equity.assignedOk': 'Assigned to {name}',
 };
 
 const fr: Record<string, string> = {
@@ -1124,6 +1132,14 @@ const fr: Record<string, string> = {
   'equity.accountCountOne': '{n} compte',
   'equity.accountCountMany': '{n} comptes',
   'equity.notInFundHint': "Comptes Control Center existants avec un rôle interne qui n'ont pas encore de part — le plus souvent un compte désactivé.",
+  'equity.pendingContributionsTitle': 'Apports en attente pour le fonds des salariés',
+  'equity.pendingContributionsHint': "Apports détectés sur le fonds non encore rattachés à un salarié — assignez chacun au salarié qu'il doit financer.",
+  'equity.noPendingContributions': 'Aucun apport en attente.',
+  'equity.detectedOn': 'Détecté le {date}',
+  'equity.assignTo': 'Assigner à…',
+  'equity.assign': 'Assigner',
+  'equity.assigning': 'Assignation…',
+  'equity.assignedOk': 'Assigné à {name}',
 };
 
 const de: Record<string, string> = {
@@ -1671,6 +1687,14 @@ const de: Record<string, string> = {
   'equity.accountCountOne': '{n} Konto',
   'equity.accountCountMany': '{n} Konten',
   'equity.notInFundHint': 'Bestehende Control-Center-Konten mit interner Rolle, die noch keinen Anteil haben — meist ein deaktiviertes Konto.',
+  'equity.pendingContributionsTitle': 'Ausstehende Einzahlungen in den Mitarbeiterfonds',
+  'equity.pendingContributionsHint': 'Erkannte Einzahlungen in den Fonds, die noch keinem Mitarbeiter zugeordnet sind — jede einem Mitarbeiter zuweisen.',
+  'equity.noPendingContributions': 'Keine ausstehenden Einzahlungen.',
+  'equity.detectedOn': 'Erkannt am {date}',
+  'equity.assignTo': 'Zuweisen an…',
+  'equity.assign': 'Zuweisen',
+  'equity.assigning': 'Wird zugewiesen…',
+  'equity.assignedOk': 'Zugewiesen an {name}',
 };
 
 const es: Record<string, string> = {
@@ -2218,6 +2242,14 @@ const es: Record<string, string> = {
   'equity.accountCountOne': '{n} cuenta',
   'equity.accountCountMany': '{n} cuentas',
   'equity.notInFundHint': 'Cuentas existentes de Control Center con un rol interno que aún no tienen una parte — normalmente una cuenta desactivada.',
+  'equity.pendingContributionsTitle': 'Aportes pendientes al fondo de empleados',
+  'equity.pendingContributionsHint': 'Aportes detectados en el fondo aún no vinculados a un empleado — asigna cada uno al empleado que debe financiar.',
+  'equity.noPendingContributions': 'No hay aportes pendientes.',
+  'equity.detectedOn': 'Detectado el {date}',
+  'equity.assignTo': 'Asignar a…',
+  'equity.assign': 'Asignar',
+  'equity.assigning': 'Asignando…',
+  'equity.assignedOk': 'Asignado a {name}',
 };
 
 export const translations: Record<Lang, Record<string, string>> = { en, fr, de, es };

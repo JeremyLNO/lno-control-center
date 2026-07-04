@@ -1,8 +1,8 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtPct, fmtDate, fmtSeniority, clsPnl, initialsOf, api, Icon, Card, SectionTitle,
-  StatusPill, KpiCard, useApp, PageHead, Denied, AreaChart, SortHeader, sortRows
+  fmtUSD, fmtSigned, fmtPct, fmtDate, fmtSeniority, clsPnl, initialsOf, api, toast, Icon, Card, SectionTitle,
+  StatusPill, KpiCard, Select, Btn, useApp, PageHead, Denied, AreaChart, SortHeader, sortRows
 } from '../ui'
 
 const EMP_GETTERS = {
@@ -23,12 +23,30 @@ function MyEquityPage(){
   const [summary,setSummary]=useState(null); const [summaryErr,setSummaryErr]=useState(null);
   const [empSort,setEmpSort]=useState({col:'joined',dir:'asc'});
   const [empQ,setEmpQ]=useState('');
+  const [assignSel,setAssignSel]=useState({});
+  const [assigning,setAssigning]=useState(null);
+  const loadMine=()=>api('funds?myEquity=1').then(setData).catch(e=>setDataErr(e.message||'Failed to load'));
+  const loadSummary=()=>api('funds?employeeSummary=1').then(setSummary).catch(e=>setSummaryErr(e.message||'Failed to load'));
   useEffect(()=>{
     if(user.role==='shareholder') return;
-    api('funds?myEquity=1').then(setData).catch(e=>setDataErr(e.message||'Failed to load'));
-    if(user.role==='admin') api('funds?employeeSummary=1').then(setSummary).catch(e=>setSummaryErr(e.message||'Failed to load'));
+    loadMine();
+    if(user.role==='admin') loadSummary();
   },[]);
   if(user.role==='shareholder') return <Denied/>;
+
+  async function doAssign(contributionId){
+    const userId=assignSel[contributionId]; if(!userId) return;
+    setAssigning(contributionId);
+    try{
+      const r=await api('funds',{method:'POST',body:{action:'assignEmployeeContribution',contributionId,userId}});
+      setSummary(r);
+      setAssignSel(s=>{ const n={...s}; delete n[contributionId]; return n; });
+      const target=(r.employees||[]).find(e=>e.userId===userId);
+      const name=target?((target.firstName||target.lastName)?`${target.firstName} ${target.lastName}`.trim():target.email):'';
+      toast.success(t('equity.assignedOk',{name}));
+      loadMine(); // in case the admin assigned it to themselves
+    }catch(e){ toast.error(e.message); } finally{ setAssigning(null); }
+  }
 
   const mine=data&&data.mine;
   const gainPct=mine&&mine.contributedAmount? ((mine.currentValue-mine.contributedAmount)/mine.contributedAmount)*100 : null;
@@ -38,6 +56,12 @@ function MyEquityPage(){
   let empRows=summary? summary.employees : [];
   if(empQ.trim()){ const q=empQ.trim().toLowerCase(); empRows=empRows.filter(e=>EMP_GETTERS.name(e).includes(q)||(e.email||'').toLowerCase().includes(q)); }
   empRows=summary? sortRows(empRows,empSort,EMP_GETTERS) : empRows;
+
+  const nameOf=(p)=> (p.firstName||p.lastName)? `${p.firstName} ${p.lastName}`.trim() : p.email;
+  const assigneeOpts=summary? [
+    ...summary.notEnrolled.map(u=>({value:u.userId,label:`${nameOf(u)} (${t('role.'+u.role)})`})),
+    ...summary.employees.map(e=>({value:e.userId,label:`${nameOf(e)} (${t('role.'+e.role)})`})),
+  ] : [];
 
   return <div className="max-w-3xl">
     <PageHead title={t('equity.title')} subtitle={t('equity.subtitle')}/>
@@ -65,6 +89,18 @@ function MyEquityPage(){
         </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('equity.notEnoughHistory')}</div>}
       </Card>
     </>}
+
+    {user.role==='admin'&&summary&&<Card className="p-5 mt-5">
+      <SectionTitle right={summary.pendingContributions.length>0&&<span className="text-[11px] text-slate-400">{summary.pendingContributions.length}</span>}>{t('equity.pendingContributionsTitle')}</SectionTitle>
+      <p className="text-xs text-slate-400 mb-3">{t('equity.pendingContributionsHint')}</p>
+      {summary.pendingContributions.length===0? <div className="text-sm text-slate-400 py-2">{t('equity.noPendingContributions')}</div>
+      : <div className="space-y-2">{summary.pendingContributions.map(c=><div key={c.id} className="flex items-center gap-2 flex-wrap text-sm border border-slate-100 rounded-lg p-2.5">
+          <span className="font-semibold text-navy tnum shrink-0">{fmtUSD(c.amount)}</span>
+          <span className="text-xs text-slate-400 shrink-0">{t('equity.detectedOn',{date:fmtDate(c.detectedAt)})}</span>
+          <div className="flex-1 min-w-[180px]"><Select value={assignSel[c.id]||''} onChange={v=>setAssignSel(s=>({...s,[c.id]:v}))} options={[{value:'',label:t('equity.assignTo')},...assigneeOpts]}/></div>
+          <Btn size="sm" onClick={()=>doAssign(c.id)} disabled={!assignSel[c.id]||assigning===c.id}>{assigning===c.id?t('equity.assigning'):t('equity.assign')}</Btn>
+        </div>)}</div>}
+    </Card>}
 
     {user.role==='admin'&&<Card className="p-5 mt-5">
       <div className="flex items-center justify-between mb-1 gap-3 flex-wrap"><SectionTitle>{t('equity.fundSummaryAdmin')}</SectionTitle>

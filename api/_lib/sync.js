@@ -5,6 +5,7 @@ import { query } from './db.js';
 import { decrypt } from './crypto.js';
 import { getPositions, getAccountEquity, getIncome } from './binance.js';
 import { migrate } from './schema.js';
+import { detectFundContributions } from './employeeFund.js';
 
 const INCOME_TYPES = new Set(['REALIZED_PNL', 'FUNDING_FEE', 'COMMISSION']);
 
@@ -16,8 +17,11 @@ export async function syncExchanges() {
     "SELECT * FROM exchanges WHERE lower(name)='binance' AND api_key <> '' AND api_secret_enc IS NOT NULL"
   );
   const existing = new Set((await query('SELECT id FROM bots')).rows.map(r => r.id));
+  // previous "live" snapshot — the baseline detectFundContributions() compares this sync's
+  // wallet balance against, to catch a real capital addition (see below).
+  const prevLive = (await query("SELECT value FROM app_config WHERE key='live'")).rows[0]?.value || null;
   const seen = [];
-  let connected = 0, created = 0, updated = 0, positions = 0, totalEquity = 0, totalWallet = 0, errors = 0;
+  let connected = 0, created = 0, updated = 0, positions = 0, totalEquity = 0, totalWallet = 0, errors = 0, deltaIncome = 0;
   const errorMsgs = [];
   // record the failure on the exchange (status + message) and collect it for the caller
   const fail = async (ex, msg) => {
@@ -65,6 +69,7 @@ export async function syncExchanges() {
            VALUES ($1,'binance',$2,$3,$4,to_timestamp($5/1000.0)) ON CONFLICT (tran_id) DO NOTHING`,
           [inc.tranId, inc.symbol, inc.incomeType, inc.income, inc.time]
         );
+        deltaIncome += Number(inc.income);
       }
     } catch (e) { /* best-effort — a failed income fetch shouldn't break the position sync */ }
   }
@@ -75,6 +80,14 @@ export async function syncExchanges() {
                                   WHERE exchange='binance' AND status='open' AND NOT (id = ANY($1))`, [seen]);
     else await query(`UPDATE bots SET status='closed', qty=0, unrealized_pnl=0, notional=0, last_seen=now()
                       WHERE exchange='binance' AND status='open'`);
+  }
+
+  // Employee Fund contribution detection — only meaningful sync-to-sync (both sides need a
+  // real previous wallet balance to diff against), so skip the very first sync ever and any
+  // sync following a fully-disconnected one (nothing to compare against).
+  if (connected > 0 && prevLive && prevLive.connected > 0 && typeof prevLive.walletBalance === 'number') {
+    try { await detectFundContributions({ prevWalletBalance: prevLive.walletBalance, newWalletBalance: totalWallet, deltaIncome }); }
+    catch (e) { /* best-effort — a detection failure shouldn't break the position sync */ }
   }
 
   // cache a "live" summary for the dashboard (current equity without recomputation).

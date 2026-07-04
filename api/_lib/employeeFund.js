@@ -1,17 +1,23 @@
-// Employee Fund: a special fund into which every employee (any internal role — admin,
-// operator, viewer; shareholders are external investors, not staff) is credited €1000 on
-// their hire date, then the fund trades like any other. Each employee owns a number of
-// "units" (mutual-fund-style unitisation) rather than a flat euro amount, so that someone
-// who joins after the fund has already gained or lost value gets a fair share of what
-// happens AFTER they join — not before. A brand-new fund starts at NAV/unit = 1 (par), so
-// backfilling every current employee at once (when this feature first ships) is exact, not
-// an approximation: nobody has an unfair head start because nothing has traded yet.
+// Employee Fund: a special fund holding real capital contributed on employees' behalf. Each
+// employee owns a number of "units" (mutual-fund-style unitisation) rather than a flat euro
+// amount, so that someone who joins after the fund has already gained or lost value gets a
+// fair share of what happens AFTER they join — not before.
+//
+// Contributions are no longer auto-credited on hire. Real capital lands in the synced Binance
+// account (however finance actually moves it there — a deposit or an internal transfer, it
+// doesn't matter which), syncExchanges() notices the wallet balance jumped by ~1000 USDT more
+// than realized PnL/funding/commission explain (detectFundContributions(), called from
+// api/_lib/sync.js), and queues it in employee_fund_contributions for an admin to assign to
+// the specific employee it's meant to fund (assignContribution()) — see api/funds.js.
 import { query } from './db.js';
 import { FUND_PALETTE } from './constants.js';
 import { migrate } from './schema.js';
 
 const GRANT_AMOUNT = 1000;
 const FUND_NAME = 'Employee Fund';
+// Slack allowed around each $1000 multiple when matching an unexplained wallet-balance jump —
+// covers rounding/dust and any small income not yet booked at the moment of comparison.
+const CONTRIBUTION_TOLERANCE = 50;
 
 // Read-only lookup — never creates anything. Used by plain reads (the ordinary GET /api/funds
 // list, the "can this be deleted" check) so a simple page load can never resurrect the fund
@@ -59,35 +65,69 @@ async function fundValue(fundId) {
   return { totalContributed, totalUnits, openUPnl, value, navPerUnit };
 }
 
-// Grants one employee their share at TODAY's NAV (used both for a brand-new hire and for the
-// one-time backfill of pre-existing employees — for the backfill, joinedAt is their real
-// account-creation date even though the grant is priced at today's NAV; see file header).
-export async function grantShare(userId, joinedAt) {
-  await migrate(); // same self-heal as getEmployeeFundSummary() — this can run on its own via users.js
+// Called once per sync (see api/_lib/sync.js) with the wallet-balance delta since the
+// previous sync and the realized PnL/funding/commission booked in between (already fetched in
+// that same pass). Any unexplained jump close to a multiple of $1000 is real capital the
+// account gained that trading doesn't explain — queued for an admin to assign. No Binance
+// deposit/transfer API involved; inferred purely from data already synced, so it needs no
+// extra API-key permissions beyond the existing read-only futures key.
+export async function detectFundContributions({ prevWalletBalance, newWalletBalance, deltaIncome }) {
+  await migrate();
+  const unexplained = (newWalletBalance - prevWalletBalance) - deltaIncome;
+  const units = Math.round(unexplained / GRANT_AMOUNT);
+  if (units < 1 || Math.abs(unexplained - units * GRANT_AMOUNT) > CONTRIBUTION_TOLERANCE) return 0;
+  for (let i = 0; i < units; i++) {
+    await query(`INSERT INTO employee_fund_contributions (amount,raw_delta) VALUES ($1,$2)`, [GRANT_AMOUNT, unexplained]);
+  }
+  return units;
+}
+
+// Contributions detected but not yet attributed to an employee — an admin picks who each one
+// funds (see assignContribution()).
+export async function listPendingContributions() {
+  await migrate();
+  const { rows } = await query(
+    `SELECT id, detected_at, amount, raw_delta FROM employee_fund_contributions WHERE status='pending' ORDER BY detected_at ASC`
+  );
+  return rows.map(r => ({ id: Number(r.id), detectedAt: r.detected_at, amount: Number(r.amount), rawDelta: Number(r.raw_delta) }));
+}
+
+// Attributes a detected contribution to one employee, priced at TODAY's NAV — same unitisation
+// as any other grant. If the employee already holds a share (a later top-up), this adds to
+// their existing units rather than replacing them.
+export async function assignContribution(contributionId, userId, adminId) {
+  await migrate();
+  const { rows } = await query(`SELECT * FROM employee_fund_contributions WHERE id=$1 AND status='pending'`, [contributionId]);
+  const contrib = rows[0];
+  if (!contrib) throw new Error('Contribution not found or already assigned');
+  const { rows: urows } = await query(`SELECT id, role FROM users WHERE id=$1`, [userId]);
+  const u = urows[0];
+  if (!u) throw new Error('User not found');
+  if (!['admin', 'operator', 'viewer'].includes(u.role)) throw new Error('Only internal (non-shareholder) accounts can hold an Employee Fund share');
+
   const fundId = await getEmployeeFundId();
   const { navPerUnit } = await fundValue(fundId);
-  const units = GRANT_AMOUNT / navPerUnit;
+  const amount = Number(contrib.amount);
+  const units = amount / navPerUnit;
+
+  const existing = await query('SELECT user_id FROM employee_shares WHERE user_id=$1', [userId]);
+  if (existing.rows[0]) {
+    await query('UPDATE employee_shares SET contributed_amount=contributed_amount+$2, units=units+$3 WHERE user_id=$1', [userId, amount, units]);
+  } else {
+    await query(
+      `INSERT INTO employee_shares (user_id,fund_id,contributed_amount,units,joined_at) VALUES ($1,$2,$3,$4,now())`,
+      [userId, fundId, amount, units]
+    );
+  }
   await query(
-    `INSERT INTO employee_shares (user_id,fund_id,contributed_amount,units,joined_at)
-     VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING`,
-    [userId, fundId, GRANT_AMOUNT, units, joinedAt]
+    `UPDATE employee_fund_contributions SET status='assigned', assigned_user_id=$2, assigned_at=now(), assigned_by=$3 WHERE id=$1`,
+    [contributionId, userId, adminId]
   );
+  return { userId, amount, units };
 }
 
-// Self-healing backfill: any active, internal-role (non-shareholder) user without a share
-// yet gets one. Safe to call on every read — a no-op once everyone has a row.
-export async function backfillEmployeeShares() {
-  const { rows } = await query(
-    `SELECT id, created_at FROM users
-     WHERE active=true AND role IN ('admin','operator','viewer')
-       AND id NOT IN (SELECT user_id FROM employee_shares)`
-  );
-  for (const u of rows) await grantShare(u.id, u.created_at);
-}
-
-// Internal-role accounts (any status) with no Employee Fund share — mostly deactivated
-// accounts that were never enrolled, surfaced so an admin can see the gap (not auto-fixed:
-// whether a deactivated employee should retroactively get a share is a judgement call).
+// Internal-role accounts with no Employee Fund share — the normal state for anyone whose
+// contribution hasn't been detected/assigned yet, not just deactivated stragglers.
 async function getNotEnrolled() {
   const { rows } = await query(
     `SELECT id, first_name, last_name, email, role, active, avatar FROM users
@@ -103,7 +143,6 @@ export async function getEmployeeFundSummary() {
   // exchange yet, those tables wouldn't exist and every query below would throw a raw SQL
   // error — silently surfaced as an endless "Loading…" by the frontend's catch(->null).
   await migrate();
-  await backfillEmployeeShares();
   const fundId = await getEmployeeFundId();
   const { totalContributed, totalUnits, openUPnl, value, navPerUnit } = await fundValue(fundId);
   const { rows } = await query(
@@ -118,7 +157,8 @@ export async function getEmployeeFundSummary() {
     currentValue: Number(r.units) * navPerUnit,
   }));
   const notEnrolled = await getNotEnrolled();
-  return { totalContributed, totalUnits, openUPnl, value, navPerUnit, employees, notEnrolled };
+  const pendingContributions = await listPendingContributions();
+  return { totalContributed, totalUnits, openUPnl, value, navPerUnit, employees, notEnrolled, pendingContributions };
 }
 
 // Monday (UTC, ISO week start) of the week containing `day` (a 'YYYY-MM-DD' string).
