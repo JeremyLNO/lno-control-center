@@ -9,25 +9,49 @@
 import { query } from './db.js';
 import { FUND_PALETTE } from './constants.js';
 
-export const EMPLOYEE_FUND_ID = 'employee-fund';
 const GRANT_AMOUNT = 1000;
+const FUND_NAME = 'Employee Fund';
 
-export async function ensureEmployeeFund() {
-  const { rows } = await query('SELECT id FROM funds WHERE id=$1', [EMPLOYEE_FUND_ID]);
-  if (rows.length) return;
+// Read-only lookup — never creates anything. Used by plain reads (the ordinary GET /api/funds
+// list, the "can this be deleted" check) so a simple page load can never resurrect the fund
+// right after an admin explicitly wipes it via Reset data.
+export async function peekEmployeeFundId() {
+  const cached = await query("SELECT value FROM app_config WHERE key='employeeFund'");
+  const cachedId = cached.rows[0] && cached.rows[0].value && cached.rows[0].value.fundId;
+  if (cachedId) {
+    const still = await query('SELECT 1 FROM funds WHERE id=$1', [cachedId]);
+    if (still.rows[0]) return cachedId;
+  }
+  const byName = await query('SELECT id FROM funds WHERE lower(name)=lower($1) LIMIT 1', [FUND_NAME]);
+  return byName.rows[0] ? byName.rows[0].id : null;
+}
+
+// The fund's id isn't a fixed constant: an admin may already have created a fund named
+// "Employee Fund" by hand before this feature ever ran. Resolving it dynamically (cached in
+// app_config once found/created) means we adopt that existing fund instead of creating a
+// second one with the same name — fund names must be unique (see funds.js). Only call this
+// from a path that's actually supposed to create the fund if it's missing (granting a share);
+// plain reads must use peekEmployeeFundId() instead.
+export async function getEmployeeFundId() {
+  const existing = await peekEmployeeFundId();
+  if (existing) return existing;
+  const id = 'ef' + Date.now();
   const next = await query('SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM funds');
   await query('INSERT INTO funds (id,name,color,bots,sort) VALUES ($1,$2,$3,$4::jsonb,$5)',
-    [EMPLOYEE_FUND_ID, 'Employee Fund', FUND_PALETTE[FUND_PALETTE.length - 1], '[]', next.rows[0].s]);
+    [id, FUND_NAME, FUND_PALETTE[FUND_PALETTE.length - 1], '[]', next.rows[0].s]);
+  await query(`INSERT INTO app_config (key,value) VALUES ('employeeFund',$1::jsonb)
+               ON CONFLICT (key) DO UPDATE SET value=$1::jsonb`, [JSON.stringify({ fundId: id })]);
+  return id;
 }
 
 // Fund's current mark-to-market value = total capital ever contributed + the open unrealized
 // PnL of bots assigned to it. This mirrors the same fidelity the rest of the app already uses
 // for fund-level reporting elsewhere (funds only ever show unrealized PnL, no realized-PnL
 // ledger exists per fund) — not a weaker version of it.
-async function fundValue() {
+async function fundValue(fundId) {
   const { rows: shareRows } = await query('SELECT COALESCE(SUM(contributed_amount),0) AS c, COALESCE(SUM(units),0) AS u FROM employee_shares');
   const totalContributed = Number(shareRows[0].c), totalUnits = Number(shareRows[0].u);
-  const { rows: botRows } = await query(`SELECT COALESCE(SUM(unrealized_pnl),0) AS p FROM bots WHERE fund_id=$1 AND status='open'`, [EMPLOYEE_FUND_ID]);
+  const { rows: botRows } = await query(`SELECT COALESCE(SUM(unrealized_pnl),0) AS p FROM bots WHERE fund_id=$1 AND status='open'`, [fundId]);
   const openUPnl = Number(botRows[0].p);
   const value = totalContributed + openUPnl;
   const navPerUnit = totalUnits > 0 ? value / totalUnits : 1;
@@ -38,20 +62,19 @@ async function fundValue() {
 // one-time backfill of pre-existing employees — for the backfill, joinedAt is their real
 // account-creation date even though the grant is priced at today's NAV; see file header).
 export async function grantShare(userId, joinedAt) {
-  await ensureEmployeeFund();
-  const { navPerUnit } = await fundValue();
+  const fundId = await getEmployeeFundId();
+  const { navPerUnit } = await fundValue(fundId);
   const units = GRANT_AMOUNT / navPerUnit;
   await query(
     `INSERT INTO employee_shares (user_id,fund_id,contributed_amount,units,joined_at)
      VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING`,
-    [userId, EMPLOYEE_FUND_ID, GRANT_AMOUNT, units, joinedAt]
+    [userId, fundId, GRANT_AMOUNT, units, joinedAt]
   );
 }
 
 // Self-healing backfill: any active, internal-role (non-shareholder) user without a share
 // yet gets one. Safe to call on every read — a no-op once everyone has a row.
 export async function backfillEmployeeShares() {
-  await ensureEmployeeFund();
   const { rows } = await query(
     `SELECT id, created_at FROM users
      WHERE active=true AND role IN ('admin','operator','viewer')
@@ -60,9 +83,22 @@ export async function backfillEmployeeShares() {
   for (const u of rows) await grantShare(u.id, u.created_at);
 }
 
+// Internal-role accounts (any status) with no Employee Fund share — mostly deactivated
+// accounts that were never enrolled, surfaced so an admin can see the gap (not auto-fixed:
+// whether a deactivated employee should retroactively get a share is a judgement call).
+async function getNotEnrolled() {
+  const { rows } = await query(
+    `SELECT id, first_name, last_name, email, role, active, avatar FROM users
+     WHERE role IN ('admin','operator','viewer') AND id NOT IN (SELECT user_id FROM employee_shares)
+     ORDER BY active DESC, created_at ASC`
+  );
+  return rows.map(r => ({ userId: r.id, firstName: r.first_name, lastName: r.last_name, email: r.email, role: r.role, active: r.active, avatar: r.avatar }));
+}
+
 export async function getEmployeeFundSummary() {
   await backfillEmployeeShares();
-  const { totalContributed, totalUnits, openUPnl, value, navPerUnit } = await fundValue();
+  const fundId = await getEmployeeFundId();
+  const { totalContributed, totalUnits, openUPnl, value, navPerUnit } = await fundValue(fundId);
   const { rows } = await query(
     `SELECT es.user_id, es.contributed_amount, es.units, es.joined_at,
             u.first_name, u.last_name, u.email, u.role, u.avatar
@@ -74,7 +110,8 @@ export async function getEmployeeFundSummary() {
     contributedAmount: Number(r.contributed_amount), units: Number(r.units), joinedAt: r.joined_at,
     currentValue: Number(r.units) * navPerUnit,
   }));
-  return { totalContributed, totalUnits, openUPnl, value, navPerUnit, employees };
+  const notEnrolled = await getNotEnrolled();
+  return { totalContributed, totalUnits, openUPnl, value, navPerUnit, employees, notEnrolled };
 }
 
 export async function getMyShare(userId) {

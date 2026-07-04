@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, fmtPct, fmtDate, fmtSeniority, clsPnl, initialsOf, api, Icon, Card, SectionTitle,
-  KpiCard, useApp, PageHead, Denied
+  StatusPill, KpiCard, useApp, PageHead, Denied
 } from '../ui'
 
 /* ============================================================
@@ -72,6 +72,19 @@ function MyEquityPage(){
           </tr>; })}</tbody>
         </table></div>
       </>}
+    </Card>}
+
+    {user.role==='admin'&&summary&&summary.notEnrolled.length>0&&<Card className="p-5 mt-5">
+      <SectionTitle right={<span className="text-[11px] text-slate-400">{summary.notEnrolled.length} account{summary.notEnrolled.length===1?'':'s'}</span>}>Not in the Employee Fund</SectionTitle>
+      <p className="text-xs text-slate-400 mb-3">Existing Control Center accounts with an internal role that don't have a share yet — most often a deactivated account.</p>
+      <div className="space-y-2">{summary.notEnrolled.map(u=><div key={u.userId} className="flex items-center justify-between text-sm">
+        <span className="flex items-center gap-2 min-w-0">
+          {u.avatar?<img src={u.avatar} className="w-6 h-6 rounded-full object-cover"/>:<span className="w-6 h-6 rounded-full bg-navy text-white grid place-items-center text-[10px] font-semibold shrink-0">{initialsOf(u)}</span>}
+          <span className="text-navy truncate">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.email}</span>
+          <span className="text-xs text-slate-400 capitalize shrink-0">{u.role}</span>
+        </span>
+        <StatusPill status={u.active?'active':'inactive'}/>
+      </div>)}</div>
     </Card>}
   </div>;
 }

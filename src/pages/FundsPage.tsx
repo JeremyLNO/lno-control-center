@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  FUND_PALETTE, EMPLOYEE_FUND_ID, api, toast, Icon, Card, Btn, Field, Input, Modal, Confirm, useApp, hasPerm,
+  FUND_PALETTE, api, toast, Icon, Card, Btn, Field, Input, Modal, Confirm, useApp, hasPerm,
   PageHead, Denied, EmptyState
 } from '../ui'
 
@@ -50,10 +50,11 @@ function FundsPage(){
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="w-4 h-4 rounded-full shrink-0" style={{background:f.color}}/>
             <span className="font-semibold text-navy truncate">{f.name}</span>
+            {f.isEmployeeFund&&<span className="text-[10px] font-medium text-gold bg-gold/15 px-1.5 py-0.5 rounded-full shrink-0">Employee Fund</span>}
           </div>
           {isAdmin&&<div className="flex gap-1 shrink-0">
             <button onClick={()=>setModal(f)} className="text-slate-400 hover:text-navy p-1" data-tip="Edit"><Icon name="pencil" className="w-4 h-4"/></button>
-            {f.id!==EMPLOYEE_FUND_ID&&<button onClick={()=>setDel(f)} className="text-slate-400 hover:text-danger p-1" data-tip="Delete"><Icon name="trash" className="w-4 h-4"/></button>}
+            {!f.isEmployeeFund&&<button onClick={()=>setDel(f)} className="text-slate-400 hover:text-danger p-1" data-tip="Delete"><Icon name="trash" className="w-4 h-4"/></button>}
           </div>}
         </div>
         <div className="flex items-center gap-4 mt-4 text-sm">
