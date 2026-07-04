@@ -206,6 +206,7 @@ const ICONS = {
   filetext:[['path','M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'],['path','M14 2v6h6M16 13H8M16 17H8M10 9H8']],
   database:[['path','M12 2C7.58 2 4 3.79 4 6s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4z'],['path','M4 6v6c0 2.21 3.58 4 8 4s8-1.79 8-4V6'],['path','M4 12v6c0 2.21 3.58 4 8 4s8-1.79 8-4v-6']],
   zap:[['path','M13 2L3 14h9l-1 8 10-12h-9l1-8z']],
+  smartphone:[['rect',7,2,10,20,2],['path','M11 18h2']],
 };
 function Icon({name,className='w-5 h-5',sw=2,fill='none'}: any){
   const items=ICONS[name]||[];
@@ -809,9 +810,9 @@ function OnboardingCard(){
   const [iosDone,setIosDone]=useState(()=>PREF.get('onboarding_ios_done',false));
   if(dismissed) return null;
   const steps=[
-    {label:'Add your WhatsApp phone number', done:!!(user.phone&&user.phone.trim()), onClick:()=>navigate('/profile')},
-    {label:'Add a profile photo', done:!!user.avatar, onClick:()=>navigate('/profile')},
-    {label:'Download the iOS app', done:iosDone, onClick:()=>{ if(IOS_APP_URL) window.open(IOS_APP_URL,'_blank','noopener'); setIosDone(true); PREF.set('onboarding_ios_done',true); }},
+    {label:'Add your WhatsApp phone number', icon:'msg', done:!!(user.phone&&user.phone.trim()), onClick:()=>navigate('/profile')},
+    {label:'Add a profile photo', icon:'camera', done:!!user.avatar, onClick:()=>navigate('/profile')},
+    {label:'Download the iOS app', icon:'smartphone', done:iosDone, onClick:()=>{ if(IOS_APP_URL) window.open(IOS_APP_URL,'_blank','noopener'); setIosDone(true); PREF.set('onboarding_ios_done',true); }},
   ];
   const left=steps.filter(s=>!s.done).length;
   if(!left) return null;
@@ -822,7 +823,9 @@ function OnboardingCard(){
     </div>
     <div className="mt-3 grid sm:grid-cols-3 gap-2">
       {steps.map((s,i)=><button key={i} onClick={s.onClick} className="flex items-center gap-2 text-left p-2 rounded-lg border border-transparent hover:border-slate-200 hover:bg-white transition text-sm">
-        <span className={`w-4 h-4 rounded-full grid place-items-center shrink-0 ${s.done?'bg-success text-white':'border border-slate-300'}`}>{s.done&&<Icon name="check" className="w-3 h-3"/>}</span>
+        <span className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${s.done?'bg-success text-white':'bg-white border border-slate-200 text-gold'}`}>
+          <Icon name={s.done?'check':s.icon} className="w-3.5 h-3.5"/>
+        </span>
         <span className={s.done?'text-slate-400 line-through':'text-navy'}>{s.label}</span>
       </button>)}
     </div>
