@@ -11,8 +11,8 @@ import {
 function BotsPage(){
   const {funds,user,data,reloadData}=useApp();
   const [syncing,setSyncing]=useState(false); const [del,setDel]=useState(null);
-  const [attr,setAttr]=useState(null);
-  useEffect(()=>{ if(user.role==='admin') api('bots?attribution=1').then(setAttr).catch(()=>setAttr({perSymbol:[],perFund:[]})); },[]);
+  const [attr,setAttr]=useState(null); const [costs,setCosts]=useState(null);
+  useEffect(()=>{ if(user.role!=='admin')return; api('bots?attribution=1').then(setAttr).catch(()=>setAttr({perSymbol:[],perFund:[]})); api('bots?costs=1').then(setCosts).catch(()=>setCosts({perSymbol:[],perFund:[]})); },[]);
   if(user.role!=='admin') return <Denied/>;
   const fundOpts=[{value:'',label:'— Unassigned —'},...funds.map(f=>({value:f.id,label:f.name}))];
 
@@ -117,6 +117,48 @@ function BotsPage(){
             <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(s.netPnl)}`}>{fmtSigned(s.netPnl)}</td>
             <td className="px-3 py-2.5 text-right tnum text-slate-500">{s.contributionPct==null?'—':fmtPctPlain(s.contributionPct)}</td>
           </tr>; })}</tbody>
+        </table></div>}
+    </Card>
+
+    {/* Funding & fee drag — same income_events ledger, FUNDING_FEE + COMMISSION types.
+        Shows the "cost" side that a profitable-looking strategy can still bleed through. */}
+    <Card className="overflow-hidden mt-5">
+      <div className="p-5 pb-0"><SectionTitle right={<span className="text-[11px] text-slate-400">funding + commissions</span>}>Funding &amp; Fee Drag by Fund</SectionTitle></div>
+      {costs===null? <div className="p-5 text-sm text-slate-400">Loading…</div>
+      : costs.perFund.length===0? <div className="p-5 text-sm text-slate-400">No funding or fee history recorded yet.</div>
+      : <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+            <th className="px-3 py-2.5 text-left font-medium">Fund</th>
+            <th className="px-3 py-2.5 text-right font-medium">Funding</th>
+            <th className="px-3 py-2.5 text-right font-medium">Commission</th>
+            <th className="px-3 py-2.5 text-right font-medium">Total Drag</th>
+          </tr></thead>
+          <tbody>{costs.perFund.map(f=>{ const fund=f.fundId&&funds.find(x=>x.id===f.fundId); return <tr key={f.fundId||'unassigned'} className="border-b border-slate-50">
+            <td className="px-3 py-2.5">{fund?fund.name:'Unassigned'}</td>
+            <td className={`px-3 py-2.5 text-right tnum ${clsPnl(f.funding)}`}>{fmtSigned(f.funding)}</td>
+            <td className="px-3 py-2.5 text-right tnum text-danger">{fmtSigned(f.commission)}</td>
+            <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(f.totalCost)}`}>{fmtSigned(f.totalCost)}</td>
+          </tr>; })}</tbody>
+        </table></div>}
+    </Card>
+
+    <Card className="overflow-hidden mt-5">
+      <div className="p-5 pb-0"><SectionTitle right={<span className="text-[11px] text-slate-400">funding + commissions</span>}>Funding &amp; Fee Drag by Bot</SectionTitle></div>
+      {costs===null? <div className="p-5 text-sm text-slate-400">Loading…</div>
+      : costs.perSymbol.length===0? <div className="p-5 text-sm text-slate-400">No funding or fee history recorded yet.</div>
+      : <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+            <th className="px-3 py-2.5 text-left font-medium">Symbol</th>
+            <th className="px-3 py-2.5 text-right font-medium">Funding</th>
+            <th className="px-3 py-2.5 text-right font-medium">Commission</th>
+            <th className="px-3 py-2.5 text-right font-medium">Total Drag</th>
+          </tr></thead>
+          <tbody>{costs.perSymbol.map(s=><tr key={s.symbol} className="border-b border-slate-50">
+            <td className="px-3 py-2.5 font-mono text-xs text-navy">{s.symbol}</td>
+            <td className={`px-3 py-2.5 text-right tnum ${clsPnl(s.funding)}`}>{fmtSigned(s.funding)}</td>
+            <td className="px-3 py-2.5 text-right tnum text-danger">{fmtSigned(s.commission)}</td>
+            <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(s.totalCost)}`}>{fmtSigned(s.totalCost)}</td>
+          </tr>)}</tbody>
         </table></div>}
     </Card>
 

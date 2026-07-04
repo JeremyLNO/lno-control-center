@@ -50,7 +50,12 @@ await db.query(`INSERT INTO income_events (tran_id,exchange,symbol,income_type,i
     ('fx3','binance','BTCUSDT','REALIZED_PNL',-150,now()-interval '3 days'),
     ('fx4','binance','ETHUSDT','REALIZED_PNL',-90,now()-interval '4 days'),
     ('fx5','binance','ETHUSDT','REALIZED_PNL',-60,now()-interval '2 days'),
-    ('fx6','binance','ETHUSDT','REALIZED_PNL',30,now()-interval '1 days')
+    ('fx6','binance','ETHUSDT','REALIZED_PNL',30,now()-interval '1 days'),
+    ('fx7','binance','BTCUSDT','FUNDING_FEE',-12.5,now()-interval '5 days'),
+    ('fx8','binance','BTCUSDT','FUNDING_FEE',-8.2,now()-interval '2 days'),
+    ('fx9','binance','BTCUSDT','COMMISSION',-6.1,now()-interval '5 days'),
+    ('fx10','binance','ETHUSDT','FUNDING_FEE',4.3,now()-interval '3 days'),
+    ('fx11','binance','ETHUSDT','COMMISSION',-3.4,now()-interval '3 days')
   ON CONFLICT (tran_id) DO NOTHING`);
 
 const MIME = { '.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.ico':'image/x-icon','.png':'image/png','.woff2':'font/woff2' };

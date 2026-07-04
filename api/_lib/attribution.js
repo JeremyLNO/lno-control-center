@@ -7,6 +7,11 @@
 // JSON not being able to represent Infinity for a "no losing trades yet" profit factor.
 import { query } from './db.js';
 
+async function fundBySymbolMap() {
+  const { rows: bots } = await query('SELECT symbol, fund_id FROM bots');
+  return new Map(bots.map(b => [b.symbol, b.fund_id]));
+}
+
 export async function getAttribution() {
   const { rows } = await query(
     `SELECT symbol, income FROM income_events WHERE income_type='REALIZED_PNL' AND symbol IS NOT NULL`
@@ -23,8 +28,7 @@ export async function getAttribution() {
   for (const s of bySymbol.values()) s.netPnl = s.grossProfit + s.grossLoss;
   const totalAbsNet = [...bySymbol.values()].reduce((a, s) => a + Math.abs(s.netPnl), 0);
 
-  const { rows: bots } = await query('SELECT symbol, fund_id FROM bots');
-  const fundBySymbol = new Map(bots.map(b => [b.symbol, b.fund_id]));
+  const fundBySymbol = await fundBySymbolMap();
 
   const perSymbol = [...bySymbol.values()].map(s => ({
     ...s, fundId: fundBySymbol.get(s.symbol) || null,
@@ -42,6 +46,38 @@ export async function getAttribution() {
   const perFund = [...byFund.values()]
     .map(f => ({ ...f, contributionPct: totalAbsNet ? (f.netPnl / totalAbsNet) * 100 : null }))
     .sort((a, b) => b.netPnl - a.netPnl);
+
+  return { perSymbol, perFund };
+}
+
+// Funding paid/received + trading commissions per symbol/fund — the "drag" on a strategy
+// that looks profitable on trading PnL alone. Both are typically a cost (negative income),
+// though funding can be positive when you're paid (perp funding flips with the crowd's bias).
+export async function getCostAnalytics() {
+  const { rows } = await query(
+    `SELECT symbol, income_type, income FROM income_events WHERE income_type IN ('FUNDING_FEE','COMMISSION') AND symbol IS NOT NULL`
+  );
+  const bySymbol = new Map();
+  for (const r of rows) {
+    const s = bySymbol.get(r.symbol) || { symbol: r.symbol, funding: 0, commission: 0 };
+    if (r.income_type === 'FUNDING_FEE') s.funding += Number(r.income); else s.commission += Number(r.income);
+    bySymbol.set(r.symbol, s);
+  }
+  for (const s of bySymbol.values()) s.totalCost = s.funding + s.commission;
+
+  const fundBySymbol = await fundBySymbolMap();
+  const perSymbol = [...bySymbol.values()]
+    .map(s => ({ ...s, fundId: fundBySymbol.get(s.symbol) || null }))
+    .sort((a, b) => a.totalCost - b.totalCost);
+
+  const byFund = new Map();
+  for (const s of perSymbol) {
+    const key = s.fundId || 'unassigned';
+    const f = byFund.get(key) || { fundId: s.fundId, funding: 0, commission: 0, totalCost: 0 };
+    f.funding += s.funding; f.commission += s.commission; f.totalCost += s.totalCost;
+    byFund.set(key, f);
+  }
+  const perFund = [...byFund.values()].sort((a, b) => a.totalCost - b.totalCost);
 
   return { perSymbol, perFund };
 }
