@@ -4,8 +4,12 @@
 import { query } from './db.js';
 import { decrypt } from './crypto.js';
 import { getPositions, getAccountEquity } from './binance.js';
+import { migrate } from './schema.js';
 
 export async function syncExchanges() {
+  // Idempotent — self-heals the schema (new bots columns, etc.) on the very next sync
+  // (manual "Sync now" or the daily cron) without needing the gated /api/init endpoint.
+  await migrate();
   const { rows: exs } = await query(
     "SELECT * FROM exchanges WHERE lower(name)='binance' AND api_key <> '' AND api_secret_enc IS NOT NULL"
   );
