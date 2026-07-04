@@ -30,12 +30,15 @@ export async function syncExchanges() {
 
     for (const p of pos) {
       const id = `binance:${p.symbol}`; seen.push(id);
+      const m = acct.margins[p.symbol] || {};
       await query(
-        `INSERT INTO bots (id,exchange,symbol,side,qty,entry,mark,unrealized_pnl,notional,leverage,status,first_seen,last_seen)
-         VALUES ($1,'binance',$2,$3,$4,$5,$6,$7,$8,$9,'open',now(),now())
+        `INSERT INTO bots (id,exchange,symbol,side,qty,entry,mark,unrealized_pnl,notional,leverage,status,first_seen,last_seen,liquidation_price,maint_margin,initial_margin)
+         VALUES ($1,'binance',$2,$3,$4,$5,$6,$7,$8,$9,'open',now(),now(),$10,$11,$12)
          ON CONFLICT (id) DO UPDATE SET
-           side=$3, qty=$4, entry=$5, mark=$6, unrealized_pnl=$7, notional=$8, leverage=$9, status='open', last_seen=now()`,
-        [id, p.symbol, p.side, p.qty, p.entry, p.mark, p.unrealizedPnl, p.notional, p.leverage]
+           side=$3, qty=$4, entry=$5, mark=$6, unrealized_pnl=$7, notional=$8, leverage=$9, status='open', last_seen=now(),
+           liquidation_price=$10, maint_margin=$11, initial_margin=$12`,
+        [id, p.symbol, p.side, p.qty, p.entry, p.mark, p.unrealizedPnl, p.notional, p.leverage,
+         p.liquidationPrice, m.maintMargin ?? null, m.initialMargin ?? null]
       );
       if (existing.has(id)) updated++; else created++;
     }

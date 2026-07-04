@@ -51,6 +51,9 @@ export interface Bot {
   unrealizedPnl?: number;
   notional?: number;
   leverage?: number;
+  liquidationPrice?: number | null;
+  maintMargin?: number | null;
+  initialMargin?: number | null;
   [k: string]: any;
 }
 export type Position = Bot;

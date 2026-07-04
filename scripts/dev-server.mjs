@@ -29,6 +29,16 @@ const handlers = {
 await handlers['/api/init']({ method: 'POST', headers: {}, query: {}, body: null },
   { _c: 200, status(c){this._c=c;return this;}, json(o){console.log('[init]', JSON.stringify(o)); return this;}, end(){return this;} });
 
+// dev-only fixture: a couple of open positions with liquidation/margin data, since there's
+// no way to exercise real Binance sync locally. Lets the risk UI (liq. distance / margin
+// usage) be checked visually without a live exchange key.
+await db.query(`INSERT INTO bots (id,exchange,symbol,side,qty,entry,mark,unrealized_pnl,notional,leverage,status,liquidation_price,maint_margin,initial_margin)
+  VALUES
+    ('binance:BTCUSDT','binance','BTCUSDT','LONG',0.5,60000,61000,500,30500,10,'open',55000,150,1600),
+    ('binance:ETHUSDT','binance','ETHUSDT','SHORT',5,3200,3100,500,15500,20,'open',3720,80,780),
+    ('binance:SOLUSDT','binance','SOLUSDT','LONG',100,145,150,500,15000,5,'open',100,900,1000)
+  ON CONFLICT (id) DO NOTHING`);
+
 const MIME = { '.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.ico':'image/x-icon','.png':'image/png','.woff2':'font/woff2' };
 const DIST = new URL('../dist/', import.meta.url);
 const send = (res, code, body, type) => { res.writeHead(code, { 'Content-Type': type || 'application/json' }); res.end(body); };

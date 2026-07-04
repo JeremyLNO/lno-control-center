@@ -67,6 +67,11 @@ export async function migrate() {
     first_seen TIMESTAMPTZ DEFAULT now(),
     last_seen TIMESTAMPTZ DEFAULT now()
   )`);
+  // liquidation price + maintenance/initial margin (from Binance positionRisk + account
+  // endpoints) — power the "distance to liquidation" / margin-health risk view.
+  await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS liquidation_price DOUBLE PRECISION`);
+  await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS maint_margin DOUBLE PRECISION`);
+  await query(`ALTER TABLE bots ADD COLUMN IF NOT EXISTS initial_margin DOUBLE PRECISION`);
   await query(`CREATE TABLE IF NOT EXISTS exchanges (
     id TEXT PRIMARY KEY,
     name TEXT,

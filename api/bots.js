@@ -12,6 +12,9 @@ const pub = (r) => ({
   side: r.side, qty: Number(r.qty), entry: Number(r.entry), mark: Number(r.mark),
   unrealizedPnl: Number(r.unrealized_pnl), notional: Number(r.notional), leverage: Number(r.leverage),
   status: r.status, firstSeen: r.first_seen, lastSeen: r.last_seen,
+  liquidationPrice: r.liquidation_price != null ? Number(r.liquidation_price) : null,
+  maintMargin: r.maint_margin != null ? Number(r.maint_margin) : null,
+  initialMargin: r.initial_margin != null ? Number(r.initial_margin) : null,
 });
 
 export default async function handler(req, res) {

@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, PREF, toast, Icon, Card, Btn, Badge, StatusPill,
-  Select, ExportMenu, useApp, hasPerm, fundOf, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag
+  Select, ExportMenu, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag
 } from '../ui'
 
 /* ============================================================
@@ -74,9 +74,11 @@ const POS_COLS=[
   {key:'uPnl',label:'Open PnL',align:'right',cell:b=><span className={`font-medium tnum ${clsPnl(b.unrealizedPnl)}`}>{fmtSigned(b.unrealizedPnl)}</span>,csv:b=>Number((b.unrealizedPnl||0).toFixed(2)),def:true},
   {key:'notional',label:'Notional',align:'right',cell:b=><span className="tnum text-slate-500">{fmtUSD(Math.abs(b.notional))}</span>,csv:b=>Math.round(Math.abs(b.notional)),def:true},
   {key:'leverage',label:'Lev',align:'right',cell:b=><span className="tnum text-slate-500">{b.leverage?b.leverage+'×':'—'}</span>,csv:b=>b.leverage,def:false},
+  {key:'liqDist',label:'Liq. Dist',align:'right',cell:b=>{ const {pct,level}=liqInfo(b); return pct==null? <span className="text-slate-300">—</span> : <span className={`tnum font-medium ${level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-500'}`}>{pct.toFixed(1)}%</span>; },csv:b=>{ const {pct}=liqInfo(b); return pct==null?'':Number(pct.toFixed(1)); },def:true},
+  {key:'marginUsage',label:'Margin Use',align:'right',cell:b=>{ const p=marginUsagePct(b); return p==null? <span className="text-slate-300">—</span> : <span className={`tnum ${p>80?'text-danger':p>50?'text-amber-600':'text-slate-500'}`}>{p.toFixed(0)}%</span>; },csv:b=>{ const p=marginUsagePct(b); return p==null?'':Number(p.toFixed(1)); },def:false},
   {key:'status',label:'Status',cell:b=><StatusPill status={b.status==='open'?'active':'inactive'}/>,csv:b=>b.status,def:true},
 ];
-const POS_GETTERS={symbol:r=>r.symbol,exchange:r=>r.exchange,fund:r=>r.fund?.name||'',side:r=>r.side,qty:r=>r.qty,entry:r=>r.entry,mark:r=>r.mark,uPnl:r=>r.unrealizedPnl,notional:r=>Math.abs(r.notional),leverage:r=>r.leverage,status:r=>r.status};
+const POS_GETTERS={symbol:r=>r.symbol,exchange:r=>r.exchange,fund:r=>r.fund?.name||'',side:r=>r.side,qty:r=>r.qty,entry:r=>r.entry,mark:r=>r.mark,uPnl:r=>r.unrealizedPnl,notional:r=>Math.abs(r.notional),leverage:r=>r.leverage,liqDist:r=>{const {pct}=liqInfo(r);return pct==null?Infinity:pct;},marginUsage:r=>marginUsagePct(r)??-1,status:r=>r.status};
 
 function TradesPage(){
   const {user,data,funds}=useApp();

@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, fmtAgo, api, Card, SectionTitle, Badge, Select, useApp,
-  hasPerm, fundOf, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag
+  hasPerm, fundOf, liqInfo, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag
 } from '../ui'
 
 /* ============================================================
@@ -60,11 +60,12 @@ function RealtimePage(){
             <SortHeader label="Open PnL" col="uPnl" sort={sort} setSort={setSort} align="right"/>
             <SortHeader label="Notional" col="notional" sort={sort} setSort={setSort} align="right"/>
             <SortHeader label="Lev" col="leverage" sort={sort} setSort={setSort} align="right"/>
+            <th className="px-3 py-2.5 text-right font-medium">Liq. Dist</th>
             <SortHeader label="Fund" col="fund" sort={sort} setSort={setSort}/>
             <th className="px-3 py-2.5 text-left font-medium">Exchange</th>
           </tr></thead>
           <tbody>
-            {rows.map(r=><tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+            {rows.map(r=>{ const {pct,level}=liqInfo(r); return <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
               <td className="px-3 py-2.5 font-mono text-xs text-navy">{r.symbol}</td>
               <td className="px-3 py-2.5"><SideTag side={r.side}/></td>
               <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtNum(r.qty,r.qty<1?4:2)}</td>
@@ -73,18 +74,20 @@ function RealtimePage(){
               <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(r.unrealizedPnl)}`}>{fmtSigned(r.unrealizedPnl)}</td>
               <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtUSD(Math.abs(r.notional))}</td>
               <td className="px-3 py-2.5 text-right tnum text-slate-500">{r.leverage?r.leverage+'×':'—'}</td>
+              <td className={`px-3 py-2.5 text-right tnum font-medium ${pct==null?'text-slate-300':level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-500'}`}>{pct==null?'—':pct.toFixed(1)+'%'}</td>
               <td className="px-3 py-2.5">{r.fund? <Badge color={r.fund.color} dot onClick={()=>setFund(r.fund.id)}>{r.fund.name}</Badge> : <span className="text-xs text-slate-400">Unassigned</span>}</td>
               <td className="px-3 py-2.5 text-slate-500 capitalize">{r.exchange}</td>
-            </tr>)}
+            </tr>; })}
           </tbody>
         </table>
       </div>
       {/* mobile cards */}
       <div className="md:hidden p-3 space-y-2">
-        {rows.map(r=><div key={r.id} className="border border-slate-100 rounded-lg p-3">
+        {rows.map(r=>{ const {pct,level}=liqInfo(r); return <div key={r.id} className="border border-slate-100 rounded-lg p-3">
           <div className="flex items-center justify-between"><div className="font-mono text-sm text-navy">{r.symbol} <SideTag side={r.side}/></div><span className={`font-medium tnum ${clsPnl(r.unrealizedPnl)}`}>{fmtSigned(r.unrealizedPnl)}</span></div>
           <div className="flex items-center justify-between mt-2 text-xs text-slate-500"><FundTag fund={r.fund}/><span className="tnum">{fmtUSD(Math.abs(r.notional))} · {r.leverage?r.leverage+'×':'—'}</span></div>
-        </div>)}
+          {pct!=null&&<div className={`mt-1.5 text-xs font-medium ${level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-400'}`}>Liq. distance {pct.toFixed(1)}%</div>}
+        </div>; })}
       </div>
       </>}
     </Card>

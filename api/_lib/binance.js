@@ -41,6 +41,7 @@ export async function getPositions(key, secret) {
     .map(p => {
       const amt = parseFloat(p.positionAmt);
       const mark = parseFloat(p.markPrice || '0');
+      const liq = parseFloat(p.liquidationPrice || '0');
       return {
         symbol: p.symbol,
         side: amt >= 0 ? 'LONG' : 'SHORT',
@@ -50,17 +51,25 @@ export async function getPositions(key, secret) {
         unrealizedPnl: parseFloat(p.unRealizedProfit || '0'),
         leverage: parseFloat(p.leverage || '0'),
         notional: Math.abs(parseFloat(p.notional != null ? p.notional : amt * mark)),
+        liquidationPrice: liq > 0 ? liq : null, // 0 = Binance reports "no liquidation price" (e.g. very low leverage)
       };
     });
 }
 
-// Account-level equity (margin balance = wallet + unrealized PnL).
+// Account-level equity (margin balance = wallet + unrealized PnL) + per-symbol maintenance/
+// initial margin (from the account endpoint's `positions[]`, keyed by symbol) — used to
+// compute each open position's margin usage alongside its liquidation distance.
 export async function getAccountEquity(key, secret) {
   const a = await signedGet('/fapi/v2/account', key, secret);
+  const margins = {};
+  for (const p of (Array.isArray(a.positions) ? a.positions : [])) {
+    margins[p.symbol] = { maintMargin: parseFloat(p.maintMargin || '0'), initialMargin: parseFloat(p.initialMargin || '0') };
+  }
   return {
     equity: parseFloat(a.totalMarginBalance || '0'),
     walletBalance: parseFloat(a.totalWalletBalance || '0'),
     unrealizedPnl: parseFloat(a.totalUnrealizedProfit || '0'),
     available: parseFloat(a.availableBalance || '0'),
+    margins,
   };
 }

@@ -397,6 +397,21 @@ function hasPerm(user: any, perm: string){ if(!user)return false; if(user.role==
 
 // helper: the fund a bot is assigned to (or undefined). Bots carry fundId; funds carry id+color.
 function fundOf(funds,bot){ return bot&&bot.fundId? funds.find(f=>f.id===bot.fundId) : undefined; }
+
+// Risk: % move from mark price to liquidation price, and a severity band for colouring.
+// null liquidationPrice means Binance reports no liquidation risk (e.g. very low leverage).
+function liqInfo(b){
+  if(b.liquidationPrice==null||!b.mark) return {pct:null,level:null};
+  const pct=Math.abs(b.mark-b.liquidationPrice)/b.mark*100;
+  return {pct, level: pct<10?'danger':pct<25?'warn':'ok'};
+}
+// Margin usage: maintenance margin required / initial margin currently posted (from Binance's
+// account endpoint). Higher = closer to a margin call. null when the account endpoint didn't
+// report either figure for this symbol.
+function marginUsagePct(b){
+  if(b.initialMargin==null||!b.initialMargin) return null;
+  return (b.maintMargin||0)/b.initialMargin*100;
+}
 function sliceByPeriod(series,period,custom){
   if(period==='all') return series;
   if(period==='custom'&&custom&&custom.start&&custom.end){
@@ -849,5 +864,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };
