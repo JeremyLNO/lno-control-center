@@ -6,6 +6,7 @@ import { buildPortfolio } from '../_lib/portfolio.js';
 import { colorToEmoji } from '../_lib/colors.js';
 import { getOpenWAConfig, notify, REPORT_AVAILABLE } from '../_lib/notify.js';
 import { syncExchanges } from '../_lib/sync.js';
+import { recordDailyFundSnapshot } from '../_lib/employeeFund.js';
 import { buildMonthlyPdf } from '../_lib/report.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
@@ -63,6 +64,7 @@ export default async function handler(req, res) {
     const m = riskMetrics(series);
     await query('UPDATE equity_snapshots SET metrics=$2::jsonb WHERE day=$1',
       [today, JSON.stringify({ sharpe: m.sharpe, sortino: m.sortino, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays })]);
+    try { await recordDailyFundSnapshot(); } catch (e) { /* best-effort, doesn't block the rest of the cron */ }
 
     // 3) threshold alerts (global portfolio): drawdown from history, daily PnL from the sync
     const breaches = [];

@@ -121,8 +121,52 @@ export async function getEmployeeFundSummary() {
   return { totalContributed, totalUnits, openUPnl, value, navPerUnit, employees, notEnrolled };
 }
 
+// Monday (UTC, ISO week start) of the week containing `day` (a 'YYYY-MM-DD' string).
+function mondayOf(day) {
+  const d = new Date(day + 'T00:00:00Z');
+  const dow = d.getUTCDay(); // 0=Sun..6=Sat
+  d.setUTCDate(d.getUTCDate() + (dow === 0 ? -6 : 1 - dow));
+  return d.toISOString().slice(0, 10);
+}
+
+// Records today's fund value/NAV — called once a day by the daily cron, same pattern as
+// equity_snapshots. Weekly points are derived from these daily rows (see getFundWeeklySeries),
+// not written directly, so "the position every Sunday" is just whichever day's row happens to
+// be the last one recorded in that ISO week.
+export async function recordDailyFundSnapshot() {
+  await migrate();
+  const fundId = await getEmployeeFundId();
+  const { value, totalContributed, navPerUnit } = await fundValue(fundId);
+  const today = new Date().toISOString().slice(0, 10);
+  await query(
+    `INSERT INTO employee_fund_snapshots (day,value,total_contributed,nav_per_unit) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (day) DO UPDATE SET value=$2, total_contributed=$3, nav_per_unit=$4`,
+    [today, value, totalContributed, navPerUnit]
+  );
+}
+
+// One point per ISO week (Mon-Sun): the last daily snapshot recorded within that week — i.e.
+// Sunday's value once the week is complete, or the latest day recorded so far for a week in
+// progress. Ordered ascending so the chart plots left-to-right.
+async function getFundWeeklySeries() {
+  const { rows } = await query('SELECT day, value, total_contributed, nav_per_unit FROM employee_fund_snapshots ORDER BY day ASC');
+  const byWeek = new Map();
+  for (const r of rows) {
+    const day = r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day);
+    byWeek.set(mondayOf(day), { week: mondayOf(day), value: Number(r.value), totalContributed: Number(r.total_contributed), navPerUnit: Number(r.nav_per_unit) });
+  }
+  return Array.from(byWeek.values()).sort((a, b) => a.week.localeCompare(b.week));
+}
+
 export async function getMyShare(userId) {
   const summary = await getEmployeeFundSummary();
   const mine = summary.employees.find(e => e.userId === userId) || null;
-  return { fund: { totalContributed: summary.totalContributed, value: summary.value, navPerUnit: summary.navPerUnit }, mine };
+  let weekly = [];
+  if (mine) {
+    const joinedDay = new Date(mine.joinedAt).toISOString().slice(0, 10);
+    weekly = (await getFundWeeklySeries())
+      .filter(w => w.week >= mondayOf(joinedDay))
+      .map(w => ({ t: new Date(w.week + 'T00:00:00Z').getTime(), equity: mine.units * w.navPerUnit }));
+  }
+  return { fund: { totalContributed: summary.totalContributed, value: summary.value, navPerUnit: summary.navPerUnit }, mine, weekly };
 }

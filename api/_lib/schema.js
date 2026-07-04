@@ -142,6 +142,16 @@ export async function migrate() {
     metrics JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
+  // one row per day — Employee Fund's mark-to-market value + NAV/unit (written by the daily
+  // cron, mirroring equity_snapshots); resampled to weekly points (one per ISO week, Mon-Sun)
+  // for the "My Equity" progression chart.
+  await ddl(`CREATE TABLE IF NOT EXISTS employee_fund_snapshots (
+    day DATE PRIMARY KEY,
+    value DOUBLE PRECISION NOT NULL,
+    total_contributed DOUBLE PRECISION NOT NULL DEFAULT 0,
+    nav_per_unit DOUBLE PRECISION NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`);
   // critical alerts that can be acknowledged (via WhatsApp reply or the UI)
   await ddl(`CREATE TABLE IF NOT EXISTS alerts (
     id BIGSERIAL PRIMARY KEY,

@@ -7,7 +7,7 @@ import {
 /* ============================================================
    SYSTEM STATUS
    ============================================================ */
-const PRICE_SYMBOLS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','DOGEUSDT','LINKUSDT','DOTUSDT','LTCUSDT','TRXUSDT','ATOMUSDT','NEARUSDT'];
+const PRICE_SYMBOLS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','DOGEUSDT','LINKUSDT','DOTUSDT','LTCUSDT','TRXUSDT','ATOMUSDT','NEARUSDT','HYPEUSDT'];
 // Live public crypto prices (Binance public REST, CORS-enabled, no key). Independent of the account.
 function PricesPage(){
   const {user}=useApp();
