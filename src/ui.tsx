@@ -71,12 +71,14 @@ function baseOf(sym){ if(!sym) return ''; const s=String(sym).toUpperCase(); for
 
 /* ============================================================
    API CLIENT — all accounts/config/secrets live in the backend DB.
-   The browser only holds a short-lived JWT (sessionStorage); no
-   passwords or secrets are ever stored client-side.
+   The browser only holds a short-lived JWT (localStorage, so the sign-in
+   survives closing the browser — the JWT's own 12h expiry is what ends the
+   session, not the tab lifetime); no passwords or secrets are ever stored
+   client-side.
    ============================================================ */
 const TOKEN_KEY='lno_token';
-const getToken=()=>{ try{ return sessionStorage.getItem(TOKEN_KEY)||null; }catch(e){ return null; } };
-const setToken=(t)=>{ try{ t? sessionStorage.setItem(TOKEN_KEY,t): sessionStorage.removeItem(TOKEN_KEY); }catch(e){} };
+const getToken=()=>{ try{ return localStorage.getItem(TOKEN_KEY)||null; }catch(e){ return null; } };
+const setToken=(t)=>{ try{ t? localStorage.setItem(TOKEN_KEY,t): localStorage.removeItem(TOKEN_KEY); }catch(e){} };
 
 // lightweight UI preference store (last period, dismissed cards, …) in localStorage
 const PREF={
