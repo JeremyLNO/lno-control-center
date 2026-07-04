@@ -18,7 +18,7 @@ const EMP_GETTERS = {
    MY EQUITY — an employee's share of the Employee Fund
    ============================================================ */
 function MyEquityPage(){
-  const {user}=useApp();
+  const {user,t}=useApp();
   const [data,setData]=useState(null); const [dataErr,setDataErr]=useState(null);
   const [summary,setSummary]=useState(null); const [summaryErr,setSummaryErr]=useState(null);
   const [empSort,setEmpSort]=useState({col:'joined',dir:'asc'});
@@ -111,7 +111,7 @@ function MyEquityPage(){
         <span className="flex items-center gap-2 min-w-0">
           {u.avatar?<img src={u.avatar} className="w-6 h-6 rounded-full object-cover"/>:<span className="w-6 h-6 rounded-full bg-navy text-white grid place-items-center text-[10px] font-semibold shrink-0">{initialsOf(u)}</span>}
           <span className="text-navy truncate">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.email}</span>
-          <span className="text-xs text-slate-400 capitalize shrink-0">{u.role}</span>
+          <span className="text-xs text-slate-400 shrink-0">{t('role.'+u.role)}</span>
         </span>
         <StatusPill status={u.active?'active':'inactive'}/>
       </div>)}</div>

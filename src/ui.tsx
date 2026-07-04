@@ -914,12 +914,13 @@ function OnboardingCard(){
 /* ============================================================
    PASSWORD POLICY (shared: Admin·Users + Profile)
    ============================================================ */
+// Labels are i18n keys (translated at each call site via t()), not display text.
 const PW_RULES: [string, (pw: string) => boolean][] = [
-  ['At least 12 characters', pw=>pw.length>=12],
-  ['An uppercase letter', pw=>/[A-Z]/.test(pw)],
-  ['A lowercase letter', pw=>/[a-z]/.test(pw)],
-  ['A number', pw=>/[0-9]/.test(pw)],
-  ['A special character', pw=>/[^A-Za-z0-9]/.test(pw)],
+  ['pw.len12', pw=>pw.length>=12],
+  ['pw.upper', pw=>/[A-Z]/.test(pw)],
+  ['pw.lower', pw=>/[a-z]/.test(pw)],
+  ['pw.digit', pw=>/[0-9]/.test(pw)],
+  ['pw.special', pw=>/[^A-Za-z0-9]/.test(pw)],
 ];
 const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.

@@ -9,7 +9,7 @@ import {
    PROFILE
    ============================================================ */
 function ProfilePage(){
-  const {user,setUser}=useApp();
+  const {user,setUser,t}=useApp();
   const [v,setV]=useState({firstName:user.firstName,lastName:user.lastName}); const [saved,setSaved]=useState(false);
   const [pw,setPw]=useState({cur:'',n1:'',n2:''}); const [pwMsg,setPwMsg]=useState(null);
   const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||'');
@@ -50,7 +50,7 @@ function ProfilePage(){
             <Field label="Confirm new"><Input type="password" value={pw.n2} onChange={e=>setPw({...pw,n2:e.target.value})}/></Field>
           </div>
           {pw.n1&&<div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 mt-2">
-            {PW_RULES.map(([label,fn])=>{ const ok=fn(pw.n1); return <div key={label} className={`flex items-center gap-1.5 text-[11px] ${ok?'text-success':'text-slate-400'}`}><Icon name={ok?'check':'x'} className="w-3 h-3 shrink-0"/>{label}</div>; })}
+            {PW_RULES.map(([label,fn])=>{ const ok=fn(pw.n1); return <div key={label} className={`flex items-center gap-1.5 text-[11px] ${ok?'text-success':'text-slate-400'}`}><Icon name={ok?'check':'x'} className="w-3 h-3 shrink-0"/>{t(label)}</div>; })}
           </div>}
           <div className="flex items-center gap-3 mt-4"><Btn onClick={changePw}>Update password</Btn>
             {pwMsg?.err&&<span className="text-sm text-danger">{pwMsg.err}</span>}{pwMsg?.ok&&<span className="text-sm text-success flex items-center gap-1"><Icon name="check" className="w-4 h-4"/>{pwMsg.ok}</span>}</div>
