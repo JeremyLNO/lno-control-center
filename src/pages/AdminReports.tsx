@@ -9,31 +9,31 @@ import {
    ADMIN — REPORT ARCHIVE
    ============================================================ */
 function AdminReports(){
-  const {user}=useApp();
+  const {user,t}=useApp();
   const isAdmin=user.role==='admin';
   const [reports,setReports]=useState(null); const [busy,setBusy]=useState(false); const [dl,setDl]=useState(null);
   const load=()=>api('snapshots?reports=list').then(r=>setReports(r.reports||[])).catch(()=>setReports([]));
   useEffect(()=>{ if(hasPerm(user,'view_reports')) load(); },[]);
   if(!hasPerm(user,'view_reports')) return <Denied/>;
-  async function generate(){ setBusy(true); try{ await api('snapshots',{method:'POST',body:{action:'generateReport'}}); toast.success('Report generated & archived'); load(); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
-  async function download(rep){ setDl(rep.id); try{ const r=await api('snapshots?report='+rep.id); downloadBlob(b64ToBlob(r.pdfBase64), r.filename||('lno-report-'+rep.periodLabel+'.pdf')); toast.success('Report downloaded'); }catch(e){ toast.error(e.message); } finally{ setDl(null); } }
+  async function generate(){ setBusy(true); try{ await api('snapshots',{method:'POST',body:{action:'generateReport'}}); toast.success(t('reports.generatedArchived')); load(); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
+  async function download(rep){ setDl(rep.id); try{ const r=await api('snapshots?report='+rep.id); downloadBlob(b64ToBlob(r.pdfBase64), r.filename||('lno-report-'+rep.periodLabel+'.pdf')); toast.success(t('reports.downloaded')); }catch(e){ toast.error(e.message); } finally{ setDl(null); } }
   return <div>
-    <PageHead title="Reports" subtitle={isAdmin?'Archive of generated portfolio reports — re-download any as PDF':'Download past portfolio reports'}
-      actions={isAdmin&&<Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?'Generating…':'Generate report now'}</Btn>}/>
-    {reports==null? <Card className="p-10 text-center text-slate-400 text-sm">Loading…</Card>
-    : reports.length===0? <Card className="p-10 text-center text-slate-400 text-sm"><Icon name="filetext" className="w-10 h-10 mx-auto text-slate-200 mb-2"/>{isAdmin?'No reports yet. Generate one now, or wait for the monthly cron (1st of each month).':'No reports available yet.'}</Card>
+    <PageHead title={t('reports.title')} subtitle={isAdmin?t('reports.subtitleAdmin'):t('reports.subtitleOther')}
+      actions={isAdmin&&<Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?t('reports.generating'):t('reports.generateNow')}</Btn>}/>
+    {reports==null? <Card className="p-10 text-center text-slate-400 text-sm">{t('common.loading')}</Card>
+    : reports.length===0? <Card className="p-10 text-center text-slate-400 text-sm"><Icon name="filetext" className="w-10 h-10 mx-auto text-slate-200 mb-2"/>{isAdmin?t('reports.noReportsAdmin'):t('reports.noReportsOther')}</Card>
     : <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
         <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-          <th className="px-4 py-2.5 text-left font-medium">Kind</th>
-          <th className="px-4 py-2.5 text-left font-medium">Period</th>
-          <th className="px-4 py-2.5 text-right font-medium">Equity</th>
-          <th className="px-4 py-2.5 text-right font-medium">PnL 30d</th>
-          <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Generated</th>
+          <th className="px-4 py-2.5 text-left font-medium">{t('reports.kind')}</th>
+          <th className="px-4 py-2.5 text-left font-medium">{t('reports.period')}</th>
+          <th className="px-4 py-2.5 text-right font-medium">{t('activity.equity')}</th>
+          <th className="px-4 py-2.5 text-right font-medium">{t('reports.pnl30d')}</th>
+          <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">{t('reports.generated')}</th>
           <th className="px-4 py-2.5"></th>
         </tr></thead>
         <tbody>
           {reports.map(r=><tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
-            <td className="px-4 py-2.5 capitalize"><span className="inline-flex items-center gap-1.5"><Icon name="filetext" className="w-4 h-4 text-gold"/>{r.kind}</span></td>
+            <td className="px-4 py-2.5"><span className="inline-flex items-center gap-1.5"><Icon name="filetext" className="w-4 h-4 text-gold"/>{t('reports.kind'+r.kind.charAt(0).toUpperCase()+r.kind.slice(1))}</span></td>
             <td className="px-4 py-2.5 font-mono text-xs">{r.periodLabel}</td>
             <td className="px-4 py-2.5 text-right tnum">{fmtUSD(r.equity)}</td>
             <td className={`px-4 py-2.5 text-right tnum ${clsPnl(r.pnl)}`}>{fmtSigned(r.pnl)}</td>

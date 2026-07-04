@@ -40,54 +40,54 @@ function MyEquityPage(){
   empRows=summary? sortRows(empRows,empSort,EMP_GETTERS) : empRows;
 
   return <div className="max-w-3xl">
-    <PageHead title="My Equity" subtitle="Your share of the Employee Fund"/>
+    <PageHead title={t('equity.title')} subtitle={t('equity.subtitle')}/>
 
-    {dataErr? <Card className="p-8 text-center text-danger text-sm">Couldn't load your Employee Fund share: {dataErr}</Card>
-    : data===null? <Card className="p-8 text-center text-slate-400">Loading…</Card>
-    : !mine? <Card className="p-8 text-center text-slate-400">Your Employee Fund share hasn't been set up yet — check back soon, or ask an admin.</Card>
+    {dataErr? <Card className="p-8 text-center text-danger text-sm">{t('equity.loadErr',{err:dataErr})}</Card>
+    : data===null? <Card className="p-8 text-center text-slate-400">{t('common.loading')}</Card>
+    : !mine? <Card className="p-8 text-center text-slate-400">{t('equity.notSetUp')}</Card>
     : <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        <KpiCard label="Current Value" value={fmtUSD(mine.currentValue)} icon="dollar"/>
-        <KpiCard label="Contributed" value={fmtUSD(mine.contributedAmount)}/>
-        <KpiCard label="Gain" value={<span className={clsPnl(gainPct)}>{gainPct==null?'—':fmtPct(gainPct)}</span>}/>
-        <KpiCard label="Member Since" value={fmtDate(mine.joinedAt)} icon="clock"/>
+        <KpiCard label={t('equity.currentValue')} value={fmtUSD(mine.currentValue)} icon="dollar"/>
+        <KpiCard label={t('equity.contributed')} value={fmtUSD(mine.contributedAmount)}/>
+        <KpiCard label={t('equity.gain')} value={<span className={clsPnl(gainPct)}>{gainPct==null?'—':fmtPct(gainPct)}</span>}/>
+        <KpiCard label={t('equity.memberSince')} value={fmtDate(mine.joinedAt)} icon="clock"/>
       </div>
       <Card className="p-5">
-        <SectionTitle>How this works</SectionTitle>
-        <p className="text-sm text-slate-600">You were credited {fmtUSD(mine.contributedAmount)} in the Employee Fund on your join date. The fund then trades like any other — your value grows or shrinks in proportion to your share, currently {fmtUSD(data.fund.value)} in total across everyone in the fund.</p>
+        <SectionTitle>{t('equity.howItWorks')}</SectionTitle>
+        <p className="text-sm text-slate-600">{t('equity.howItWorksBody',{amount:fmtUSD(mine.contributedAmount),total:fmtUSD(data.fund.value)})}</p>
       </Card>
 
       <Card className="p-5 mt-5">
-        <SectionTitle right={weekly&&weekly.length>1&&<span className={`text-sm font-semibold ${clsPnl(weekly[weekly.length-1].equity-weekly[0].equity)}`}>{fmtSigned(weekly[weekly.length-1].equity-weekly[0].equity)}</span>}>Equity Progression (weekly)</SectionTitle>
+        <SectionTitle right={weekly&&weekly.length>1&&<span className={`text-sm font-semibold ${clsPnl(weekly[weekly.length-1].equity-weekly[0].equity)}`}>{fmtSigned(weekly[weekly.length-1].equity-weekly[0].equity)}</span>}>{t('equity.progressionWeekly')}</SectionTitle>
         {weekly&&weekly.length>1? <>
           <AreaChart data={weekly} positive={weeklyPositive} resetKey="my-equity-weekly"/>
           <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{fmtDate(weekly[0].t)}</span><span>{fmtDate(weekly[weekly.length-1].t)}</span></div>
-        </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">Not enough weekly history yet — a snapshot of your share is recorded every day; check back in a couple of weeks.</div>}
+        </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('equity.notEnoughHistory')}</div>}
       </Card>
     </>}
 
     {user.role==='admin'&&<Card className="p-5 mt-5">
-      <div className="flex items-center justify-between mb-1 gap-3 flex-wrap"><SectionTitle>Fund Summary (admin)</SectionTitle>
-        {summary&&<div className="relative w-56"><Icon name="search" className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/><input value={empQ} onChange={e=>setEmpQ(e.target.value)} placeholder="Search employee…" className="w-full bg-slate-100 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"/></div>}
+      <div className="flex items-center justify-between mb-1 gap-3 flex-wrap"><SectionTitle>{t('equity.fundSummaryAdmin')}</SectionTitle>
+        {summary&&<div className="relative w-56"><Icon name="search" className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/><input value={empQ} onChange={e=>setEmpQ(e.target.value)} placeholder={t('equity.searchEmployee')} className="w-full bg-slate-100 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"/></div>}
       </div>
-      {summaryErr? <div className="text-sm text-danger">Couldn't load the fund summary: {summaryErr}</div>
-      : summary===null? <div className="text-sm text-slate-400">Loading…</div>
+      {summaryErr? <div className="text-sm text-danger">{t('equity.summaryLoadErr',{err:summaryErr})}</div>
+      : summary===null? <div className="text-sm text-slate-400">{t('common.loading')}</div>
       : <>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">Total Value</div><div className="text-lg font-bold text-navy mt-0.5">{fmtUSD(summary.value)}</div></div>
-          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">Total Contributed</div><div className="text-lg font-bold text-navy mt-0.5">{fmtUSD(summary.totalContributed)}</div></div>
-          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">Open PnL</div><div className={`text-lg font-bold mt-0.5 ${clsPnl(summary.openUPnl)}`}>{fmtSigned(summary.openUPnl)}</div></div>
-          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">NAV / Unit</div><div className="text-lg font-bold text-navy mt-0.5">{summary.navPerUnit.toFixed(4)}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">{t('equity.totalValue')}</div><div className="text-lg font-bold text-navy mt-0.5">{fmtUSD(summary.value)}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">{t('equity.totalContributed')}</div><div className="text-lg font-bold text-navy mt-0.5">{fmtUSD(summary.totalContributed)}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">{t('activity.openPnl')}</div><div className={`text-lg font-bold mt-0.5 ${clsPnl(summary.openUPnl)}`}>{fmtSigned(summary.openUPnl)}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">{t('equity.navPerUnit')}</div><div className="text-lg font-bold text-navy mt-0.5">{summary.navPerUnit.toFixed(4)}</div></div>
         </div>
-        {empRows.length===0? <div className="text-sm text-slate-400 py-4 text-center">No employees match “{empQ}”.</div>
+        {empRows.length===0? <div className="text-sm text-slate-400 py-4 text-center">{t('equity.noEmployeesMatch',{q:empQ})}</div>
         : <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-            <SortHeader label="Employee" col="name" sort={empSort} setSort={setEmpSort}/>
-            <SortHeader label="Contributed" col="contributed" sort={empSort} setSort={setEmpSort} align="right"/>
-            <SortHeader label="Current Value" col="currentValue" sort={empSort} setSort={setEmpSort} align="right"/>
-            <SortHeader label="Gain" col="gain" sort={empSort} setSort={setEmpSort} align="right"/>
-            <SortHeader label="Joined" col="joined" sort={empSort} setSort={setEmpSort}/>
-            <SortHeader label="Seniority" col="seniority" sort={empSort} setSort={setEmpSort} align="right"/>
+            <SortHeader label={t('equity.employee')} col="name" sort={empSort} setSort={setEmpSort}/>
+            <SortHeader label={t('equity.contributed')} col="contributed" sort={empSort} setSort={setEmpSort} align="right"/>
+            <SortHeader label={t('equity.currentValue')} col="currentValue" sort={empSort} setSort={setEmpSort} align="right"/>
+            <SortHeader label={t('equity.gain')} col="gain" sort={empSort} setSort={setEmpSort} align="right"/>
+            <SortHeader label={t('equity.joined')} col="joined" sort={empSort} setSort={setEmpSort}/>
+            <SortHeader label={t('equity.seniority')} col="seniority" sort={empSort} setSort={setEmpSort} align="right"/>
           </tr></thead>
           <tbody>{empRows.map(e=>{ const g=e.contributedAmount? ((e.currentValue-e.contributedAmount)/e.contributedAmount)*100 : null; return <tr key={e.userId} className="border-b border-slate-50">
             <td className="px-3 py-2.5"><span className="flex items-center gap-2">
@@ -105,8 +105,8 @@ function MyEquityPage(){
     </Card>}
 
     {user.role==='admin'&&summary&&summary.notEnrolled.length>0&&<Card className="p-5 mt-5">
-      <SectionTitle right={<span className="text-[11px] text-slate-400">{summary.notEnrolled.length} account{summary.notEnrolled.length===1?'':'s'}</span>}>Not in the Employee Fund</SectionTitle>
-      <p className="text-xs text-slate-400 mb-3">Existing Control Center accounts with an internal role that don't have a share yet — most often a deactivated account.</p>
+      <SectionTitle right={<span className="text-[11px] text-slate-400">{t(summary.notEnrolled.length===1?'equity.accountCountOne':'equity.accountCountMany',{n:summary.notEnrolled.length})}</span>}>{t('equity.notInFund')}</SectionTitle>
+      <p className="text-xs text-slate-400 mb-3">{t('equity.notInFundHint')}</p>
       <div className="space-y-2">{summary.notEnrolled.map(u=><div key={u.userId} className="flex items-center justify-between text-sm">
         <span className="flex items-center gap-2 min-w-0">
           {u.avatar?<img src={u.avatar} className="w-6 h-6 rounded-full object-cover"/>:<span className="w-6 h-6 rounded-full bg-navy text-white grid place-items-center text-[10px] font-semibold shrink-0">{initialsOf(u)}</span>}
