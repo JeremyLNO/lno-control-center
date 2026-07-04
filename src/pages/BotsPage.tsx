@@ -1,8 +1,8 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtNum, clsPnl, fmtAgo, api, toast, Icon, Card, SectionTitle, Btn, StatusPill,
-  Select, Confirm, useApp, PageHead, Denied, EmptyState, SideTag
+  fmtUSD, fmtSigned, fmtNum, fmtPctPlain, clsPnl, fmtAgo, api, toast, Icon, Card, SectionTitle, Btn, StatusPill,
+  Select, Confirm, useApp, fundOf, attrStats, PageHead, Denied, EmptyState, SideTag
 } from '../ui'
 
 /* ============================================================
@@ -11,6 +11,8 @@ import {
 function BotsPage(){
   const {funds,user,data,reloadData}=useApp();
   const [syncing,setSyncing]=useState(false); const [del,setDel]=useState(null);
+  const [attr,setAttr]=useState(null);
+  useEffect(()=>{ if(user.role==='admin') api('bots?attribution=1').then(setAttr).catch(()=>setAttr({perSymbol:[],perFund:[]})); },[]);
   if(user.role!=='admin') return <Denied/>;
   const fundOpts=[{value:'',label:'— Unassigned —'},...funds.map(f=>({value:f.id,label:f.name}))];
 
@@ -65,6 +67,58 @@ function BotsPage(){
         </table></div>
       </Card>
     </>}
+
+    {/* Performance attribution — realized PnL only (win rate/profit factor need closed
+        trades; a currently-open position's unrealized PnL isn't a win or loss yet) */}
+    <Card className="overflow-hidden mt-5">
+      <div className="p-5 pb-0"><SectionTitle right={<span className="text-[11px] text-slate-400">from realized PnL</span>}>Performance by Fund</SectionTitle></div>
+      {attr===null? <div className="p-5 text-sm text-slate-400">Loading…</div>
+      : attr.perFund.length===0? <div className="p-5 text-sm text-slate-400">No closed trades recorded yet — this fills in as positions close.</div>
+      : <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+            <th className="px-3 py-2.5 text-left font-medium">Fund</th>
+            <th className="px-3 py-2.5 text-right font-medium">Trades</th>
+            <th className="px-3 py-2.5 text-right font-medium">Win Rate</th>
+            <th className="px-3 py-2.5 text-right font-medium">Net PnL</th>
+            <th className="px-3 py-2.5 text-right font-medium">Contribution</th>
+          </tr></thead>
+          <tbody>{attr.perFund.map(f=>{ const s=attrStats(f); const fund=f.fundId&&funds.find(x=>x.id===f.fundId); return <tr key={f.fundId||'unassigned'} className="border-b border-slate-50">
+            <td className="px-3 py-2.5">{fund?fund.name:'Unassigned'}</td>
+            <td className="px-3 py-2.5 text-right tnum text-slate-500">{f.trades}</td>
+            <td className="px-3 py-2.5 text-right tnum text-slate-500">{s.winRate==null?'—':s.winRate.toFixed(0)+'%'}</td>
+            <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(f.netPnl)}`}>{fmtSigned(f.netPnl)}</td>
+            <td className="px-3 py-2.5 text-right tnum text-slate-500">{f.contributionPct==null?'—':fmtPctPlain(f.contributionPct)}</td>
+          </tr>; })}</tbody>
+        </table></div>}
+    </Card>
+
+    <Card className="overflow-hidden mt-5">
+      <div className="p-5 pb-0"><SectionTitle right={<span className="text-[11px] text-slate-400">from realized PnL</span>}>Performance by Bot</SectionTitle></div>
+      {attr===null? <div className="p-5 text-sm text-slate-400">Loading…</div>
+      : attr.perSymbol.length===0? <div className="p-5 text-sm text-slate-400">No closed trades recorded yet — this fills in as positions close.</div>
+      : <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+            <th className="px-3 py-2.5 text-left font-medium">Symbol</th>
+            <th className="px-3 py-2.5 text-right font-medium">Trades</th>
+            <th className="px-3 py-2.5 text-right font-medium">Win Rate</th>
+            <th className="px-3 py-2.5 text-right font-medium">Profit Factor</th>
+            <th className="px-3 py-2.5 text-right font-medium">Avg Win</th>
+            <th className="px-3 py-2.5 text-right font-medium">Avg Loss</th>
+            <th className="px-3 py-2.5 text-right font-medium">Net PnL</th>
+            <th className="px-3 py-2.5 text-right font-medium">Contribution</th>
+          </tr></thead>
+          <tbody>{attr.perSymbol.map(s=>{ const st=attrStats(s); return <tr key={s.symbol} className="border-b border-slate-50">
+            <td className="px-3 py-2.5 font-mono text-xs text-navy">{s.symbol}</td>
+            <td className="px-3 py-2.5 text-right tnum text-slate-500">{s.trades}</td>
+            <td className="px-3 py-2.5 text-right tnum text-slate-500">{st.winRate==null?'—':st.winRate.toFixed(0)+'%'}</td>
+            <td className="px-3 py-2.5 text-right tnum text-slate-500">{st.profitFactor==null?'—':st.profitFactor===Infinity?'∞':st.profitFactor.toFixed(2)}</td>
+            <td className="px-3 py-2.5 text-right tnum text-success">{st.avgWin==null?'—':fmtSigned(st.avgWin)}</td>
+            <td className="px-3 py-2.5 text-right tnum text-danger">{st.avgLoss==null?'—':fmtSigned(st.avgLoss)}</td>
+            <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(s.netPnl)}`}>{fmtSigned(s.netPnl)}</td>
+            <td className="px-3 py-2.5 text-right tnum text-slate-500">{s.contributionPct==null?'—':fmtPctPlain(s.contributionPct)}</td>
+          </tr>; })}</tbody>
+        </table></div>}
+    </Card>
 
     <Confirm open={!!del} title="Remove bot" confirmLabel="Remove"
       message={`Remove ${del?.symbol} (${del?.exchange})? It will reappear on the next sync if the position is still open.`}

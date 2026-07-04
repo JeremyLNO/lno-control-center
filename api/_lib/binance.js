@@ -73,3 +73,16 @@ export async function getAccountEquity(key, secret) {
     margins,
   };
 }
+
+// Realized PnL / funding / commission history (income history only covers the last 3
+// months per Binance). Used to build the trade-attribution and funding/fee analytics —
+// unrealized PnL of a currently-open position isn't a "win" or "loss" until it's realized.
+export async function getIncome(key, secret, { startTime } = {}) {
+  const params = { limit: '1000' };
+  if (startTime) params.startTime = String(startTime);
+  const rows = await signedGet('/fapi/v1/income', key, secret, params);
+  return (Array.isArray(rows) ? rows : []).map(r => ({
+    tranId: String(r.tranId), symbol: r.symbol || null, incomeType: r.incomeType,
+    income: parseFloat(r.income || '0'), time: Number(r.time),
+  }));
+}

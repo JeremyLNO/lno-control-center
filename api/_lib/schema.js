@@ -94,6 +94,19 @@ export async function migrate() {
     key TEXT PRIMARY KEY,
     value JSONB NOT NULL DEFAULT '{}'
   )`);
+  // Realized PnL / funding / commission history (from Binance's income endpoint) — the real
+  // "did this trade win or lose" record, distinct from a currently-open position's unrealized
+  // PnL. Powers per-bot performance attribution + funding/fee drag analytics. tran_id dedupes
+  // (income events are immutable once recorded, so ON CONFLICT DO NOTHING is enough).
+  await query(`CREATE TABLE IF NOT EXISTS income_events (
+    tran_id TEXT PRIMARY KEY,
+    exchange TEXT NOT NULL,
+    symbol TEXT,
+    income_type TEXT NOT NULL,
+    income DOUBLE PRECISION NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS income_events_symbol_idx ON income_events (symbol)`);
   // one row per day — real recorded equity history (written by the daily cron)
   await query(`CREATE TABLE IF NOT EXISTS equity_snapshots (
     day DATE PRIMARY KEY,

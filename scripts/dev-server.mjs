@@ -42,6 +42,16 @@ await db.query(`INSERT INTO bots (id,exchange,symbol,side,qty,entry,mark,unreali
 // exercise the balance-reconciliation warning locally (real Binance data would rarely drift).
 await db.query(`INSERT INTO app_config (key,value) VALUES ('live','{"equity":50000,"walletBalance":45000,"positions":3,"connected":1,"syncedAt":0}'::jsonb)
   ON CONFLICT (key) DO NOTHING`);
+// dev-only fixture: realized PnL history, since there's no local way to exercise Binance's
+// income endpoint either. Lets the per-bot/per-fund attribution tables be checked visually.
+await db.query(`INSERT INTO income_events (tran_id,exchange,symbol,income_type,income,occurred_at) VALUES
+    ('fx1','binance','BTCUSDT','REALIZED_PNL',420,now()-interval '5 days'),
+    ('fx2','binance','BTCUSDT','REALIZED_PNL',180,now()-interval '4 days'),
+    ('fx3','binance','BTCUSDT','REALIZED_PNL',-150,now()-interval '3 days'),
+    ('fx4','binance','ETHUSDT','REALIZED_PNL',-90,now()-interval '4 days'),
+    ('fx5','binance','ETHUSDT','REALIZED_PNL',-60,now()-interval '2 days'),
+    ('fx6','binance','ETHUSDT','REALIZED_PNL',30,now()-interval '1 days')
+  ON CONFLICT (tran_id) DO NOTHING`);
 
 const MIME = { '.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.ico':'image/x-icon','.png':'image/png','.woff2':'font/woff2' };
 const DIST = new URL('../dist/', import.meta.url);

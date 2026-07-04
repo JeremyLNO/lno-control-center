@@ -3,8 +3,10 @@
 // Runs daily (cron) and on demand (manual "Sync now").
 import { query } from './db.js';
 import { decrypt } from './crypto.js';
-import { getPositions, getAccountEquity } from './binance.js';
+import { getPositions, getAccountEquity, getIncome } from './binance.js';
 import { migrate } from './schema.js';
+
+const INCOME_TYPES = new Set(['REALIZED_PNL', 'FUNDING_FEE', 'COMMISSION']);
 
 export async function syncExchanges() {
   // Idempotent — self-heals the schema (new bots columns, etc.) on the very next sync
@@ -48,6 +50,23 @@ export async function syncExchanges() {
       );
       if (existing.has(id)) updated++; else created++;
     }
+
+    // Income history (realized PnL / funding / commission) — incremental: resume from the
+    // latest recorded event, or backfill the last 7 days on the very first sync. A single
+    // page (limit 1000) per sync; fine for normal trading volume, not a full 3-month replay.
+    try {
+      const cursor = (await query("SELECT MAX(occurred_at) AS t FROM income_events WHERE exchange='binance'")).rows[0].t;
+      const startTime = cursor ? new Date(cursor).getTime() + 1 : Date.now() - 7 * 86400000;
+      const income = await getIncome(ex.api_key, secret, { startTime });
+      for (const inc of income) {
+        if (!INCOME_TYPES.has(inc.incomeType)) continue;
+        await query(
+          `INSERT INTO income_events (tran_id,exchange,symbol,income_type,income,occurred_at)
+           VALUES ($1,'binance',$2,$3,$4,to_timestamp($5/1000.0)) ON CONFLICT (tran_id) DO NOTHING`,
+          [inc.tranId, inc.symbol, inc.incomeType, inc.income, inc.time]
+        );
+      }
+    } catch (e) { /* best-effort — a failed income fetch shouldn't break the position sync */ }
   }
 
   // any previously-open Binance bot no longer reported is now flat
