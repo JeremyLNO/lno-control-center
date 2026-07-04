@@ -8,7 +8,7 @@ import {
 } from './ui'
 import {
   ActivityPage, RealtimePage, TradesPage, AdminUsers, AdminExchanges, AdminOpenWA,
-  FundsPage, BotsPage, ProfilePage, SupportPage, PricesPage, StatusPage, AdminReports
+  FundsPage, BotsPage, ProfilePage, MyEquityPage, SupportPage, PricesPage, StatusPage, AdminReports
 } from './pages/index'
 
 /* ============================================================
@@ -141,6 +141,7 @@ function Shell(){
   else if(a==='admin'&&b==='funds') page=<FundsPage/>;
   else if(a==='admin'&&b==='reports') page=<AdminReports/>;
   else if(a==='profile') page=<ProfilePage/>;
+  else if(a==='equity') page=<MyEquityPage/>;
   else if(a==='support') page=<SupportPage/>;
   else page=<ActivityPage/>;
   return <div className="flex h-full">

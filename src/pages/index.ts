@@ -8,6 +8,7 @@ export { AdminOpenWA } from './AdminOpenWA';
 export { FundsPage } from './FundsPage';
 export { BotsPage } from './BotsPage';
 export { ProfilePage } from './ProfilePage';
+export { MyEquityPage } from './MyEquityPage';
 export { SupportPage } from './SupportPage';
 export { PricesPage } from './PricesPage';
 export { StatusPage } from './StatusPage';

@@ -1,11 +1,14 @@
 // Funds are GLOBAL entities (name + colour). Bots are assigned to a fund via bots.fund_id.
-//   GET    -> funds (+ bot counts)             (any auth)
+//   GET                    -> funds (+ bot counts)             (any auth)
+//   GET ?myEquity=1        -> the caller's Employee Fund share  (any auth)
+//   GET ?employeeSummary=1 -> Employee Fund totals + all shares (admin)
 //   POST   -> create a fund                     (admin)
 //   PATCH  -> rename / recolour / reorder       (admin)
 //   DELETE -> remove a fund (unassigns its bots)(admin)
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
 import { FUND_PALETTE } from './_lib/constants.js';
+import { getMyShare, getEmployeeFundSummary, EMPLOYEE_FUND_ID } from './_lib/employeeFund.js';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -24,6 +27,8 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const a = requireAuth(req, res); if (!a) return;
+      if (req.query?.myEquity) return res.status(200).json(await getMyShare(a.id));
+      if (req.query?.employeeSummary) { const adm = requireAdmin(req, res); if (!adm) return; return res.status(200).json(await getEmployeeFundSummary()); }
       return res.status(200).json({ funds: await listFunds() });
     }
     const body = req.body || {};
@@ -58,6 +63,7 @@ export default async function handler(req, res) {
       const a = requireAdmin(req, res); if (!a) return;
       const id = body.id || req.query?.id;
       if (!id) return res.status(400).json({ error: 'id required' });
+      if (id === EMPLOYEE_FUND_ID) return res.status(400).json({ error: 'The Employee Fund can\'t be deleted — it holds every employee\'s contributed capital.' });
       await query('UPDATE bots SET fund_id=NULL WHERE fund_id=$1', [id]); // its bots become unassigned
       await query('DELETE FROM funds WHERE id=$1', [id]);
       return res.status(200).json({ funds: await listFunds() });

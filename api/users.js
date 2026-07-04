@@ -5,6 +5,7 @@ import { query } from './_lib/db.js';
 import { requireAdmin, hashPassword, sanitizeUser, passwordIssues } from './_lib/auth.js';
 import { ROLE_PERMS } from './_lib/constants.js';
 import { audit, recentAudit } from './_lib/audit.js';
+import { grantShare } from './_lib/employeeFund.js';
 
 export default async function handler(req, res) {
   const a = requireAdmin(req, res); if (!a) return;
@@ -50,6 +51,9 @@ export default async function handler(req, res) {
         [id, email, email, firstName, lastName, role, JSON.stringify(perms), hash, provider]
       );
       await audit(req, a, 'user.create', email, { role, provider });
+      // every employee (internal role — not an external shareholder) gets their €1000
+      // Employee Fund share on day one, priced at today's NAV
+      if (!isShareholder) { try { await grantShare(id, new Date()); } catch (e) {} }
       const { rows } = await query('SELECT * FROM users WHERE id=$1', [id]);
       return res.status(201).json({ user: sanitizeUser(rows[0]) });
     }

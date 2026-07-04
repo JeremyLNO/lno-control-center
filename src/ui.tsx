@@ -60,6 +60,8 @@ const fmtAgo = (t)=>{ if(t==null)return '—'; const min=Math.round((Date.now()-
 const fmtTime = (t)=> new Date(t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
 const fmtDT = (t)=> fmtDate(t)+' '+fmtTime(t);
 const fmtDur = (mins)=>{ mins=Math.round(mins); if(mins<60)return mins+'m'; const h=Math.floor(mins/60),m=mins%60; if(h<24)return h+'h'+(m?' '+m+'m':''); const d=Math.floor(h/24),hh=h%24; return d+'d'+(hh?' '+hh+'h':''); };
+// Seniority since a join/hire date (Employee Fund) — days, then months, then years+months.
+const fmtSeniority = (since)=>{ const days=Math.floor((Date.now()-new Date(since).getTime())/86400000); if(days<30) return days+'d'; const months=Math.floor(days/30.44); if(months<12) return months+'mo'; const years=Math.floor(months/12), remM=months%12; return years+'y'+(remM?' '+remM+'mo':''); };
 const initialsOf = (u)=>{ const a=(u.firstName||'').trim(), b=(u.lastName||'').trim(); if(a||b) return ((a[0]||'')+(b[0]||'')).toUpperCase(); return (u.email||'?').slice(0,2).toUpperCase(); };
 
 /* ============================================================
@@ -417,6 +419,9 @@ function marginUsagePct(b){
 // sync still "sees" it (last_seen keeps bumping) but nothing has actually traded, which may
 // mean the strategy behind it has gone silent while the position just sits there.
 const DORMANT_HOURS=48;
+// Must match EMPLOYEE_FUND_ID in api/_lib/employeeFund.js — the fund can't be deleted from
+// the UI since it holds every employee's contributed capital.
+const EMPLOYEE_FUND_ID='employee-fund';
 function dormantInfo(b){
   if(b.status!=='open'||!b.lastChanged) return {dormant:false,hours:null};
   const hours=(Date.now()-new Date(b.lastChanged).getTime())/3600000;
@@ -644,6 +649,9 @@ const ACCT_NAV=[
   ['usercircle','Profile','/profile'],
   ['lifebuoy','Support','/support'],
 ];
+// Employee Fund — every internal role (admin/operator/viewer) has a share; shareholders are
+// external investors, not staff, so they don't see this.
+const MY_EQUITY_NAV=['dollar','My Equity','/equity'];
 
 function NavItem({icon,label,path,active,onClick}: any){
   return <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${active?'bg-gold text-navy font-semibold':'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
@@ -669,6 +677,7 @@ function Sidebar(){
         {ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
       </>}
       <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">Account</div>
+      {user.role!=='shareholder'&&<NavItem icon={MY_EQUITY_NAV[0]} label={MY_EQUITY_NAV[1]} path={MY_EQUITY_NAV[2]} active={isAct(MY_EQUITY_NAV[2])} onClick={()=>navigate(MY_EQUITY_NAV[2])}/>}
       {ACCT_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={l} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
     </nav>
     <div className="p-3 border-t border-white/10">
@@ -761,7 +770,7 @@ function MobileNav(){
       <button onClick={()=>setMore(!more)} className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] text-slate-500"><Icon name="menu" className="w-5 h-5"/>More</button>
     </nav>
     {more&&<div className="lg:hidden fixed inset-0 z-40" onClick={()=>setMore(false)}><div className="absolute bottom-14 inset-x-3 bg-white rounded-xl shadow-xl border border-slate-200 p-2" onClick={e=>e.stopPropagation()}>
-      {[...TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)),...(user.role==='admin'?ADMIN_NAV:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{l}</button>)}
+      {[...TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)),...(user.role==='admin'?ADMIN_NAV:[]),...(user.role!=='shareholder'?[MY_EQUITY_NAV]:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{l}</button>)}
     </div></div>}
   </>;
 }
@@ -887,5 +896,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, EMPLOYEE_FUND_ID, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };

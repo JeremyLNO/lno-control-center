@@ -107,6 +107,16 @@ export async function migrate() {
     occurred_at TIMESTAMPTZ NOT NULL
   )`);
   await query(`CREATE INDEX IF NOT EXISTS income_events_symbol_idx ON income_events (symbol)`);
+  // Employee Fund: each employee's capital contribution, recorded as a number of "units"
+  // (mutual-fund-style unitisation — see api/_lib/employeeFund.js) rather than a flat euro
+  // amount, so joining after the fund has already gained/lost value is priced fairly.
+  await query(`CREATE TABLE IF NOT EXISTS employee_shares (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    fund_id TEXT NOT NULL,
+    contributed_amount DOUBLE PRECISION NOT NULL DEFAULT 1000,
+    units DOUBLE PRECISION NOT NULL,
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
   // one row per day — real recorded equity history (written by the daily cron)
   await query(`CREATE TABLE IF NOT EXISTS equity_snapshots (
     day DATE PRIMARY KEY,
