@@ -11,7 +11,7 @@ functions — nothing sensitive is stored in the browser.
 - **Passwords** are **bcrypt-hashed** in the DB; plaintext never exists in code, the API, or localStorage.
 - **Secrets** (OpenWA api key, exchange API secrets) are **AES-256-GCM encrypted at rest** and are
   **never returned to the browser** — only a masked preview.
-- The browser holds a short-lived **JWT** (12 h) in `sessionStorage`; every API call is authenticated, admin routes are role-gated.
+- The browser holds a **JWT** (12 h) in `localStorage`, so the session survives closing the browser and stays valid until the JWT's own 12 h expiry. Every API call is authenticated, admin routes are role-gated.
 - Encryption/signing keys come **only from env vars** (`JWT_SECRET`, `APP_ENCRYPTION_KEY`) — never hard-coded.
 
 ### Backend layout
@@ -111,7 +111,7 @@ vite.config.js
 vercel.json
 ```
 
-State is persisted to `localStorage` (`lno_users`, `lno_funds`, `lno_exchanges`, `lno_whatsapp_config`, `lno_login_attempts`); the session lives in `sessionStorage` (`lno_auth`).
+State is persisted to `localStorage` (`lno_users`, `lno_funds`, `lno_exchanges`, `lno_whatsapp_config`, `lno_login_attempts`); the session token also lives in `localStorage` (`lno_token`), so it persists across browser restarts until the JWT's 12 h expiry.
 
 ---
 LNO Trading Systems — Internal Use Only
