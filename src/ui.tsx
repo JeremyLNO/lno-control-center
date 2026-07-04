@@ -267,12 +267,13 @@ function Badge({color,children,className='',onClick,dot}: any){
 function darken(hex){ return hex; }
 
 function StatusPill({status}: any){
+  const {t}=useApp();
   const map={
-    active:['bg-success/10 text-success','active'], connected:['bg-success/10 text-success','Connected'],
-    paused:['bg-warn/10 text-amber-600','paused'], pending:['bg-slate-200 text-slate-600','Pending'],
-    error:['bg-danger/10 text-danger','error'], degraded:['bg-warn/10 text-amber-600','degraded'],
-    down:['bg-danger/10 text-danger','down'], inactive:['bg-slate-200 text-slate-500','inactive'],
-    Open:['bg-blue-100 text-blue-700','Open'], Closed:['bg-slate-100 text-slate-600','Closed'],
+    active:['bg-success/10 text-success',t('status.active')], connected:['bg-success/10 text-success',t('status.connected')],
+    paused:['bg-warn/10 text-amber-600',t('status.paused')], pending:['bg-slate-200 text-slate-600',t('status.pending')],
+    error:['bg-danger/10 text-danger',t('status.error')], degraded:['bg-warn/10 text-amber-600',t('status.degraded')],
+    down:['bg-danger/10 text-danger',t('status.down')], inactive:['bg-slate-200 text-slate-500',t('status.inactive')],
+    Open:['bg-blue-100 text-blue-700',t('status.open')], Closed:['bg-slate-100 text-slate-600',t('status.closed')],
   };
   const [c,l]=map[status]||['bg-slate-100 text-slate-600',status];
   return <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${c}`}>
