@@ -9,7 +9,7 @@ import {
    REAL-TIME OPERATIONS
    ============================================================ */
 function RealtimePage(){
-  const {funds,user,data,dataStatus}=useApp();
+  const {funds,user,data,dataStatus,t}=useApp();
   const [fund,setFund]=useState('all');
   const [sort,setSort]=useState({col:'uPnl',dir:'desc'});
   const [incidents,setIncidents]=useState(null);
@@ -27,46 +27,46 @@ function RealtimePage(){
   let rows=open.map(b=>({...b,fund:fundOf(funds,b)}));
   rows=sortRows(rows,sort,{symbol:r=>r.symbol,side:r=>r.side,exchange:r=>r.exchange,fund:r=>r.fund?.name||'',qty:r=>r.qty,entry:r=>r.entry,mark:r=>r.mark,uPnl:r=>r.unrealizedPnl,notional:r=>Math.abs(r.notional),leverage:r=>r.leverage});
 
-  const fundOpts=[{value:'all',label:'All Funds'},...funds.map(f=>({value:f.id,label:f.name})),{value:'unassigned',label:'Unassigned'}];
+  const fundOpts=[{value:'all',label:t('live.allFunds')},...funds.map(f=>({value:f.id,label:f.name})),{value:'unassigned',label:t('live.unassigned')}];
   return <div>
-    <PageHead title="Live" subtitle="Open futures positions across all connected exchanges"
+    <PageHead title={t('live.title')} subtitle={t('live.subtitle')}
       actions={<div className="flex items-center gap-3">
         <Select value={fund} onChange={setFund} className="w-40" options={fundOpts}/>
-        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">{data.live&&data.live.syncedAt?<>synced {fmtAgo(data.live.syncedAt)}</>:'not synced yet'}</span>
+        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">{data.live&&data.live.syncedAt?t('live.syncedAgo',{ago:fmtAgo(data.live.syncedAt)}):t('live.notSynced')}</span>
       </div>}/>
 
     <MarketTicker/>
 
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-      <KpiCard label="Account Equity" value={fmtUSD(data.equity)} icon="dollar"/>
-      <KpiCard label="Open PnL" value={<span className={clsPnl(livePnl)}>{fmtSigned(livePnl)}</span>}/>
-      <KpiCard label="Open Positions" value={open.length} icon="briefcase"/>
-      <KpiCard label="Exposure" value={fmtUSD(exposure)} icon="layers"/>
+      <KpiCard label={t('activity.equity')} value={fmtUSD(data.equity)} icon="dollar"/>
+      <KpiCard label={t('activity.openPnl')} value={<span className={clsPnl(livePnl)}>{fmtSigned(livePnl)}</span>}/>
+      <KpiCard label={t('live.openPositions')} value={open.length} icon="briefcase"/>
+      <KpiCard label={t('activity.exposure')} value={fmtUSD(exposure)} icon="layers"/>
     </div>
 
     <Card className="overflow-hidden">
-      <div className="p-5 pb-0"><SectionTitle right={data.live&&data.live.connected>0&&<span className="flex items-center gap-1.5 text-xs text-success"><span className="w-1.5 h-1.5 rounded-full bg-success pulse-dot"/>{data.live.connected} connected</span>}>Open Positions</SectionTitle></div>
-      {rows.length===0? <div className="p-8"><EmptyState icon="briefcase" title="No open positions" hint={data.live&&data.live.connected? 'No positions are currently open on your connected exchange.' : 'Connect an exchange and sync to see live positions here.'}/></div>
+      <div className="p-5 pb-0"><SectionTitle right={data.live&&data.live.connected>0&&<span className="flex items-center gap-1.5 text-xs text-success"><span className="w-1.5 h-1.5 rounded-full bg-success pulse-dot"/>{t('live.connectedCount',{n:data.live.connected})}</span>}>{t('live.openPositions')}</SectionTitle></div>
+      {rows.length===0? <div className="p-8"><EmptyState icon="briefcase" title={t('live.noOpenPositionsTitle')} hint={data.live&&data.live.connected? t('live.noOpenPositionsHintConnected') : t('live.noOpenPositionsHintDisconnected')}/></div>
       : <>
       {/* desktop table */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-            <SortHeader label="Symbol" col="symbol" sort={sort} setSort={setSort}/>
-            <SortHeader label="Side" col="side" sort={sort} setSort={setSort}/>
-            <SortHeader label="Qty" col="qty" sort={sort} setSort={setSort} align="right"/>
-            <SortHeader label="Entry" col="entry" sort={sort} setSort={setSort} align="right"/>
-            <SortHeader label="Mark" col="mark" sort={sort} setSort={setSort} align="right"/>
-            <SortHeader label="Open PnL" col="uPnl" sort={sort} setSort={setSort} align="right"/>
-            <SortHeader label="Notional" col="notional" sort={sort} setSort={setSort} align="right"/>
-            <SortHeader label="Lev" col="leverage" sort={sort} setSort={setSort} align="right"/>
-            <th className="px-3 py-2.5 text-right font-medium">Liq. Dist</th>
-            <SortHeader label="Fund" col="fund" sort={sort} setSort={setSort}/>
-            <th className="px-3 py-2.5 text-left font-medium">Exchange</th>
+            <SortHeader label={t('activity.symbol')} col="symbol" sort={sort} setSort={setSort}/>
+            <SortHeader label={t('activity.side')} col="side" sort={sort} setSort={setSort}/>
+            <SortHeader label={t('live.qty')} col="qty" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label={t('live.entry')} col="entry" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label={t('live.mark')} col="mark" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label={t('activity.openPnl')} col="uPnl" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label={t('activity.notional')} col="notional" sort={sort} setSort={setSort} align="right"/>
+            <SortHeader label={t('activity.lev')} col="leverage" sort={sort} setSort={setSort} align="right"/>
+            <th className="px-3 py-2.5 text-right font-medium">{t('live.liqDist')}</th>
+            <SortHeader label={t('activity.fund')} col="fund" sort={sort} setSort={setSort}/>
+            <th className="px-3 py-2.5 text-left font-medium">{t('live.exchange')}</th>
           </tr></thead>
           <tbody>
             {rows.map(r=>{ const {pct,level}=liqInfo(r); const {dormant}=dormantInfo(r); return <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
-              <td className="px-3 py-2.5 font-mono text-xs text-navy">{r.symbol}{dormant&&<Icon name="clock" className="w-3.5 h-3.5 text-amber-500 inline-block ml-1.5 -mt-0.5" data-tip="Dormant — no activity in 48h+"/>}</td>
+              <td className="px-3 py-2.5 font-mono text-xs text-navy">{r.symbol}{dormant&&<Icon name="clock" className="w-3.5 h-3.5 text-amber-500 inline-block ml-1.5 -mt-0.5" data-tip={t('live.dormantTooltip')}/>}</td>
               <td className="px-3 py-2.5"><SideTag side={r.side}/></td>
               <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtNum(r.qty,r.qty<1?4:2)}</td>
               <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtPrice(r.entry)}</td>
@@ -75,7 +75,7 @@ function RealtimePage(){
               <td className="px-3 py-2.5 text-right tnum text-slate-500">{fmtUSD(Math.abs(r.notional))}</td>
               <td className="px-3 py-2.5 text-right tnum text-slate-500">{r.leverage?r.leverage+'×':'—'}</td>
               <td className={`px-3 py-2.5 text-right tnum font-medium ${pct==null?'text-slate-300':level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-500'}`}>{pct==null?'—':pct.toFixed(1)+'%'}</td>
-              <td className="px-3 py-2.5">{r.fund? <Badge color={r.fund.color} dot onClick={()=>setFund(r.fund.id)}>{r.fund.name}</Badge> : <span className="text-xs text-slate-400">Unassigned</span>}</td>
+              <td className="px-3 py-2.5">{r.fund? <Badge color={r.fund.color} dot onClick={()=>setFund(r.fund.id)}>{r.fund.name}</Badge> : <span className="text-xs text-slate-400">{t('live.unassigned')}</span>}</td>
               <td className="px-3 py-2.5 text-slate-500 capitalize">{r.exchange}</td>
             </tr>; })}
           </tbody>
@@ -86,8 +86,8 @@ function RealtimePage(){
         {rows.map(r=>{ const {pct,level}=liqInfo(r); const {dormant}=dormantInfo(r); return <div key={r.id} className="border border-slate-100 rounded-lg p-3">
           <div className="flex items-center justify-between"><div className="font-mono text-sm text-navy">{r.symbol} <SideTag side={r.side}/>{dormant&&<Icon name="clock" className="w-3.5 h-3.5 text-amber-500 inline-block ml-1"/>}</div><span className={`font-medium tnum ${clsPnl(r.unrealizedPnl)}`}>{fmtSigned(r.unrealizedPnl)}</span></div>
           <div className="flex items-center justify-between mt-2 text-xs text-slate-500"><FundTag fund={r.fund}/><span className="tnum">{fmtUSD(Math.abs(r.notional))} · {r.leverage?r.leverage+'×':'—'}</span></div>
-          {pct!=null&&<div className={`mt-1.5 text-xs font-medium ${level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-400'}`}>Liq. distance {pct.toFixed(1)}%</div>}
-          {dormant&&<div className="mt-1 text-xs font-medium text-amber-600">Dormant — no activity in 48h+</div>}
+          {pct!=null&&<div className={`mt-1.5 text-xs font-medium ${level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-400'}`}>{t('live.liqDistanceMobile',{pct:pct.toFixed(1)})}</div>}
+          {dormant&&<div className="mt-1 text-xs font-medium text-amber-600">{t('live.dormantTooltip')}</div>}
         </div>; })}
       </div>
       </>}
@@ -95,13 +95,13 @@ function RealtimePage(){
 
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
       <Card className="p-5">
-        <SectionTitle right={<LiveBadge status={dataStatus}/>}>Service health</SectionTitle>
+        <SectionTitle right={<LiveBadge status={dataStatus}/>}>{t('live.serviceHealth')}</SectionTitle>
         <div className="space-y-2.5">
           {[
-            ['Exchange sync', data.live&&data.live.connected>0?'ok':'neutral', data.live&&data.live.connected>0?`${data.live.connected} connected`:'No exchange connected'],
-            ['Market data feed', dataStatus==='live'?'ok':dataStatus==='partial'?'warn':'neutral', dataStatus==='live'?'Streaming':dataStatus==='partial'?'Degraded':'Idle'],
-            ['Open positions', data.openBots.length?'ok':'neutral', `${data.openBots.length} open · ${data.bots.length} tracked`],
-            ['Last sync', data.live&&data.live.syncedAt?'ok':'neutral', data.live&&data.live.syncedAt?fmtAgo(data.live.syncedAt):'never'],
+            [t('live.exchangeSync'), data.live&&data.live.connected>0?'ok':'neutral', data.live&&data.live.connected>0?t('live.connectedCount',{n:data.live.connected}):t('live.noExchangeConnected')],
+            [t('live.marketDataFeed'), dataStatus==='live'?'ok':dataStatus==='partial'?'warn':'neutral', dataStatus==='live'?t('live.streaming'):dataStatus==='partial'?t('live.degraded'):t('live.idle')],
+            [t('live.openPositions'), data.openBots.length?'ok':'neutral', t('live.openTracked',{open:data.openBots.length,tracked:data.bots.length})],
+            [t('live.lastSync'), data.live&&data.live.syncedAt?'ok':'neutral', data.live&&data.live.syncedAt?fmtAgo(data.live.syncedAt):t('live.never')],
           ].map(([label,state,sub])=><div key={label} className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-2 text-navy"><span className={`w-2 h-2 rounded-full ${state==='ok'?'bg-success':state==='warn'?'bg-amber-500':'bg-slate-300'}`}/>{label}</span>
             <span className="text-xs text-slate-400">{sub}</span>
@@ -109,14 +109,14 @@ function RealtimePage(){
         </div>
       </Card>
       <Card className="p-5">
-        <SectionTitle right={<span className="text-[11px] text-slate-400">latest alerts</span>}>Recent incidents</SectionTitle>
-        {incidents===null? <div className="text-sm text-slate-400">Loading…</div>
-         : incidents.length===0? <div className="text-sm text-slate-400 py-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-success"/>No incidents — all clear.</div>
+        <SectionTitle right={<span className="text-[11px] text-slate-400">{t('live.latestAlerts')}</span>}>{t('live.recentIncidents')}</SectionTitle>
+        {incidents===null? <div className="text-sm text-slate-400">{t('common.loading')}</div>
+         : incidents.length===0? <div className="text-sm text-slate-400 py-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-success"/>{t('live.noIncidents')}</div>
          : <div className="space-y-2.5">
             {incidents.map(a=><div key={a.id} className="flex items-start gap-2.5 text-sm">
               <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${a.ackedAt?'bg-success':'bg-danger'}`}/>
               <div className="flex-1 min-w-0"><div className="text-navy">{a.summary}</div>
-                <div className="text-[11px] text-slate-400">{fmtAgo(a.createdAt)} · {a.ackedAt?'acknowledged':'pending'}</div></div>
+                <div className="text-[11px] text-slate-400">{fmtAgo(a.createdAt)} · {a.ackedAt?t('live.acknowledged'):t('live.pending')}</div></div>
             </div>)}
           </div>}
       </Card>
