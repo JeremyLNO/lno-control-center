@@ -800,25 +800,28 @@ function PeriodControls({period,setPeriod,custom,setCustom}: any){
 
 // First-run setup nudge for admins on the main dashboard. Dismissible; the OpenWA
 // step is detected live, the others are reminders the admin ticks off then dismisses.
+// TODO: replace with the real distribution link (TestFlight / enterprise) once available.
+const IOS_APP_URL = '';
+
 function OnboardingCard(){
   const {user,navigate}=useApp();
   const [dismissed,setDismissed]=useState(()=>PREF.get('onboarding_dismissed',false));
-  const [openwaOk,setOpenwaOk]=useState(null);
-  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>setOpenwaOk(!!(r.config&&r.config.enabled))).catch(()=>{}); },[]);
-  if(user.role!=='admin'||dismissed) return null;
+  const [iosDone,setIosDone]=useState(()=>PREF.get('onboarding_ios_done',false));
+  if(dismissed) return null;
   const steps=[
-    {label:'Change the default admin password', done:false, to:'/profile'},
-    {label:'Connect your Binance API key', done:false, to:'/admin/exchanges'},
-    {label:'Set up WhatsApp alerts (TextMeBot)', done:!!openwaOk, to:'/admin/openwa'},
+    {label:'Add your WhatsApp phone number', done:!!(user.phone&&user.phone.trim()), onClick:()=>navigate('/profile')},
+    {label:'Add a profile photo', done:!!user.avatar, onClick:()=>navigate('/profile')},
+    {label:'Download the iOS app', done:iosDone, onClick:()=>{ if(IOS_APP_URL) window.open(IOS_APP_URL,'_blank','noopener'); setIosDone(true); PREF.set('onboarding_ios_done',true); }},
   ];
   const left=steps.filter(s=>!s.done).length;
+  if(!left) return null;
   return <Card className="p-4 mb-5 border border-gold/30 bg-gold/5">
     <div className="flex items-start justify-between gap-3">
-      <div className="flex items-center gap-2"><Icon name="shield" className="w-4 h-4 text-gold"/><span className="text-sm font-semibold text-navy">Finish setting up your Control Center</span><span className="text-[11px] text-slate-400">{left} step{left>1?'s':''} left</span></div>
+      <div className="flex items-center gap-2"><Icon name="shield" className="w-4 h-4 text-gold"/><span className="text-sm font-semibold text-navy">Finish setting up your account</span><span className="text-[11px] text-slate-400">{left} step{left>1?'s':''} left</span></div>
       <button onClick={()=>{setDismissed(true);PREF.set('onboarding_dismissed',true);}} className="text-slate-400 hover:text-navy text-xs flex items-center gap-1"><Icon name="x" className="w-3.5 h-3.5"/>Dismiss</button>
     </div>
     <div className="mt-3 grid sm:grid-cols-3 gap-2">
-      {steps.map((s,i)=><button key={i} onClick={()=>navigate(s.to)} className="flex items-center gap-2 text-left p-2 rounded-lg border border-transparent hover:border-slate-200 hover:bg-white transition text-sm">
+      {steps.map((s,i)=><button key={i} onClick={s.onClick} className="flex items-center gap-2 text-left p-2 rounded-lg border border-transparent hover:border-slate-200 hover:bg-white transition text-sm">
         <span className={`w-4 h-4 rounded-full grid place-items-center shrink-0 ${s.done?'bg-success text-white':'border border-slate-300'}`}>{s.done&&<Icon name="check" className="w-3 h-3"/>}</span>
         <span className={s.done?'text-slate-400 line-through':'text-navy'}>{s.label}</span>
       </button>)}

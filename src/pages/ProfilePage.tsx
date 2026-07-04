@@ -63,7 +63,10 @@ function ProfilePage(){
         <Toggle on={notify} onChange={async x=>{setNotify(x);if(await patchSelf({notify:x})&&x&&phone)toast.success('WhatsApp notifications on — welcome message sent');}}/>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
-        <Field label="Your phone number"><Input value={phone} onChange={e=>setPhone(e.target.value)} onBlur={()=>patchSelf({phone})} placeholder="+33 6 12 34 56 78"/></Field>
+        <Field label="Your phone number"><Input value={phone} onChange={e=>setPhone(e.target.value)} onBlur={async()=>{
+          const firstAdd=!user.phone&&phone.trim();
+          if(await patchSelf(firstAdd?{phone,notify:true}:{phone})&&firstAdd){ setNotify(true); toast.success('WhatsApp notifications on — welcome message sent'); }
+        }} placeholder="+33 6 12 34 56 78"/></Field>
       </div>
       <div className="text-[11px] text-slate-500 mt-2 space-y-1 bg-navy/5 border border-slate-200 rounded-lg p-3">
         <div>Alerts are delivered through the firm's <span className="font-medium text-slate-600">TextMeBot</span> number — there's no personal key to set up. To receive them, make sure your WhatsApp number above is registered with TextMeBot. If you don't get the welcome message after turning notifications on, ask an admin to add your number.</div>
