@@ -572,7 +572,6 @@ function Login(){
   const [u,setU]=useState(''); const [p,setP]=useState(''); const [err,setErr]=useState(''); const [warn,setWarn]=useState(false);
   const [busy,setBusy]=useState(false); const attemptsRef=useRef(0);
   const clientId=GOOGLE_CLIENT_ID;
-  const [showPw,setShowPw]=useState(!clientId); // when Google is available it's the primary path
   const gref=useRef<any>(null);
   useEffect(()=>{
     if(!clientId) return; let cancelled=false;
@@ -622,13 +621,12 @@ function Login(){
           <p className="text-[11px] text-slate-400 text-center">{t('login.googleHint',{domain:'@lno.company'})}</p>
         </>}
         {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4 shrink-0"/>{err}</div>}
-        {clientId&&!showPw&&<button onClick={()=>setShowPw(true)} className="w-full text-xs text-slate-400 hover:text-navy">{t('login.passwordInstead')}</button>}
-        {showPw&&<form onSubmit={submit} className="space-y-4">
+        <form onSubmit={submit} className="space-y-4">
           {clientId&&<div className="flex items-center gap-2 pt-1"><div className="flex-1 border-t border-slate-200"/><span className="text-[10px] uppercase tracking-wide text-slate-400">{t('login.emailSignIn')}</span><div className="flex-1 border-t border-slate-200"/></div>}
           <Field label={t('login.email')}><Input type="email" value={u} onChange={e=>setU(e.target.value)} placeholder="you@example.com" autoFocus={!clientId}/></Field>
           <Field label={t('login.password')}><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="••••••"/></Field>
           <Btn className="w-full" type="submit" disabled={busy}>{busy?t('login.signingIn'):t('login.signIn')}</Btn>
-        </form>}
+        </form>
         {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>{t('login.securityWarning')}</span></div>}
         {!clientId&&<div className="text-[11px] text-slate-400 text-center">{t('login.defaultAdmin')}: <span className="font-mono">admin@lno.company / admin</span></div>}
       </div>
