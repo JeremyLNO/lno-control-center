@@ -15,7 +15,15 @@ function AdminExchanges(){
   const reload=()=>api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{});
   const [syncing,setSyncing]=useState(false);
   async function runSync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); await reload(); if(r.errors){ toast.error((r.errorMsgs&&r.errorMsgs[0])||t(r.errors===1?'bots.syncFailedOne':'bots.syncFailedMany',{n:r.errors})); } else { const exch=t((r.connected||0)===1?'exchanges.exchangeCountOne':'exchanges.exchangeCountMany',{n:r.connected||0}); const pos=t((r.positions||0)===1?'exchanges.positionCountOne':'exchanges.positionCountMany',{n:r.positions||0}); toast.success(t('exchanges.syncedResult',{exch,pos})); } }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
-  useEffect(()=>{ if(user.role==='admin') reload(); },[]);
+  useEffect(()=>{
+    if(user.role!=='admin') return;
+    reload();
+    // the shared data layer (useData in main.tsx) already re-syncs from the exchange every
+    // 30s for an admin session — just re-read this table on the same cadence so connection
+    // status / last-sync here stay live too, without triggering a second redundant sync.
+    const iv=setInterval(reload,30000);
+    return ()=>clearInterval(iv);
+  },[]);
   if(user.role!=='admin') return <Denied/>;
   const mask=(s)=> s? s.slice(0,6)+'••••••••'+s.slice(-4) : '';
   return <div>

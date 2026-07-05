@@ -34,8 +34,15 @@ function useHashRoute(){
 }
 
 /* Real data: fetch bots + funds + snapshots on login; refresh bots/live every ~30s.
-   Builds the derived `data` shape the UI reads, plus the funds array + a reload(). */
-function useData(authed){
+   Builds the derived `data` shape the UI reads, plus the funds array + a reload().
+   When the logged-in user is an admin, that 30s refresh also triggers a REAL re-sync
+   from the exchange first (not just a re-read of whatever's cached) — this is what
+   keeps exchange-derived numbers (positions, equity) genuinely live rather than stuck
+   at whatever the last manual "Sync now" click or the once-daily cron last recorded.
+   Non-admins still get the 30s cache refresh unchanged; the sync action itself stays
+   admin-gated (see api/bots.js) so a lower-privileged or shareholder tab can never
+   trigger a live signed Binance call. */
+function useData(authed,isAdmin){
   const [raw,setRaw]=useState(null);     // { bots, live }
   const [funds,setFunds]=useState([]);
   const [snaps,setSnaps]=useState([]);
@@ -45,18 +52,24 @@ function useData(authed){
   const loadBots=useCallback(async()=>{ const r=await api('bots'); setRaw({bots:r.bots||[],live:r.live||null}); return r; },[]);
   const loadFunds=useCallback(async()=>{ const r=await api('funds'); setFunds(r.funds||[]); return r.funds; },[]);
   const loadSnaps=useCallback(async()=>{ const r=await api('snapshots'); setSnaps(r.snapshots||[]); return r.snapshots; },[]);
+  // refreshLive: what the 30s poll (and the initial load) actually calls — re-syncs from
+  // the exchange first when the viewer is an admin, then re-reads bots/live either way.
+  const refreshLive=useCallback(async()=>{
+    if(isAdmin){ try{ await api('bots',{method:'POST',body:{action:'sync'}}); }catch(e){ /* best-effort — a failed sync shouldn't block reading whatever's cached */ } }
+    return loadBots();
+  },[isAdmin,loadBots]);
   // reloadData: re-fetch everything (used after sync / fund or bot mutations).
-  const reloadData=useCallback(async()=>{ try{ await Promise.all([loadBots(),loadFunds(),loadSnaps()]); setError(null); }catch(e){ setError(e); } },[loadBots,loadFunds,loadSnaps]);
+  const reloadData=useCallback(async()=>{ try{ await Promise.all([refreshLive(),loadFunds(),loadSnaps()]); setError(null); }catch(e){ setError(e); } },[refreshLive,loadFunds,loadSnaps]);
 
   useEffect(()=>{
     if(!authed){ setRaw(null); setFunds([]); setSnaps([]); setLoading(true); return; }
     let alive=true; setLoading(true);
-    Promise.allSettled([loadBots(),loadFunds(),loadSnaps()]).then(rs=>{ if(!alive)return; const bad=rs.find(x=>x.status==='rejected'); setError(bad?bad.reason:null); setLoading(false); });
+    Promise.allSettled([refreshLive(),loadFunds(),loadSnaps()]).then(rs=>{ if(!alive)return; const bad=rs.find(x=>x.status==='rejected'); setError(bad?bad.reason:null); setLoading(false); });
     return ()=>{alive=false;};
-  },[authed,loadBots,loadFunds,loadSnaps]);
+  },[authed,refreshLive,loadFunds,loadSnaps]);
 
   // poll positions/live every 30s (snapshots/funds change rarely)
-  useEffect(()=>{ if(!authed)return; const iv=setInterval(()=>{ loadBots().catch(e=>setError(e)); },30000); return ()=>clearInterval(iv); },[authed,loadBots]);
+  useEffect(()=>{ if(!authed)return; const iv=setInterval(()=>{ refreshLive().catch(e=>setError(e)); },30000); return ()=>clearInterval(iv); },[authed,refreshLive]);
 
   const data=useMemo(()=>{
     if(!raw) return null;
@@ -160,7 +173,7 @@ function Root(){
   const route=useHashRoute();
   const [user,setUser]=useState(null);
   const [booting,setBooting]=useState(true);
-  const {data,funds,setFunds,reloadData,reloadFunds,dataStatus}=useData(!!user);
+  const {data,funds,setFunds,reloadData,reloadFunds,dataStatus}=useData(!!user,!!(user&&user.role==='admin'));
 
   // Language: defaults to the browser's language; once a user explicitly picks one (the
   // sidebar switcher), it's persisted both locally (instant on next visit, incl. logged out)

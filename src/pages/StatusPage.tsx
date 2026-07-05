@@ -16,6 +16,14 @@ function StatusPage(){
     api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>setAlerts([]));
     if(user.role==='admin'){ api('openwa').then(r=>setOpenwa(r.config)).catch(()=>setOpenwa(null)); api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>setExchanges([])); }
   },[]);
+  // exchange connection status/last-sync change as a side effect of the same live re-sync the
+  // shared data layer (useData) already runs every 30s for an admin — re-read on that cadence
+  // so "Exchange Connections" here doesn't sit stale on a once-per-mount snapshot.
+  useEffect(()=>{
+    if(user.role!=='admin') return;
+    const iv=setInterval(()=>{ api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{}); },30000);
+    return ()=>clearInterval(iv);
+  },[user.role]);
   if(!hasPerm(user,'view_activity')) return <Denied/>;
 
   const live=data.live; const connected=live?live.connected:0;
