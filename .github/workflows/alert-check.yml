@@ -6,9 +6,14 @@ name: Frequent alert check
 # checks but deliberately skips the daily/weekly/monthly report sends (those stay 1x/day,
 # driven only by the real Vercel Cron). GitHub's own scheduler isn't exact either — expect
 # some jitter, same caveat as Vercel's.
+#
+# 5 minutes is GitHub Actions' hard floor for scheduled workflows (it won't run any more
+# often than that no matter what's written here) — it's also already well past this repo's
+# free monthly Actions-minutes quota at this cadence on a private repo, so don't tighten this
+# further without switching the trigger to a dedicated external cron service instead.
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch: {}
 
 jobs:
