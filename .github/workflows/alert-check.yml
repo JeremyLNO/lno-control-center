@@ -1,0 +1,22 @@
+name: Frequent alert check
+
+# Runs independently of Vercel Cron (Hobby plan caps that at once/day) and independently of
+# anyone visiting the Control Center — this is what makes breach/dormant-bot alerts fire
+# 24/7. Hits the same daily-cron endpoint with ?mode=alerts, which does the sync + threshold
+# checks but deliberately skips the daily/weekly/monthly report sends (those stay 1x/day,
+# driven only by the real Vercel Cron). GitHub's own scheduler isn't exact either — expect
+# some jitter, same caveat as Vercel's.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger alert check
+        run: |
+          curl -sf -X POST "https://cc.lno.company/api/cron/daily?mode=alerts" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -o /dev/null -w "status=%{http_code}\n"

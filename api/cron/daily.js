@@ -3,6 +3,13 @@
 // (global + per-fund, grouped by fund with a colour emoji). Secured by CRON_SECRET or an admin JWT.
 // Every WhatsApp message is rendered per-recipient in their own users.language (see
 // api/_lib/notifyText.js) — notify() calls the builder once per recipient's language.
+//
+// ?mode=alerts — everything EXCEPT the daily/weekly/monthly report sends: sync, snapshot,
+// breach + dormant-bot alerts only. This is what a frequent external trigger (see
+// .github/workflows/alert-check.yml) hits every ~10 minutes so alerts fire 24/7 independently
+// of anyone visiting the site or of Vercel's own Cron feature (Hobby plan caps that at
+// once/day) — while the once-daily report sends stay exactly once/day, driven only by the
+// real Vercel Cron (no ?mode=alerts) at its scheduled time.
 import { riskMetrics } from '../_lib/metrics.js';
 import { buildPortfolio } from '../_lib/portfolio.js';
 import { getOpenWAConfig, notify, REPORT_AVAILABLE } from '../_lib/notify.js';
@@ -35,6 +42,7 @@ async function equitySeries() {
 
 export default async function handler(req, res) {
   if (!authorized(req)) return res.status(401).json({ error: 'unauthorized' });
+  const alertsOnly = req.query?.mode === 'alerts';
   try {
     // 1) refresh bots + equity from connected exchanges (best-effort)
     let synced = null; try { synced = await syncExchanges(); } catch (e) { synced = { error: String(e.message || e) }; }
@@ -84,31 +92,35 @@ export default async function handler(req, res) {
       sent.push({ type: 'stale', ...(await notify((lang) => dormantAlertText(lang, dormantData), { type: 'stale' })) });
     }
 
-    // 4) reports — global + per-fund, grouped by fund
-    const eqv = series.map(s => s.equity);
-    const pnlOver = (d) => eqv.length ? eqv[eqv.length - 1] - eqv[Math.max(0, eqv.length - 1 - d)] : 0;
-    const pctOver = (d) => { const base = eqv[Math.max(0, eqv.length - 1 - d)] || 0; return base ? (pnlOver(d) / base) * 100 : 0; };
+    // 4) reports — global + per-fund, grouped by fund. Skipped entirely in ?mode=alerts so a
+    // frequent trigger can never re-send the daily/weekly/monthly reports — only the real
+    // once-daily Vercel Cron run (no mode param) reaches this block.
+    if (!alertsOnly) {
+      const eqv = series.map(s => s.equity);
+      const pnlOver = (d) => eqv.length ? eqv[eqv.length - 1] - eqv[Math.max(0, eqv.length - 1 - d)] : 0;
+      const pctOver = (d) => { const base = eqv[Math.max(0, eqv.length - 1 - d)] || 0; return base ? (pnlOver(d) / base) * 100 : 0; };
 
-    if ((cfg.dailyReport ?? true) && cfg.enabled) {
-      sent.push({ type: 'report', ...(await notify((lang) => reportText(lang, 'daily', port, { pnl: port.pnlDay, pct: port.pnlPct, labelKey: 'periodDay' }), { type: 'daily' })) });
-    }
-    const force = req.query?.force;
-    const dt = new Date();
-    if (cfg.enabled && (dt.getUTCDay() === 1 || force === 'weekly' || force === 'all')) {
-      sent.push({ type: 'weekly', ...(await notify((lang) => reportText(lang, 'weekly', port, { pnl: pnlOver(7), pct: pctOver(7), labelKey: 'period7d' }), { type: 'weekly' })) });
-    }
-    if (cfg.enabled && (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all')) {
-      const pnl30 = pnlOver(30);
-      sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
-      try {
-        const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: today });
-        try { await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5)', ['monthly', today, Math.round(port.equity), Math.round(pnl30), b64]); } catch (e) {}
-        const shr = await notify(REPORT_AVAILABLE, { type: 'new_report' });
-        sent.push({ type: 'monthly-pdf', archived: true, bytes: b64.length, shareholdersNotified: shr.sent || 0 });
-      } catch (e) { sent.push({ type: 'monthly-pdf', error: String(e.message || e) }); }
+      if ((cfg.dailyReport ?? true) && cfg.enabled) {
+        sent.push({ type: 'report', ...(await notify((lang) => reportText(lang, 'daily', port, { pnl: port.pnlDay, pct: port.pnlPct, labelKey: 'periodDay' }), { type: 'daily' })) });
+      }
+      const force = req.query?.force;
+      const dt = new Date();
+      if (cfg.enabled && (dt.getUTCDay() === 1 || force === 'weekly' || force === 'all')) {
+        sent.push({ type: 'weekly', ...(await notify((lang) => reportText(lang, 'weekly', port, { pnl: pnlOver(7), pct: pctOver(7), labelKey: 'period7d' }), { type: 'weekly' })) });
+      }
+      if (cfg.enabled && (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all')) {
+        const pnl30 = pnlOver(30);
+        sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
+        try {
+          const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: today });
+          try { await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5)', ['monthly', today, Math.round(port.equity), Math.round(pnl30), b64]); } catch (e) {}
+          const shr = await notify(REPORT_AVAILABLE, { type: 'new_report' });
+          sent.push({ type: 'monthly-pdf', archived: true, bytes: b64.length, shareholdersNotified: shr.sent || 0 });
+        } catch (e) { sent.push({ type: 'monthly-pdf', error: String(e.message || e) }); }
+      }
     }
 
-    res.status(200).json({ ok: true, synced, equity: port.equity, pnlDay: port.pnlDay, metrics: m, breaches, sent });
+    res.status(200).json({ ok: true, alertsOnly, synced, equity: port.equity, pnlDay: port.pnlDay, metrics: m, breaches, sent });
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }

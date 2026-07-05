@@ -171,6 +171,15 @@ const { buildMonthlyPdf } = await import('../api/_lib/report.js');
 const pdfB64 = await buildMonthlyPdf({ equity: 1e6, pnl30: 5000, openPnl: 1200, exposure: 8e5, maxDrawdownPct: -8, ddDurationDays: 12, sharpe: 1.2, sortino: 1.5, funds: [{ name: 'Core', color: '#10B981', uPnl: 1200, notional: 8e5, bots: [{}] }], dateLabel: '2026-06-15' });
 ok('buildMonthlyPdf produces a valid %PDF', Buffer.from(pdfB64, 'base64').slice(0, 5).toString() === '%PDF-', pdfB64.slice(0, 8));
 
+// ?mode=alerts (the frequent GitHub Actions trigger — see .github/workflows/alert-check.yml):
+// still catches the same breach, but must NEVER send the daily/weekly/monthly reports — even
+// with force=all — since a report re-send every ~10 minutes would spam recipients all day.
+sentMessages.length = 0;
+r = await call(cronDaily, { method: 'POST', headers: authH, query: { mode: 'alerts', force: 'all' } });
+ok('?mode=alerts still detects the same breach', r.body.alertsOnly === true && r.body.breaches.some(b => b.kind === 'pnlDay'), r.body.breaches);
+ok('?mode=alerts never sends daily/weekly/monthly reports, even with force=all', !r.body.sent.some(s => ['report', 'weekly', 'monthly', 'monthly-pdf'].includes(s.type)), r.body.sent.map(s => s.type));
+ok('?mode=alerts still sends the breach alert itself', r.body.sent.some(s => s.type === 'alert'), r.body.sent.map(s => s.type));
+
 // acknowledgement: cron created an alert (breach) with a code -> webhook acks it -> /api/alerts shows acked
 r = await call(alerts, { method: 'GET', headers: authH });
 const pending = r.body.alerts.find(al => !al.ackedAt);
