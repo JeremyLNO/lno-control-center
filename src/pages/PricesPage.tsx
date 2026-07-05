@@ -8,26 +8,57 @@ import {
    SYSTEM STATUS
    ============================================================ */
 const PRICE_SYMBOLS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','DOGEUSDT','LINKUSDT','DOTUSDT','LTCUSDT','TRXUSDT','ATOMUSDT','NEARUSDT','HYPEUSDT'];
-// Live public crypto prices (Binance public REST, CORS-enabled, no key). Independent of the account.
+// Live public crypto prices — Binance's public futures ticker WebSocket (no key, no CORS
+// issue since it's not even HTTP), so every symbol updates in real time (~once/sec) instead
+// of waiting on a fixed poll interval. Entirely independent of the account/positions.
 function PricesPage(){
   const {user,t}=useApp();
   const [rows,setRows]=useState(null); const [err,setErr]=useState(false); const [ts,setTs]=useState(null);
   const [order,setOrder]=useState(()=>PREF.get('prices_order',[])); const [drag,setDrag]=useState(null);
   useEffect(()=>{
     if(!hasPerm(user,'view_activity')) return;
-    let alive=true;
-    const load=async()=>{
+    let stopped=false, ws: WebSocket|null=null, reconnectTimer: any=null, reconnectDelay=2000;
+    let restIv: any=null, watchdog: any=null, gotFirstMessage=false;
+    const want=new Set(PRICE_SYMBOLS);
+
+    // Fallback: some networks (corporate proxies, certain regions) let the WS handshake
+    // through but silently drop the actual data frames, or block it outright. If no real
+    // tick has arrived a few seconds after connecting, fall back to the old 20s REST poll so
+    // the page never gets stuck on "Loading…" — and drop the fallback the moment WS data
+    // does start flowing (now, or after a later successful reconnect).
+    const loadRest=async()=>{
       try{
-        // Binance USDⓈ-M FUTURES 24h tickers (public, no key). The futures endpoint has no
-        // `symbols` batch param → fetch all and filter to our list.
         const r=await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr',{cache:'no-store'});
-        if(!r.ok) throw 0; const all=await r.json(); if(!alive) return;
-        const want=new Set(PRICE_SYMBOLS); const j=(Array.isArray(all)?all:[]).filter(t=>want.has(t.symbol));
-        setRows(j.map(t=>({symbol:t.symbol,base:baseOf(t.symbol),price:+t.lastPrice,chg:+t.priceChangePercent,vol:+t.quoteVolume,high:+t.highPrice,low:+t.lowPrice})).sort((a,b)=>b.vol-a.vol));
+        if(!r.ok) throw 0; const all=await r.json(); if(stopped) return;
+        const j=(Array.isArray(all)?all:[]).filter(x=>want.has(x.symbol));
+        setRows(j.map(x=>({symbol:x.symbol,base:baseOf(x.symbol),price:+x.lastPrice,chg:+x.priceChangePercent,vol:+x.quoteVolume,high:+x.highPrice,low:+x.lowPrice})).sort((a,b)=>b.vol-a.vol));
         setErr(false); setTs(Date.now());
-      }catch(e){ if(alive){ setErr(true); setRows(p=>p||[]); } }
+      }catch(e){ if(!stopped){ setErr(true); setRows(p=>p||[]); } }
     };
-    load(); const iv=setInterval(load,20000); return ()=>{alive=false;clearInterval(iv);};
+    const startRestFallback=()=>{ if(restIv) return; loadRest(); restIv=setInterval(loadRest,20000); };
+
+    function connect(){
+      if(stopped) return;
+      // !ticker@arr streams a fresh 24hr-ticker snapshot for EVERY symbol roughly once a
+      // second; filtering client-side mirrors exactly what the REST fetch-all-then-filter
+      // fallback does (the futures ticker endpoint has no per-symbol batch param either).
+      ws=new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
+      ws.onopen=()=>{ reconnectDelay=2000; clearTimeout(watchdog); watchdog=setTimeout(()=>{ if(!gotFirstMessage) startRestFallback(); },8000); };
+      ws.onmessage=(ev)=>{
+        try{
+          const all=JSON.parse(ev.data);
+          const j=(Array.isArray(all)?all:[]).filter(x=>want.has(x.s));
+          if(!j.length) return;
+          if(!gotFirstMessage){ gotFirstMessage=true; clearTimeout(watchdog); if(restIv){ clearInterval(restIv); restIv=null; } }
+          setRows(j.map(x=>({symbol:x.s,base:baseOf(x.s),price:+x.c,chg:+x.P,vol:+x.q,high:+x.h,low:+x.l})).sort((a,b)=>b.vol-a.vol));
+          setErr(false); setTs(Date.now());
+        }catch(e){ /* a malformed tick shouldn't drop the whole stream */ }
+      };
+      ws.onclose=()=>{ if(stopped)return; if(gotFirstMessage) setErr(true); reconnectTimer=setTimeout(connect,reconnectDelay); reconnectDelay=Math.min(reconnectDelay*2,30000); };
+      ws.onerror=()=>{ try{ ws&&ws.close(); }catch(e){} };
+    }
+    connect();
+    return ()=>{ stopped=true; if(ws){ try{ ws.close(); }catch(e){} } if(reconnectTimer) clearTimeout(reconnectTimer); if(restIv) clearInterval(restIv); if(watchdog) clearTimeout(watchdog); };
   },[]);
   // apply the user's saved drag order; unknown/new symbols fall to the end (by volume)
   const ordered=useMemo(()=>{ if(!rows||!order.length) return rows; const idx=s=>{ const i=order.indexOf(s); return i<0?1e9:i; }; return rows.slice().sort((a,b)=>idx(a.symbol)-idx(b.symbol)||b.vol-a.vol); },[rows,order]);

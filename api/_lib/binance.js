@@ -86,3 +86,19 @@ export async function getIncome(key, secret, { startTime } = {}) {
     income: parseFloat(r.income || '0'), time: Number(r.time),
   }));
 }
+
+// User Data Stream (listenKey) — unlike every call above, these three take ONLY the API-KEY
+// header, no HMAC signature, by Binance's own design: a listenKey is a scoped, revocable,
+// time-limited token meant to be handed to a lower-trust client so it can open its own
+// WebSocket for real-time ACCOUNT_UPDATE/ORDER_TRADE_UPDATE events. The account's actual
+// key+secret never leave the server — only this derived token does.
+async function listenKeyRequest(key, method) {
+  const opts = { method, headers: { 'X-MBX-APIKEY': key } };
+  const d = await proxyDispatcher(); if (d) opts.dispatcher = d;
+  const r = await fetch(`${FAPI}/fapi/v1/listenKey`, opts);
+  let body; try { body = await r.json(); } catch (e) { body = null; }
+  if (!r.ok) { const e = new Error((body && body.msg) || `binance ${r.status}`); e.code = body && body.code; throw e; }
+  return body || {};
+}
+export async function createListenKey(key) { return (await listenKeyRequest(key, 'POST')).listenKey; }
+export async function keepAliveListenKey(key) { await listenKeyRequest(key, 'PUT'); }

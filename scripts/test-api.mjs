@@ -96,6 +96,7 @@ globalThis.fetch = async (url, opts) => {
     if (binanceFail) return { ok: false, status: 401, json: async () => ({ code: -2015, msg: 'Invalid API-key, IP, or permissions for action.' }) };
     if (u.includes('/fapi/v2/positionRisk')) return { ok: true, status: 200, json: async () => binancePositions };
     if (u.includes('/fapi/v2/account')) return { ok: true, status: 200, json: async () => ({ totalMarginBalance: '125000.50', totalWalletBalance: walletBalance, totalUnrealizedProfit: '5000.50', availableBalance: '90000' }) };
+    if (u.endsWith('/fapi/v1/listenKey')) return { ok: true, status: 200, json: async () => (opts && opts.method === 'POST' ? { listenKey: 'fake-listen-key-123' } : {}) };
     return { ok: true, status: 200, json: async () => ({}) };
   }
   if (u.includes('textmebot.com')) { sentMessages.push({ text: new URL(u).searchParams.get('text') || '' }); return { ok: true, status: 200, text: async () => 'Success! Message Sent.' }; }
@@ -234,6 +235,14 @@ ok('the sync error is stored on the exchange (status=error + lastError)', !!exEr
 binanceFail = false;
 await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } }); // restore good state (clears lastError)
 ok('a successful re-sync clears the stored error', ((await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId) || {}).lastError == null);
+
+// ── Real-time: the browser gets a scoped listenKey (never the real key/secret) to open its
+// own WebSocket for instant account/position updates, instead of waiting on the 30s poll ──
+ok('fetching a listenKey requires auth -> 401', (await call(bots, { query: { listenKey: '1' } })).status === 401);
+r = await call(bots, { method: 'GET', headers: authH, query: { listenKey: '1' } });
+ok('admin gets a real listenKey + wss:// URL, never the underlying API key/secret', r.status === 200 && r.body.listenKey === 'fake-listen-key-123' && r.body.wsUrl === 'wss://fstream.binance.com/ws/fake-listen-key-123', r.body);
+r = await call(bots, { method: 'POST', headers: authH, body: { action: 'listenKeyKeepAlive' } });
+ok('admin can keep the listenKey alive', r.status === 200 && r.body.ok === true, r.body);
 
 // ── Employee Fund: contributions are detected live from the synced wallet balance, never
 // auto-granted on hire, and only become a share once an admin assigns them to someone ──

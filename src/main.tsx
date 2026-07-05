@@ -68,8 +68,55 @@ function useData(authed,isAdmin){
     return ()=>{alive=false;};
   },[authed,refreshLive,loadFunds,loadSnaps]);
 
-  // poll positions/live every 30s (snapshots/funds change rarely)
+  // poll positions/live every 30s (snapshots/funds change rarely) — kept as a fallback net
+  // even with the WebSocket below, in case that connection is silently stuck.
   useEffect(()=>{ if(!authed)return; const iv=setInterval(()=>{ refreshLive().catch(e=>setError(e)); },30000); return ()=>clearInterval(iv); },[authed,refreshLive]);
+
+  // True real-time trigger: an admin session opens Binance's private user-data WebSocket via
+  // a short-lived listenKey (minted server-side — see api/bots.js — the account's actual key
+  // + secret never leave the server, only this scoped, revocable, time-limited token does).
+  // Rather than re-deriving balances/positions from Binance's raw WS payload client-side
+  // (duplicating the margin/liquidation/notional math that already lives, tested, in
+  // api/_lib/binance.js), any message on it is treated as "something changed, re-sync now" —
+  // reuses the exact same REST sync pipeline, just triggered within ~1-2s of a real change
+  // instead of waiting for the 30s fallback poll above.
+  useEffect(()=>{
+    if(!authed||!isAdmin) return;
+    let stopped=false, ws: WebSocket|null=null, keepaliveIv: any=null, reconnectTimer: any=null, debounceTimer: any=null;
+    let reconnectDelay=2000, lastSyncAt=0;
+
+    const triggerSync=()=>{
+      const now=Date.now(), gap=now-lastSyncAt;
+      if(gap>2000){ lastSyncAt=now; refreshLive().catch(()=>{}); }
+      else { clearTimeout(debounceTimer); debounceTimer=setTimeout(()=>{ lastSyncAt=Date.now(); refreshLive().catch(()=>{}); },2000-gap); }
+    };
+    const scheduleReconnect=()=>{
+      if(stopped) return;
+      reconnectTimer=setTimeout(connect,reconnectDelay);
+      reconnectDelay=Math.min(reconnectDelay*2,30000);
+    };
+    async function connect(){
+      if(stopped) return;
+      try{
+        const r=await api('bots?listenKey=1');
+        if(stopped||!r.wsUrl) { scheduleReconnect(); return; }
+        ws=new WebSocket(r.wsUrl);
+        ws.onopen=()=>{ reconnectDelay=2000; };
+        ws.onmessage=()=>{ triggerSync(); };
+        ws.onclose=()=>{ if(!keepaliveIv)return; clearInterval(keepaliveIv); keepaliveIv=null; scheduleReconnect(); };
+        ws.onerror=()=>{ try{ ws&&ws.close(); }catch(e){} };
+        keepaliveIv=setInterval(()=>{ api('bots',{method:'POST',body:{action:'listenKeyKeepAlive'}}).catch(()=>{}); },30*60*1000);
+      }catch(e){ scheduleReconnect(); }
+    }
+    connect();
+    return ()=>{
+      stopped=true;
+      if(ws){ try{ ws.close(); }catch(e){} }
+      if(keepaliveIv) clearInterval(keepaliveIv);
+      if(reconnectTimer) clearTimeout(reconnectTimer);
+      if(debounceTimer) clearTimeout(debounceTimer);
+    };
+  },[authed,isAdmin,refreshLive]);
 
   const data=useMemo(()=>{
     if(!raw) return null;
