@@ -3,6 +3,8 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   fmtPrice, fmtAgo, baseOf, PREF, Card, useApp, hasPerm, PageHead, Denied
 } from '../ui'
+import { Quantum } from 'ldrs/react'
+import 'ldrs/react/Quantum.css'
 
 /* ============================================================
    SYSTEM STATUS
@@ -37,13 +39,21 @@ function PricesPage(){
     };
     const startRestFallback=()=>{ if(restIv) return; loadRest(); restIv=setInterval(loadRest,20000); };
 
+    // Set once, tied to the whole mount — NOT re-armed on every reconnect attempt. A blocked
+    // connection (CSP, proxy, offline) fires onerror/onclose before onopen ever runs, and
+    // retries can cycle well within 8s of each other; arming the watchdog inside onopen (or
+    // resetting it on every connect()) means a connection that never opens never triggers the
+    // fallback. This way it fires exactly once, 8s after the first attempt, unless real data
+    // has arrived by then.
+    watchdog=setTimeout(()=>{ if(!gotFirstMessage) startRestFallback(); },8000);
+
     function connect(){
       if(stopped) return;
       // !ticker@arr streams a fresh 24hr-ticker snapshot for EVERY symbol roughly once a
       // second; filtering client-side mirrors exactly what the REST fetch-all-then-filter
       // fallback does (the futures ticker endpoint has no per-symbol batch param either).
       ws=new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
-      ws.onopen=()=>{ reconnectDelay=2000; clearTimeout(watchdog); watchdog=setTimeout(()=>{ if(!gotFirstMessage) startRestFallback(); },8000); };
+      ws.onopen=()=>{ reconnectDelay=2000; };
       ws.onmessage=(ev)=>{
         try{
           const all=JSON.parse(ev.data);
@@ -71,7 +81,10 @@ function PricesPage(){
       {order.length>0&&<button onClick={()=>{setOrder([]);PREF.set('prices_order',[]);}} className="text-xs text-slate-400 hover:text-navy">{t('prices.resetOrder')}</button>}
       {ts&&<span className="text-xs text-slate-400">{t('prices.updatedAgo',{ago:fmtAgo(ts)})}</span>}
     </div>}/>
-    {rows==null? <Card className="p-10 text-center text-slate-400 text-sm">{t('prices.loading')}</Card>
+    {rows==null? <Card className="p-10 text-center text-slate-400 text-sm">
+        <div className="flex justify-center mb-2"><Quantum size="45" speed="1.9" color="#C9A24D"/></div>
+        {t('prices.loading')}
+      </Card>
      : err&&!rows.length? <Card className="p-10 text-center text-slate-400 text-sm">{t('prices.couldNotLoad')}</Card>
      : <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {ordered.map(row=><div key={row.symbol} draggable
