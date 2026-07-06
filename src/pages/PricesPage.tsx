@@ -17,6 +17,11 @@ function PricesPage(){
   const {user,t}=useApp();
   const [rows,setRows]=useState(null); const [err,setErr]=useState(false); const [ts,setTs]=useState(null);
   const [order,setOrder]=useState(()=>PREF.get('prices_order',[])); const [drag,setDrag]=useState(null);
+  // Ticks on every real price update — WS ticks (~1/sec) or a REST-fallback poll — so the
+  // top progress bar restarts each time. Shown against a 20s span (the REST fallback's
+  // cadence): under normal WS flow it resets almost instantly; if it ever visibly fills,
+  // that's a sign updates have stalled.
+  const [tick,setTick]=useState(0);
   useEffect(()=>{
     if(!hasPerm(user,'view_activity')) return;
     let stopped=false, ws: WebSocket|null=null, reconnectTimer: any=null, reconnectDelay=2000;
@@ -34,7 +39,7 @@ function PricesPage(){
         if(!r.ok) throw 0; const all=await r.json(); if(stopped) return;
         const j=(Array.isArray(all)?all:[]).filter(x=>want.has(x.symbol));
         setRows(j.map(x=>({symbol:x.symbol,base:baseOf(x.symbol),price:+x.lastPrice,chg:+x.priceChangePercent,vol:+x.quoteVolume,high:+x.highPrice,low:+x.lowPrice})).sort((a,b)=>b.vol-a.vol));
-        setErr(false); setTs(Date.now());
+        setErr(false); setTs(Date.now()); setTick(x=>x+1);
       }catch(e){ if(!stopped){ setErr(true); setRows(p=>p||[]); } }
     };
     const startRestFallback=()=>{ if(restIv) return; loadRest(); restIv=setInterval(loadRest,20000); };
@@ -61,7 +66,7 @@ function PricesPage(){
           if(!j.length) return;
           if(!gotFirstMessage){ gotFirstMessage=true; clearTimeout(watchdog); if(restIv){ clearInterval(restIv); restIv=null; } }
           setRows(j.map(x=>({symbol:x.s,base:baseOf(x.s),price:+x.c,chg:+x.P,vol:+x.q,high:+x.h,low:+x.l})).sort((a,b)=>b.vol-a.vol));
-          setErr(false); setTs(Date.now());
+          setErr(false); setTs(Date.now()); setTick(x=>x+1);
         }catch(e){ /* a malformed tick shouldn't drop the whole stream */ }
       };
       ws.onclose=()=>{ if(stopped)return; if(gotFirstMessage) setErr(true); reconnectTimer=setTimeout(connect,reconnectDelay); reconnectDelay=Math.min(reconnectDelay*2,30000); };
@@ -77,7 +82,7 @@ function PricesPage(){
   const px=(p)=>fmtPrice(p).replace(' USDT','');
   const onDrop=(targetSym)=>{ const cur=(ordered||[]).map(r=>r.symbol); const from=cur.indexOf(drag); if(from<0||drag===targetSym){ setDrag(null); return; } cur.splice(from,1); const to=cur.indexOf(targetSym); cur.splice(to<0?cur.length:to,0,drag); setOrder(cur); PREF.set('prices_order',cur); setDrag(null); };
   return <div>
-    <PageHead title={t('prices.title')} subtitle={t('prices.subtitle')} actions={<div className="flex items-center gap-3">
+    <PageHead title={t('prices.title')} subtitle={t('prices.subtitle')} refresh={{ms:20000,tick}} actions={<div className="flex items-center gap-3">
       {order.length>0&&<button onClick={()=>{setOrder([]);PREF.set('prices_order',[]);}} className="text-xs text-slate-400 hover:text-navy">{t('prices.resetOrder')}</button>}
       {ts&&<span className="text-xs text-slate-400">{t('prices.updatedAgo',{ago:fmtAgo(ts)})}</span>}
     </div>}/>
