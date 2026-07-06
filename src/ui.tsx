@@ -3,6 +3,8 @@ import type { AppContextValue, ApiError } from './types'
 export type { Role, Permission, User, Fund, Bot, Position, Snapshot, SeriesPoint, FundGroup, DashboardData, Route, DataStatus, ApiFn, AppContextValue, Lang } from './types'
 import { SUPPORTED_LANGS, LANG_LABELS } from './i18n'
 export { SUPPORTED_LANGS, LANG_LABELS } from './i18n'
+import { Quantum } from 'ldrs/react'
+import 'ldrs/react/Quantum.css'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 
 /* ============================================================
@@ -555,11 +557,9 @@ function LoadingScreen(){
   const {t}=useApp();
   return <div className="h-full grid place-items-center bg-bg">
     <div className="text-center">
-      <Logo className="h-8 text-navy mx-auto mb-3"/>
-      <div className="flex items-center justify-center gap-2 text-slate-500 text-sm">
-        <span className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-gold animate-spin"/>
-        {t('loading.portfolio')}
-      </div>
+      <Logo className="h-8 text-navy mx-auto mb-4"/>
+      <div className="flex justify-center"><Quantum size="90" speed="1.9" color="#C9A24D"/></div>
+      <div className="text-slate-500 text-sm mt-3">{t('loading.portfolio')}</div>
     </div>
   </div>;
 }
