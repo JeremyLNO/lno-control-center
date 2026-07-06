@@ -145,6 +145,11 @@ export interface AppContextValue {
   reloadData: () => Promise<void>;
   data: DashboardData | null;
   dataStatus: DataStatus;
+  /** Bumped on every successful shared-data refresh (interval, WS-triggered, or manual);
+   *  pass with refreshMs to <PageHead refresh={{ms:refreshMs,tick:refreshTick}}/> so the
+   *  page shows a time-to-next-refresh progress bar. */
+  refreshTick: number;
+  refreshMs: number;
   lang: Lang;
   setLang: (lang: Lang) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;

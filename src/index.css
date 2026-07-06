@@ -16,3 +16,4 @@ html,body,#root{height:100%}
   .fadein{animation:fadein .2s ease}
   @keyframes fadein{from{opacity:0}to{opacity:1}}
   [data-tip]{position:relative}
+  @keyframes lno-refresh-bar{from{transform:scaleX(0)}to{transform:scaleX(1)}}

@@ -42,12 +42,17 @@ function useHashRoute(){
    Non-admins still get the 30s cache refresh unchanged; the sync action itself stays
    admin-gated (see api/bots.js) so a lower-privileged or shareholder tab can never
    trigger a live signed Binance call. */
+const DATA_REFRESH_MS=30000;
 function useData(authed,isAdmin){
   const [raw,setRaw]=useState(null);     // { bots, live }
   const [funds,setFunds]=useState([]);
   const [snaps,setSnaps]=useState([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState(null);
+  // bumped on every successful refreshLive (interval-driven, WS-triggered, or manual) so
+  // pages can show a "time until next refresh" progress bar that restarts on ANY real
+  // refresh, not just the fixed-interval ones — see RefreshBar in ui.tsx.
+  const [refreshTick,setRefreshTick]=useState(0);
 
   const loadBots=useCallback(async()=>{ const r=await api('bots'); setRaw({bots:r.bots||[],live:r.live||null}); return r; },[]);
   const loadFunds=useCallback(async()=>{ const r=await api('funds'); setFunds(r.funds||[]); return r.funds; },[]);
@@ -56,7 +61,9 @@ function useData(authed,isAdmin){
   // the exchange first when the viewer is an admin, then re-reads bots/live either way.
   const refreshLive=useCallback(async()=>{
     if(isAdmin){ try{ await api('bots',{method:'POST',body:{action:'sync'}}); }catch(e){ /* best-effort — a failed sync shouldn't block reading whatever's cached */ } }
-    return loadBots();
+    const r=await loadBots();
+    setRefreshTick(x=>x+1);
+    return r;
   },[isAdmin,loadBots]);
   // reloadData: re-fetch everything (used after sync / fund or bot mutations).
   const reloadData=useCallback(async()=>{ try{ await Promise.all([refreshLive(),loadFunds(),loadSnaps()]); setError(null); }catch(e){ setError(e); } },[refreshLive,loadFunds,loadSnaps]);
@@ -70,7 +77,7 @@ function useData(authed,isAdmin){
 
   // poll positions/live every 30s (snapshots/funds change rarely) — kept as a fallback net
   // even with the WebSocket below, in case that connection is silently stuck.
-  useEffect(()=>{ if(!authed)return; const iv=setInterval(()=>{ refreshLive().catch(e=>setError(e)); },30000); return ()=>clearInterval(iv); },[authed,refreshLive]);
+  useEffect(()=>{ if(!authed)return; const iv=setInterval(()=>{ refreshLive().catch(e=>setError(e)); },DATA_REFRESH_MS); return ()=>clearInterval(iv); },[authed,refreshLive]);
 
   // True real-time trigger: an admin session opens Binance's private user-data WebSocket via
   // a short-lived listenKey (minted server-side — see api/bots.js — the account's actual key
@@ -135,7 +142,7 @@ function useData(authed,isAdmin){
   },[raw,funds,snaps,loading,error]);
 
   const dataStatus: DataStatus = error? 'partial' : (raw&&raw.live&&raw.live.connected>0)? (raw.live.errors? 'partial':'live') : 'offline';
-  return { data, funds, setFunds, reloadData, reloadFunds:loadFunds, dataStatus };
+  return { data, funds, setFunds, reloadData, reloadFunds:loadFunds, dataStatus, refreshTick, refreshMs:DATA_REFRESH_MS };
 }
 
 // Global keyboard navigation: `g` then a letter jumps between pages, `/` focuses
@@ -220,7 +227,7 @@ function Root(){
   const route=useHashRoute();
   const [user,setUser]=useState(null);
   const [booting,setBooting]=useState(true);
-  const {data,funds,setFunds,reloadData,reloadFunds,dataStatus}=useData(!!user,!!(user&&user.role==='admin'));
+  const {data,funds,setFunds,reloadData,reloadFunds,dataStatus,refreshTick,refreshMs}=useData(!!user,!!(user&&user.role==='admin'));
 
   // Language: defaults to the browser's language; once a user explicitly picks one (the
   // sidebar switcher), it's persisted both locally (instant on next visit, incl. logged out)
@@ -272,7 +279,7 @@ function Root(){
   function logout(){ api('auth',{method:'POST',body:{action:'logout'}}).catch(()=>{}); setToken(null); setUser(null); window.location.hash='#/activity'; }
   function navigate(to){ window.location.hash='#'+to; }
 
-  const ctx={route,navigate,user,setUser,login,loginGoogle,logout,api,funds,setFunds,reloadFunds,reloadData,data,dataStatus,lang,setLang,t};
+  const ctx={route,navigate,user,setUser,login,loginGoogle,logout,api,funds,setFunds,reloadFunds,reloadData,data,dataStatus,refreshTick,refreshMs,lang,setLang,t};
 
   const content = booting ? <LoadingScreen/>
     : !user ? <Login/>

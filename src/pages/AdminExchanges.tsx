@@ -12,7 +12,8 @@ function AdminExchanges(){
   const {user,t}=useApp();
   const [exchanges,setExchanges]=useState([]);
   const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
-  const reload=()=>api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{});
+  const [tick,setTick]=useState(0);
+  const reload=()=>{ setTick(x=>x+1); return api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{}); };
   const [syncing,setSyncing]=useState(false);
   async function runSync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); await reload(); if(r.errors){ toast.error((r.errorMsgs&&r.errorMsgs[0])||t(r.errors===1?'bots.syncFailedOne':'bots.syncFailedMany',{n:r.errors})); } else { const exch=t((r.connected||0)===1?'exchanges.exchangeCountOne':'exchanges.exchangeCountMany',{n:r.connected||0}); const pos=t((r.positions||0)===1?'exchanges.positionCountOne':'exchanges.positionCountMany',{n:r.positions||0}); toast.success(t('exchanges.syncedResult',{exch,pos})); } }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
   useEffect(()=>{
@@ -27,7 +28,7 @@ function AdminExchanges(){
   if(user.role!=='admin') return <Denied/>;
   const mask=(s)=> s? s.slice(0,6)+'••••••••'+s.slice(-4) : '';
   return <div>
-    <PageHead title={t('exchanges.title')} subtitle={t('exchanges.subtitle')} actions={<div className="flex items-center gap-2">
+    <PageHead title={t('exchanges.title')} subtitle={t('exchanges.subtitle')} refresh={{ms:30000,tick}} actions={<div className="flex items-center gap-2">
       <Btn variant="outline" onClick={runSync} disabled={syncing}><Icon name="refresh" className="w-4 h-4"/>{syncing?t('bots.syncing'):t('bots.syncNow')}</Btn>
       <Btn onClick={()=>setModal({mode:'add',data:{name:'binance',label:'',apiKey:'',secret:'',note:'',wallets:[]}})}><Icon name="plus" className="w-4 h-4"/>{t('exchanges.addExchange')}</Btn>
     </div>}/>

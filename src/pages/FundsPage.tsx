@@ -32,7 +32,7 @@ function FundModal({open,initial,onClose,onSave}: any){
   </Modal>;
 }
 function FundsPage(){
-  const {funds,user,reloadData,t}=useApp();
+  const {funds,user,reloadData,refreshTick,refreshMs,t}=useApp();
   const isAdmin=user.role==='admin';
   const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
   if(!hasPerm(user,'view_trades')) return <Denied/>;
@@ -41,6 +41,7 @@ function FundsPage(){
   async function removeFund(){ try{ await api('funds',{method:'DELETE',body:{id:del.id}}); await reloadData(); toast.success(t('funds.deleted')); }catch(e){ toast.error(e.message); } setDel(null); }
   return <div>
     <PageHead title={t('funds.title')} subtitle={t('funds.subtitle')}
+      refresh={{ms:refreshMs,tick:refreshTick}}
       actions={isAdmin&&<Btn onClick={()=>setModal({})}><Icon name="plus" className="w-4 h-4"/>{t('funds.newFund')}</Btn>}/>
     {funds.length===0? <EmptyState icon="layers" title={t('funds.noFundsTitle')}
         hint={isAdmin?t('funds.noFundsHintAdmin'):t('funds.noFundsHintOther')}

@@ -6,7 +6,7 @@ import {
 } from '../ui'
 
 function StatusPage(){
-  const {user,data,dataStatus,reloadData,t}=useApp();
+  const {user,data,dataStatus,reloadData,refreshTick,refreshMs,t}=useApp();
   const [snaps,setSnaps]=useState(null); const [alerts,setAlerts]=useState(null); const [openwa,setOpenwa]=useState(undefined); const [dbErr,setDbErr]=useState(null);
   const [exchanges,setExchanges]=useState(null);
   const [wipe,setWipe]=useState(false); const [wiping,setWiping]=useState(false);
@@ -59,7 +59,7 @@ function StatusPage(){
   const dotCls=(s)=>s==='ok'?'bg-success':s==='warn'?'bg-amber-500':s==='down'?'bg-danger':'bg-slate-300';
 
   return <div>
-    <PageHead title={t('sysstatus.title')} subtitle={t('sysstatus.subtitle')}/>
+    <PageHead title={t('sysstatus.title')} subtitle={t('sysstatus.subtitle')} refresh={{ms:refreshMs,tick:refreshTick}}/>
     <Card className="p-5 mb-5 flex items-center gap-3">
       <span className={`w-3 h-3 rounded-full ${overall[1]} ${anyDown?'':'pulse-dot'}`}/>
       <span className={`text-lg font-semibold ${overall[2]}`}>{overall[0]}</span>

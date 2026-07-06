@@ -7,7 +7,7 @@ import {
 } from '../ui'
 
 function ActivityPage(){
-  const {funds,navigate,user,data,t}=useApp();
+  const {funds,navigate,user,data,refreshTick,refreshMs,t}=useApp();
   const [period,setPeriod]=useState(()=>PREF.get('activity_period2','90'));
   const [custom,setCustom]=useState({start:null,end:null});
   useEffect(()=>{ PREF.set('activity_period2',period); },[period]);
@@ -32,6 +32,7 @@ function ActivityPage(){
 
   return <div>
     <PageHead title={t('activity.title')} subtitle={t('activity.subtitle')}
+      refresh={{ms:refreshMs,tick:refreshTick}}
       actions={hasHistory&&<PeriodControls {...{period,setPeriod,custom,setCustom}}/>}/>
 
     <OnboardingCard/>

@@ -801,11 +801,25 @@ function MobileNav(){
   </>;
 }
 
-function PageHead({title,subtitle,actions}: any){
-  return <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
-    <div><h1 className="text-xl font-bold text-navy tracking-tight">{title}</h1>{subtitle&&<p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}</div>
-    {actions&&<div className="flex items-center gap-2">{actions}</div>}
+// Thin progress bar showing time-to-next-auto-refresh, so the user can see at a glance
+// when a page's data will update rather than being surprised by a silent change. `tick`
+// should increment every time the page's data actually refreshes (whatever the trigger —
+// the fixed interval, or an earlier out-of-band refresh) so the bar always restarts from
+// empty at the moment of a real refresh; `ms` is that refresh cadence. Remounting the fill
+// via `key={tick}` restarts its CSS animation for free, no per-frame JS needed.
+function RefreshBar({ms,tick}: {ms:number; tick:number}){
+  return <div className="h-[3px] rounded-full bg-navy/10 overflow-hidden mb-3">
+    <div key={tick} className="h-full w-full bg-gold origin-left rounded-full" style={{animation:`lno-refresh-bar ${ms}ms linear forwards`}}/>
   </div>;
+}
+function PageHead({title,subtitle,actions,refresh}: any){
+  return <>
+    {refresh&&<RefreshBar ms={refresh.ms} tick={refresh.tick}/>}
+    <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
+      <div><h1 className="text-xl font-bold text-navy tracking-tight">{title}</h1>{subtitle&&<p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}</div>
+      {actions&&<div className="flex items-center gap-2">{actions}</div>}
+    </div>
+  </>;
 }
 function Denied(){ const {t}=useApp(); return <div className="grid place-items-center h-full"><Card className="p-8 text-center max-w-sm"><Icon name="shield" className="w-10 h-10 mx-auto text-slate-300"/><h2 className="font-semibold text-navy mt-3">{t('denied.title')}</h2><p className="text-sm text-slate-500 mt-1">{t('denied.message')}</p></Card></div>; }
 
@@ -924,5 +938,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };

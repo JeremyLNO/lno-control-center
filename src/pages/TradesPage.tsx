@@ -84,7 +84,7 @@ function buildPosCols(t: any){ return [
 const POS_GETTERS={symbol:r=>r.symbol,exchange:r=>r.exchange,fund:r=>r.fund?.name||'',side:r=>r.side,qty:r=>r.qty,entry:r=>r.entry,mark:r=>r.mark,uPnl:r=>r.unrealizedPnl,notional:r=>Math.abs(r.notional),leverage:r=>r.leverage,liqDist:r=>{const {pct}=liqInfo(r);return pct==null?Infinity:pct;},marginUsage:r=>marginUsagePct(r)??-1,dormant:r=>{const {hours}=dormantInfo(r);return hours??-1;},status:r=>r.status};
 
 function TradesPage(){
-  const {user,data,funds,t}=useApp();
+  const {user,data,funds,refreshTick,refreshMs,t}=useApp();
   const [f,setF]=useState(()=>PREF.get('pos_filter',{fund:'all',side:'All',status:'open',q:''}));
   const [sort,setSort]=useState(()=>PREF.get('pos_sort',{col:'uPnl',dir:'desc'}));
   const POS_COLS=useMemo(()=>buildPosCols(t),[t]);
@@ -112,6 +112,7 @@ function TradesPage(){
 
   return <div>
     <PageHead title={t('positions.title')} subtitle={t(data.bots.length===1?'positions.subtitleOne':'positions.subtitle',{shown:rows.length,total:data.bots.length})}
+      refresh={{ms:refreshMs,tick:refreshTick}}
       actions={<div className="flex items-center gap-2">
         <PresetMenu storeKey="pos_presets" current={{f,sort,colKeys}} onApply={s=>{ if(s.f)setF(s.f); if(s.sort)setSort(s.sort); if(s.colKeys)setColKeys(s.colKeys); }}/>
         <ColumnPicker columns={POS_COLS} visible={colKeys} onChange={setColKeys}/>

@@ -9,7 +9,7 @@ import {
    ADMIN — BOTS (auto-detected positions; assign to funds, sync)
    ============================================================ */
 function BotsPage(){
-  const {funds,user,data,reloadData,t}=useApp();
+  const {funds,user,data,reloadData,refreshTick,refreshMs,t}=useApp();
   const [syncing,setSyncing]=useState(false); const [del,setDel]=useState(null);
   const [attr,setAttr]=useState(null); const [costs,setCosts]=useState(null);
   useEffect(()=>{ if(user.role!=='admin')return; api('bots?attribution=1').then(setAttr).catch(()=>setAttr({perSymbol:[],perFund:[]})); api('bots?costs=1').then(setCosts).catch(()=>setCosts({perSymbol:[],perFund:[]})); },[]);
@@ -43,6 +43,7 @@ function BotsPage(){
 
   return <div>
     <PageHead title={t('bots.title')} subtitle={t('bots.subtitle')}
+      refresh={{ms:refreshMs,tick:refreshTick}}
       actions={<div className="flex items-center gap-3">
         <span className="hidden sm:block text-xs text-slate-400">{t('bots.lastSynced',{ago:lastSynced})}</span>
         <Btn onClick={sync} disabled={syncing}><Icon name="refresh" className={`w-4 h-4 ${syncing?'animate-spin':''}`}/>{syncing?t('bots.syncing'):t('bots.syncNow')}</Btn>

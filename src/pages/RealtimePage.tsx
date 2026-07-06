@@ -9,7 +9,7 @@ import {
    REAL-TIME OPERATIONS
    ============================================================ */
 function RealtimePage(){
-  const {funds,user,data,dataStatus,t}=useApp();
+  const {funds,user,data,dataStatus,refreshTick,refreshMs,t}=useApp();
   const [fund,setFund]=useState('all');
   const [sort,setSort]=useState({col:'uPnl',dir:'desc'});
   const [incidents,setIncidents]=useState(null);
@@ -30,6 +30,7 @@ function RealtimePage(){
   const fundOpts=[{value:'all',label:t('live.allFunds')},...funds.map(f=>({value:f.id,label:f.name})),{value:'unassigned',label:t('live.unassigned')}];
   return <div>
     <PageHead title={t('live.title')} subtitle={t('live.subtitle')}
+      refresh={{ms:refreshMs,tick:refreshTick}}
       actions={<div className="flex items-center gap-3">
         <Select value={fund} onChange={setFund} className="w-40" options={fundOpts}/>
         <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">{data.live&&data.live.syncedAt?t('live.syncedAgo',{ago:fmtAgo(data.live.syncedAt)}):t('live.notSynced')}</span>
