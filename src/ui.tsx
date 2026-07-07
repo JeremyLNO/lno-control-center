@@ -748,6 +748,7 @@ function Header(){
   return <header className="h-16 shrink-0 bg-white border-b border-slate-200 flex items-center gap-4 px-4 lg:px-6">
     <Logo className="lg:hidden h-6 text-navy"/>
     <GlobalSearch/>
+    <div className="ml-auto flex items-center gap-4">
     {user.firstName&&<div className="hidden md:block text-sm text-slate-500">{t('common.hello')}, <span className="font-semibold text-navy">{user.firstName}</span></div>}
     <LiveBadge status={dataStatus}/>
     <div ref={bref} className="relative">
@@ -781,6 +782,7 @@ function Header(){
         <button onClick={()=>{navigate('/support');setMenu(false);}} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2"><Icon name="lifebuoy" className="w-4 h-4"/>{t('nav.support')}</button>
         <button onClick={logout} className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-danger/10 text-danger text-sm flex items-center gap-2"><Icon name="logout" className="w-4 h-4"/>{t('common.signOut')}</button>
       </div>}
+    </div>
     </div>
   </header>;
 }
