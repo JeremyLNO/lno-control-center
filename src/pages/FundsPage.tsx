@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  FUND_PALETTE, api, toast, Icon, Card, Btn, Field, Input, Modal, Confirm, useApp, hasPerm,
+  FUND_PALETTE, fmtUSD, api, toast, Icon, Card, SectionTitle, Btn, Field, Input, Modal, Confirm, Donut, KpiCard, useApp, hasPerm,
   PageHead, Denied, EmptyState
 } from '../ui'
 
@@ -32,17 +32,46 @@ function FundModal({open,initial,onClose,onSave}: any){
   </Modal>;
 }
 function FundsPage(){
-  const {funds,user,reloadData,refreshTick,refreshMs,t}=useApp();
+  const {funds,user,data,reloadData,refreshTick,refreshMs,t}=useApp();
   const isAdmin=user.role==='admin';
   const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
   if(!hasPerm(user,'view_trades')) return <Denied/>;
   async function createFund(v){ await api('funds',{method:'POST',body:v}); await reloadData(); setModal(null); toast.success(t('funds.created')); }
   async function editFund(v){ await api('funds',{method:'PATCH',body:{id:modal.id,...v}}); await reloadData(); setModal(null); toast.success(t('funds.updated')); }
   async function removeFund(){ try{ await api('funds',{method:'DELETE',body:{id:del.id}}); await reloadData(); toast.success(t('funds.deleted')); }catch(e){ toast.error(e.message); } setDel(null); }
+
+  const totalBots=funds.reduce((s,f)=>s+(f.botCount||0),0);
+  const totalOpen=funds.reduce((s,f)=>s+(f.openCount||0),0);
+  const allocFunds=(data.byFund||[]).filter(f=>f.id!=null&&f.notional>0);
+  const allocTotal=allocFunds.reduce((s,f)=>s+f.notional,0);
+
   return <div>
     <PageHead title={t('funds.title')} subtitle={t('funds.subtitle')}
       refresh={{ms:refreshMs,tick:refreshTick}}
       actions={isAdmin&&<Btn onClick={()=>setModal({})}><Icon name="plus" className="w-4 h-4"/>{t('funds.newFund')}</Btn>}/>
+
+    {funds.length>0&&<div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <KpiCard label={t('funds.activeFunds')} value={funds.length} icon="layers" accent="#C9A24D"/>
+      <KpiCard label={t('positions.totalPositions')} value={totalBots} icon="briefcase" accent="#3B82F6"/>
+      <KpiCard label={t('live.openPositions')} value={totalOpen} icon="trendup" accent="#10B981"/>
+      <KpiCard label={t('activity.exposure')} value={fmtUSD(allocTotal)} icon="dollar" accent="#F59E0B"/>
+    </div>}
+
+    {allocFunds.length>0&&<Card className="p-5 mb-5">
+      <SectionTitle>{t('activity.fundAllocation')}</SectionTitle>
+      <div className="flex flex-wrap items-center gap-8">
+        <Donut size={140} thickness={16}
+          segments={allocFunds.map((f,i)=>({value:f.notional,color:f.color||FUND_PALETTE[i%FUND_PALETTE.length]}))}
+          center={<div><div className="text-base font-bold text-navy tnum">{fmtUSD(allocTotal)}</div><div className="text-[10px] text-slate-400">{t('activity.exposure')}</div></div>}/>
+        <div className="flex-1 min-w-[200px] space-y-1.5">
+          {allocFunds.map((f,i)=><div key={f.id} className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2 min-w-0"><span className="w-2.5 h-2.5 rounded-full shrink-0" style={{background:f.color||FUND_PALETTE[i%FUND_PALETTE.length]}}/><span className="truncate text-navy font-medium">{f.name}</span></span>
+            <span className="font-semibold text-navy tnum shrink-0">{(f.notional/allocTotal*100).toFixed(1)}%</span>
+          </div>)}
+        </div>
+      </div>
+    </Card>}
+
     {funds.length===0? <EmptyState icon="layers" title={t('funds.noFundsTitle')}
         hint={isAdmin?t('funds.noFundsHintAdmin'):t('funds.noFundsHintOther')}
         action={isAdmin&&<Btn onClick={()=>setModal({})}><Icon name="plus" className="w-4 h-4"/>{t('funds.createFund')}</Btn>}/>

@@ -1,8 +1,8 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, fmtAgo, PREF, toast, Icon, Card, Btn, Badge, StatusPill,
-  Select, ExportMenu, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag
+  fmtUSD, fmtSigned, fmtNum, fmtPctPlain, clsPnl, fmtPrice, fmtAgo, baseOf, PREF, toast, Icon, Card, SectionTitle, Btn, Badge, StatusPill,
+  Select, ExportMenu, Donut, KpiCard, FUND_PALETTE, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag
 } from '../ui'
 
 /* ============================================================
@@ -110,6 +110,17 @@ function TradesPage(){
   const getExportRows=()=>rows.map(b=>cols.map(c=>c.csv(b)));
   const fundOpts=[{value:'all',label:t('positions.allFunds')},...funds.map(ff=>({value:ff.id,label:ff.name})),{value:'unassigned',label:t('live.unassigned')}];
 
+  const openNotional=data.openBots.reduce((a,b)=>a+Math.abs(b.notional||0),0);
+  const longNotional=data.openBots.filter(b=>b.side==='LONG').reduce((a,b)=>a+Math.abs(b.notional||0),0);
+  const shortNotional=openNotional-longNotional;
+  const openPnl=data.openBots.reduce((a,b)=>a+(b.unrealizedPnl||0),0);
+  const marginUsed=data.openBots.reduce((a,b)=>a+(b.initialMargin||0),0);
+  const byAsset=useMemo(()=>{
+    const m=new Map();
+    data.openBots.forEach(b=>{ const k=baseOf(b.symbol); m.set(k,(m.get(k)||0)+Math.abs(b.notional||0)); });
+    return [...m.entries()].map(([symbol,notional])=>({symbol,notional})).sort((a,b)=>b.notional-a.notional);
+  },[data.openBots]);
+
   return <div>
     <PageHead title={t('positions.title')} subtitle={t(data.bots.length===1?'positions.subtitleOne':'positions.subtitle',{shown:rows.length,total:data.bots.length})}
       refresh={{ms:refreshMs,tick:refreshTick}}
@@ -118,7 +129,18 @@ function TradesPage(){
         <ColumnPicker columns={POS_COLS} visible={colKeys} onChange={setColKeys}/>
         {hasPerm(user,'export_data')&&<ExportMenu filename="lno_positions" headers={exportHeaders} getRows={getExportRows}/>}
       </div>}/>
-    <Card className="p-3 mb-4">
+
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+      <KpiCard label={t('positions.totalPositions')} value={data.openBots.length} icon="briefcase" accent="#C9A24D"/>
+      <KpiCard label={t('positions.longExposure')} value={openNotional?fmtPctPlain(longNotional/openNotional*100):'—'} icon="trendup" accent="#10B981"/>
+      <KpiCard label={t('positions.shortExposure')} value={openNotional?fmtPctPlain(shortNotional/openNotional*100):'—'} icon="trendup" accent="#EF4444"/>
+      <KpiCard label={t('activity.openPnl')} value={<span className={clsPnl(openPnl)}>{fmtSigned(openPnl)}</span>}/>
+      <KpiCard label={t('positions.marginUse')} value={fmtUSD(marginUsed)} icon="layers" accent="#3B82F6"/>
+    </div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-5 mb-4">
+      <div className="lg:col-span-3 space-y-4">
+    <Card className="p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Select value={f.fund} onChange={v=>setF({...f,fund:v})} className="w-44" options={fundOpts}/>
         <Select value={f.side} onChange={v=>setF({...f,side:v})} className="w-32" options={['All','LONG','SHORT']}/>
@@ -144,6 +166,23 @@ function TradesPage(){
       </div>
       {rows.length===0&&<div className="p-10"><EmptyState icon="briefcase" title={data.bots.length===0?t('positions.noPositionsYet'):t('positions.noPositionsMatch')} hint={data.bots.length===0?t('positions.noPositionsHint'):undefined}/></div>}
     </Card>
+      </div>
+      <Card className="p-5">
+        <SectionTitle>{t('positions.exposureByAsset')}</SectionTitle>
+        {byAsset.length===0? <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noExposure')}</div>
+        : <div className="flex flex-col items-center gap-4">
+          <Donut size={130} thickness={15}
+            segments={byAsset.map((a,i)=>({value:a.notional,color:FUND_PALETTE[i%FUND_PALETTE.length]}))}
+            center={<div><div className="text-sm font-bold text-navy tnum">{fmtUSD(openNotional)}</div><div className="text-[10px] text-slate-400">{t('activity.exposure')}</div></div>}/>
+          <div className="w-full space-y-1.5">
+            {byAsset.map((a,i)=><div key={a.symbol} className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:FUND_PALETTE[i%FUND_PALETTE.length]}}/><span className="truncate text-slate-600">{a.symbol}</span></span>
+              <span className="font-medium text-navy tnum shrink-0">{(a.notional/openNotional*100).toFixed(1)}%</span>
+            </div>)}
+          </div>
+        </div>}
+      </Card>
+    </div>
   </div>;
 }
 

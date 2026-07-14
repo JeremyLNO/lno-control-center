@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtPct, clsPnl, fmtDate, PREF, Icon, Card, SectionTitle, Btn, AreaChart, useApp,
+  fmtUSD, fmtSigned, fmtPct, clsPnl, fmtDate, PREF, Icon, Card, SectionTitle, Btn, AreaChart, Donut, Sparkline, FUND_PALETTE, useApp,
   hasPerm, fundOf, sliceByPeriod, RiskPanel, Underwater, PnlCalendar, MarketTicker, PageHead, Denied, KpiCard, TrendBadge, EmptyState,
   SideTag, FundTag, PeriodControls, OnboardingCard
 } from '../ui'
@@ -29,6 +29,9 @@ function ActivityPage(){
   const fundsWithExposure = byFund.filter(f=>f.id!=null);  // real funds (drop the Unassigned bucket from this list view)
 
   const empty = !hasHistory && !openBots.length;
+  const equitySpark = hasHistory? series.slice(-20).map(s=>s.equity) : null;
+  const allocFunds = byFund.filter(f=>f.notional>0);       // include Unassigned here — it's real open exposure
+  const allocTotal = allocFunds.reduce((s,f)=>s+f.notional,0);
 
   return <div>
     <PageHead title={t('activity.title')} subtitle={t('activity.subtitle')}
@@ -44,21 +47,39 @@ function ActivityPage(){
     : <>
       {/* Hero: account equity + KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
-        <KpiCard label={t('activity.equity')} value={fmtUSD(equity)} icon="dollar"/>
+        <KpiCard label={t('activity.equity')} value={fmtUSD(equity)} icon="dollar" accent="#C9A24D"
+          spark={equitySpark&&<Sparkline data={equitySpark} positive={positive}/>}/>
         <KpiCard label={t('activity.pnlDay')} value={<span className={clsPnl(pnlDay)}>{fmtSigned(pnlDay)}</span>} badge={equity?<TrendBadge pct={pnlDay/equity*100}/>:null}/>
         <KpiCard label={t('activity.openPnl')} value={<span className={clsPnl(openPnl)}>{fmtSigned(openPnl)}</span>}/>
-        <KpiCard label={t('activity.exposure')} value={fmtUSD(exposure)} icon="briefcase"/>
-        <KpiCard label={t('activity.openFunds')} value={`${openBots.length} / ${fundsWithExposure.length||funds.length}`} icon="layers"/>
+        <KpiCard label={t('activity.exposure')} value={fmtUSD(exposure)} icon="briefcase" accent="#3B82F6"/>
+        <KpiCard label={t('activity.openFunds')} value={`${openBots.length} / ${fundsWithExposure.length||funds.length}`} icon="layers" accent="#10B981"/>
       </div>
 
-      {/* Equity curve */}
-      <Card className="p-5 mb-5">
-        <SectionTitle right={hasHistory&&<span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} <span className="tnum">({fmtPct(periodPnlPct)})</span> {t('activity.thisPeriod')}</span>}>{t('activity.equityCurve')}</SectionTitle>
-        {hasHistory? <>
-          <AreaChart data={view} positive={positive} resetKey={`${period}|${custom.start||''}`}/>
-          <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{view.length?fmtDate(view[0].t):''}</span><span>{view.length?fmtDate(view[view.length-1].t):''}</span></div>
-        </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noHistory')}</div>}
-      </Card>
+      {/* Equity curve + fund allocation */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+        <Card className="p-5 lg:col-span-2">
+          <SectionTitle right={hasHistory&&<span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} <span className="tnum">({fmtPct(periodPnlPct)})</span> {t('activity.thisPeriod')}</span>}>{t('activity.equityCurve')}</SectionTitle>
+          {hasHistory? <>
+            <AreaChart data={view} positive={positive} resetKey={`${period}|${custom.start||''}`}/>
+            <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{view.length?fmtDate(view[0].t):''}</span><span>{view.length?fmtDate(view[view.length-1].t):''}</span></div>
+          </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noHistory')}</div>}
+        </Card>
+        <Card className="p-5">
+          <SectionTitle>{t('activity.fundAllocation')}</SectionTitle>
+          {allocFunds.length===0? <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noExposure')}</div>
+          : <div className="flex flex-col items-center gap-4">
+            <Donut size={140} thickness={16}
+              segments={allocFunds.map((f,i)=>({value:f.notional,color:f.id!=null?(f.color||FUND_PALETTE[i%FUND_PALETTE.length]):'#94A3B8'}))}
+              center={<div><div className="text-base font-bold text-navy tnum">{fmtUSD(allocTotal)}</div><div className="text-[10px] text-slate-400">{t('activity.exposure')}</div></div>}/>
+            <div className="w-full space-y-1.5">
+              {allocFunds.map((f,i)=><div key={f.id||'unassigned'} className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:f.id!=null?(f.color||FUND_PALETTE[i%FUND_PALETTE.length]):'#94A3B8'}}/><span className="truncate text-slate-600">{f.name}</span></span>
+                <span className="font-medium text-navy tnum shrink-0">{(f.notional/allocTotal*100).toFixed(1)}%</span>
+              </div>)}
+            </div>
+          </div>}
+        </Card>
+      </div>
 
       {/* By-fund breakdown */}
       <Card className="overflow-hidden mb-5">

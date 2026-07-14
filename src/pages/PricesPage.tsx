@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtPrice, fmtAgo, baseOf, PREF, Card, useApp, hasPerm, PageHead, Denied
+  fmtPrice, fmtAgo, baseOf, PREF, Card, KpiCard, useApp, hasPerm, PageHead, Denied
 } from '../ui'
 import { Quantum } from 'ldrs/react'
 import 'ldrs/react/Quantum.css'
@@ -91,7 +91,14 @@ function PricesPage(){
         {t('prices.loading')}
       </Card>
      : err&&!rows.length? <Card className="p-10 text-center text-slate-400 text-sm">{t('prices.couldNotLoad')}</Card>
-     : <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+     : <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <KpiCard label={t('prices.activeMarkets')} value={rows.length} icon="layers" accent="#C9A24D"/>
+        <KpiCard label={t('prices.volume24h')} value={compact(rows.reduce((s,r)=>s+r.vol,0))+' USDT'} icon="dollar" accent="#3B82F6"/>
+        <KpiCard label={t('prices.gainers')} value={rows.filter(r=>r.chg>=0).length} icon="trendup" accent="#10B981"/>
+        <KpiCard label={t('prices.losers')} value={rows.filter(r=>r.chg<0).length} icon="trendup" accent="#EF4444"/>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {ordered.map(row=><div key={row.symbol} draggable
           onDragStart={()=>setDrag(row.symbol)} onDragOver={e=>e.preventDefault()} onDrop={()=>onDrop(row.symbol)} onDragEnd={()=>setDrag(null)}
           className={`cursor-move select-none transition ${drag===row.symbol?'opacity-40':''}`}>
@@ -109,7 +116,8 @@ function PricesPage(){
             </div>
           </Card>
         </div>)}
-      </div>}
+      </div>
+     </>}
     <p className="text-[11px] text-slate-400 mt-3">{t('prices.footerHint')}</p>
   </div>;
 }

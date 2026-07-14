@@ -39,10 +39,10 @@ function RealtimePage(){
     <MarketTicker/>
 
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-      <KpiCard label={t('activity.equity')} value={fmtUSD(data.equity)} icon="dollar"/>
+      <KpiCard label={t('activity.equity')} value={fmtUSD(data.equity)} icon="dollar" accent="#C9A24D"/>
       <KpiCard label={t('activity.openPnl')} value={<span className={clsPnl(livePnl)}>{fmtSigned(livePnl)}</span>}/>
-      <KpiCard label={t('live.openPositions')} value={open.length} icon="briefcase"/>
-      <KpiCard label={t('activity.exposure')} value={fmtUSD(exposure)} icon="layers"/>
+      <KpiCard label={t('live.openPositions')} value={open.length} icon="briefcase" accent="#3B82F6"/>
+      <KpiCard label={t('activity.exposure')} value={fmtUSD(exposure)} icon="layers" accent="#10B981"/>
     </div>
 
     <Card className="overflow-hidden">
