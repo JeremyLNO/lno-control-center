@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtPrice, fmtAgo, baseOf, PREF, Card, KpiCard, useApp, hasPerm, PageHead, Denied
+  fmtPrice, fmtAgo, baseOf, PREF, Card, SectionTitle, KpiCard, Donut, useApp, hasPerm, PageHead, Denied
 } from '../ui'
 import { Quantum } from 'ldrs/react'
 import 'ldrs/react/Quantum.css'
@@ -75,6 +75,34 @@ function PricesPage(){
     connect();
     return ()=>{ stopped=true; if(ws){ try{ ws.close(); }catch(e){} } if(reconnectTimer) clearTimeout(reconnectTimer); if(restIv) clearInterval(restIv); if(watchdog) clearTimeout(watchdog); };
   },[]);
+  // Market sentiment — two public, keyless third-party APIs (not Binance), same
+  // client-side-fetch pattern as everything else on this page. Both are confirmed
+  // CORS-open (Access-Control-Allow-Origin: *). Neither needs sub-second freshness
+  // (Fear & Greed updates once/day, dominance drifts slowly) so a plain 60s poll is
+  // plenty — no WebSocket for these.
+  const [fg,setFg]=useState(null);
+  const [dom,setDom]=useState(null);
+  useEffect(()=>{
+    if(!hasPerm(user,'view_activity')) return;
+    let stopped=false;
+    const load=async()=>{
+      try{
+        const r=await fetch('https://api.alternative.me/fng/?limit=1',{cache:'no-store'});
+        const j=await r.json(); if(stopped) return;
+        const d=j&&j.data&&j.data[0];
+        if(d) setFg({value:+d.value,label:d.value_classification});
+      }catch(e){ /* leave last-known value on screen rather than clearing it */ }
+      try{
+        const r=await fetch('https://api.coingecko.com/api/v3/global',{cache:'no-store'});
+        const j=await r.json(); if(stopped) return;
+        const p=j&&j.data&&j.data.market_cap_percentage;
+        if(p) setDom({btc:p.btc,eth:p.eth});
+      }catch(e){}
+    };
+    load(); const iv=setInterval(load,60000);
+    return ()=>{ stopped=true; clearInterval(iv); };
+  },[]);
+  const fgColor=(v)=>v<25?'#EF4444':v<50?'#F59E0B':v<75?'#84CC16':'#10B981';
   // apply the user's saved drag order; unknown/new symbols fall to the end (by volume)
   const ordered=useMemo(()=>{ if(!rows||!order.length) return rows; const idx=s=>{ const i=order.indexOf(s); return i<0?1e9:i; }; return rows.slice().sort((a,b)=>idx(a.symbol)-idx(b.symbol)||b.vol-a.vol); },[rows,order]);
   if(!hasPerm(user,'view_activity')) return <Denied/>;
@@ -101,6 +129,20 @@ function PricesPage(){
         <KpiCard label={t('prices.gainers')} value={rows.filter(r=>r.chg>=0).length} icon="trendup" accent="#10B981"/>
         <KpiCard label={t('prices.losers')} value={rows.filter(r=>r.chg<0).length} icon="trendup" accent="#EF4444"/>
       </div>
+      <Card className="p-5 mb-4">
+        <SectionTitle>{t('prices.marketSentiment')}</SectionTitle>
+        <div className="flex flex-wrap items-center gap-8">
+          {fg? <div className="flex items-center gap-4">
+            <Donut size={100} thickness={11} segments={[{value:fg.value,color:fgColor(fg.value)},{value:100-fg.value,color:'#EEF0F3'}]}
+              center={<div className="text-lg font-bold text-navy tnum">{fg.value}</div>}/>
+            <div><div className="text-xs text-slate-400">{t('prices.fearGreed')}</div><div className="text-base font-semibold" style={{color:fgColor(fg.value)}}>{fg.label}</div></div>
+          </div> : <div className="text-sm text-slate-400 w-[220px]">{t('common.loading')}</div>}
+          <div className="flex gap-8">
+            <div><div className="text-xs text-slate-400">{t('prices.btcDominance')}</div><div className="text-2xl font-bold text-navy tnum">{dom?dom.btc.toFixed(1)+'%':'—'}</div></div>
+            <div><div className="text-xs text-slate-400">{t('prices.ethDominance')}</div><div className="text-2xl font-bold text-navy tnum">{dom?dom.eth.toFixed(1)+'%':'—'}</div></div>
+          </div>
+        </div>
+      </Card>
       <Card className="p-5 mb-4">
         <div className="text-sm font-semibold text-navy tracking-tight mb-3">{t('prices.heatmap')}</div>
         <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 gap-1.5">
