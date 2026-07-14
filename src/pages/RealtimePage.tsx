@@ -1,9 +1,70 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, fmtAgo, api, Icon, Card, SectionTitle, Badge, Select, useApp,
+  fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, fmtAgo, api, Icon, Card, SectionTitle, Badge, Select, CandleChart, useApp,
   hasPerm, fundOf, liqInfo, dormantInfo, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag
 } from '../ui'
+
+const CHART_INTERVALS=['1m','5m','15m','1h','4h','1d'];
+// Live BTC/ETH/... candlestick chart — public Binance futures klines, same client-side
+// architecture as PricesPage's ticker: REST for the initial 200-bar history (a kline WS
+// stream only ever pushes the currently-forming bar, never backfill), then a live kline
+// WS stream updates the in-progress bar tick-by-tick. The 8s watchdog is armed once, tied
+// to the whole mount (not reset on every reconnect) — see PricesPage.tsx for why that
+// matters when a connection is blocked before it ever opens.
+function LiveChart({symbol,interval}: any){
+  const {t}=useApp();
+  const [candles,setCandles]=useState(null);
+  const [err,setErr]=useState(false);
+  useEffect(()=>{
+    let stopped=false, ws: WebSocket|null=null, reconnectTimer: any=null, reconnectDelay=2000;
+    let restIv: any=null, watchdog: any=null, gotFirstMessage=false;
+    setCandles(null); setErr(false);
+
+    const loadRest=async()=>{
+      try{
+        const r=await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=200`,{cache:'no-store'});
+        if(!r.ok) throw 0; const raw=await r.json(); if(stopped) return;
+        setCandles((Array.isArray(raw)?raw:[]).map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4]})));
+        setErr(false);
+      }catch(e){ if(!stopped) setErr(true); }
+    };
+    const startRestFallback=()=>{ if(restIv) return; loadRest(); restIv=setInterval(loadRest,15000); };
+    watchdog=setTimeout(()=>{ if(!gotFirstMessage) startRestFallback(); },8000);
+
+    function connect(){
+      if(stopped) return;
+      loadRest(); // klines WS only ever streams the in-progress bar — always fetch history via REST
+      ws=new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@kline_${interval}`);
+      ws.onopen=()=>{ reconnectDelay=2000; };
+      ws.onmessage=(ev)=>{
+        try{
+          const msg=JSON.parse(ev.data); const k=msg&&msg.k; if(!k) return;
+          if(!gotFirstMessage){ gotFirstMessage=true; clearTimeout(watchdog); if(restIv){ clearInterval(restIv); restIv=null; } }
+          const bar={t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c};
+          setCandles(prev=>{ if(!prev||!prev.length) return prev; const last=prev[prev.length-1]; return last&&last.t===bar.t? [...prev.slice(0,-1),bar] : [...prev,bar]; });
+          setErr(false);
+        }catch(e){ /* a malformed tick shouldn't drop the whole stream */ }
+      };
+      ws.onclose=()=>{ if(stopped)return; reconnectTimer=setTimeout(connect,reconnectDelay); reconnectDelay=Math.min(reconnectDelay*2,30000); };
+      ws.onerror=()=>{ try{ ws&&ws.close(); }catch(e){} };
+    }
+    connect();
+    return ()=>{ stopped=true; if(ws){ try{ ws.close(); }catch(e){} } if(reconnectTimer) clearTimeout(reconnectTimer); if(restIv) clearInterval(restIv); if(watchdog) clearTimeout(watchdog); };
+  },[symbol,interval]);
+
+  if(candles==null) return <div className="h-[320px] grid place-items-center text-sm text-slate-400">{t('common.loading')}</div>;
+  if(err&&!candles.length) return <div className="h-[320px] grid place-items-center text-sm text-slate-400">{t('prices.couldNotLoad')}</div>;
+  const last=candles[candles.length-1], first=candles[0];
+  const chgPct=first&&first.o? (last.c-first.o)/first.o*100 : 0;
+  return <>
+    <div className="flex items-baseline gap-2 mb-2">
+      <span className="text-lg font-bold text-navy tnum">{fmtPrice(last.c)}</span>
+      <span className={`text-sm font-medium ${chgPct>=0?'text-success':'text-danger'}`}>{chgPct>=0?'▲':'▼'} {Math.abs(chgPct).toFixed(2)}%</span>
+    </div>
+    <CandleChart data={candles} height={320}/>
+  </>;
+}
 
 /* ============================================================
    REAL-TIME OPERATIONS
@@ -13,8 +74,16 @@ function RealtimePage(){
   const [fund,setFund]=useState('all');
   const [sort,setSort]=useState({col:'uPnl',dir:'desc'});
   const [incidents,setIncidents]=useState(null);
+  const [chartSymbol,setChartSymbol]=useState('BTCUSDT');
+  const [chartInterval,setChartInterval]=useState('1h');
   useEffect(()=>{ if(!hasPerm(user,'view_realtime'))return; api('alerts').then(r=>setIncidents((r.alerts||[]).slice().sort((a,b)=>+new Date(b.createdAt)-+new Date(a.createdAt)).slice(0,6))).catch(()=>setIncidents([])); },[]);
+  // Default the chart to whichever symbol is actually open, so it's not always showing an
+  // unrelated market on first load — but only once, per mount (don't yank the chart out
+  // from under the user if their positions change while they're looking at something else).
+  useEffect(()=>{ if(data.openBots.length) setChartSymbol(s=>s==='BTCUSDT'&&data.openBots[0].symbol!=='BTCUSDT'?data.openBots[0].symbol:s); },[]);
   if(!hasPerm(user,'view_realtime')) return <Denied/>;
+
+  const chartSymbolOpts=[...new Set(['BTCUSDT','ETHUSDT','SOLUSDT',...data.bots.map(b=>b.symbol)])].map(s=>({value:s,label:s}));
 
   const selFund=fund!=='all'?(fund==='unassigned'?'unassigned':funds.find(f=>f.id===fund)):null;
   let open=data.openBots;
@@ -44,6 +113,17 @@ function RealtimePage(){
       <KpiCard label={t('live.openPositions')} value={open.length} icon="briefcase" accent="#3B82F6"/>
       <KpiCard label={t('activity.exposure')} value={fmtUSD(exposure)} icon="layers" accent="#10B981"/>
     </div>
+
+    <Card className="p-5 mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+        <Select value={chartSymbol} onChange={setChartSymbol} className="w-40" options={chartSymbolOpts}/>
+        <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs">
+          {CHART_INTERVALS.map(iv=><button key={iv} onClick={()=>setChartInterval(iv)}
+            className={`px-2.5 py-1 rounded-md font-medium transition ${chartInterval===iv?'bg-white text-navy shadow-sm':'text-slate-500'}`}>{iv.toUpperCase()}</button>)}
+        </div>
+      </div>
+      <LiveChart symbol={chartSymbol} interval={chartInterval}/>
+    </Card>
 
     <Card className="overflow-hidden">
       <div className="p-5 pb-0"><SectionTitle right={data.live&&data.live.connected>0&&<span className="flex items-center gap-1.5 text-xs text-success"><span className="w-1.5 h-1.5 rounded-full bg-success pulse-dot"/>{t('live.connectedCount',{n:data.live.connected})}</span>}>{t('live.openPositions')}</SectionTitle></div>

@@ -395,6 +395,44 @@ function AreaChart({data,positive,height=260,resetKey,benchmark}: any){
   </div>;
 }
 
+// OHLC candlestick chart — a sibling to AreaChart rather than an extension of it: the
+// area-fill/gradient/benchmark-overlay logic there is single-scalar-specific, and the
+// Y-domain here needs high/low across the view instead of a single `equity` field. Hover
+// crosshair reuses the same idxFromEvent trick as AreaChart; no drag-to-zoom or indicator
+// overlays for v1 (kept deliberately out of scope — see the redesign plan).
+function CandleChart({data,height=320}: any){
+  const ref=useRef<any>(null);
+  const [hover,setHover]=useState(null);
+  if(!data||data.length<2) return <div style={{height}} className="grid place-items-center text-slate-300 text-sm">No data</div>;
+  const w=1000,h=height,n=data.length;
+  const minY=Math.min(...data.map(d=>d.l)),maxY=Math.max(...data.map(d=>d.h));
+  const pad=(maxY-minY)*0.08||1; const y0=minY-pad,y1=maxY+pad;
+  const slot=w/n, bodyW=Math.max(1,slot*0.6);
+  const X=i=>i*slot+slot/2; const Y=v=>h-((v-y0)/(y1-y0))*h;
+  const idxFromEvent=(e)=>{ const r=ref.current.getBoundingClientRect(); const f=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)); return Math.min(n-1,Math.max(0,Math.floor(f*n))); };
+  const hv=hover!=null?data[hover]:null;
+  const hoverPct=hover!=null?(hover/(n-1))*100:0;
+  return <div className="relative select-none cursor-crosshair" ref={ref} style={{height}}
+      onMouseMove={e=>setHover(idxFromEvent(e))} onMouseLeave={()=>setHover(null)}>
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full" style={{height}}>
+      {[0.25,0.5,0.75].map(g=><line key={g} x1="0" x2={w} y1={h*g} y2={h*g} stroke="#eef0f3" strokeWidth="1" vectorEffect="non-scaling-stroke"/>)}
+      {data.map((d,i)=>{
+        const up=d.c>=d.o, color=up?'#10B981':'#EF4444';
+        const bodyTop=Y(Math.max(d.o,d.c)), bodyBot=Y(Math.min(d.o,d.c));
+        return <g key={i}>
+          <line x1={X(i)} x2={X(i)} y1={Y(d.h)} y2={Y(d.l)} stroke={color} strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+          <rect x={X(i)-bodyW/2} y={bodyTop} width={bodyW} height={Math.max(1,bodyBot-bodyTop)} fill={color}/>
+        </g>;
+      })}
+      {hv&&<line x1={X(hover)} x2={X(hover)} y1="0" y2={h} stroke="#0B1F3A" strokeWidth="1" strokeDasharray="4 3" strokeOpacity="0.3" vectorEffect="non-scaling-stroke"/>}
+    </svg>
+    {hv&&<div className="absolute -top-1 z-10 pointer-events-none" style={{left:hoverPct+'%',transform:`translateX(${hoverPct>75?'-100%':hoverPct<25?'0':'-50%'})`}}>
+      <div className="bg-navy text-white rounded-md px-2 py-1 text-[11px] shadow-lg whitespace-nowrap tnum">
+        O {fmtPrice(hv.o)} H {fmtPrice(hv.h)} L {fmtPrice(hv.l)} C {fmtPrice(hv.c)}
+      </div>
+    </div>}
+  </div>;
+}
 // Small inline trend line for a KPI card corner — same index-based X/Y scale approach as
 // AreaChart but stripped of crosshair/zoom/tooltip (this is decoration, not an interactive
 // chart). `positive` overrides the auto up/down color inferred from first vs last point.
@@ -986,5 +1024,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };
