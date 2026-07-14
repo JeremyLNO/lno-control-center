@@ -80,6 +80,9 @@ function PricesPage(){
   if(!hasPerm(user,'view_activity')) return <Denied/>;
   const compact=(n)=>{ const a=Math.abs(n); return a>=1e9?(n/1e9).toFixed(2)+'B':a>=1e6?(n/1e6).toFixed(1)+'M':a>=1e3?(n/1e3).toFixed(0)+'K':String(Math.round(n)); };
   const px=(p)=>fmtPrice(p).replace(' USDT','');
+  // Heatmap tile color — intensity scales with |chg| (clamped at ±5%, past which it's
+  // just "very green/red" — a 20% mover isn't 4x as red as a 5% one, visually).
+  const heatColor=(chg)=>{ const t=Math.min(Math.abs(chg)/5,1); const a=0.18+0.62*t; return chg>=0?`rgba(16,185,129,${a})`:`rgba(239,68,68,${a})`; };
   const onDrop=(targetSym)=>{ const cur=(ordered||[]).map(r=>r.symbol); const from=cur.indexOf(drag); if(from<0||drag===targetSym){ setDrag(null); return; } cur.splice(from,1); const to=cur.indexOf(targetSym); cur.splice(to<0?cur.length:to,0,drag); setOrder(cur); PREF.set('prices_order',cur); setDrag(null); };
   return <div>
     <PageHead title={t('prices.title')} subtitle={t('prices.subtitle')} refresh={{ms:20000,tick}} actions={<div className="flex items-center gap-3">
@@ -98,6 +101,15 @@ function PricesPage(){
         <KpiCard label={t('prices.gainers')} value={rows.filter(r=>r.chg>=0).length} icon="trendup" accent="#10B981"/>
         <KpiCard label={t('prices.losers')} value={rows.filter(r=>r.chg<0).length} icon="trendup" accent="#EF4444"/>
       </div>
+      <Card className="p-5 mb-4">
+        <div className="text-sm font-semibold text-navy tracking-tight mb-3">{t('prices.heatmap')}</div>
+        <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 gap-1.5">
+          {ordered.map(row=><div key={row.symbol} className="rounded-lg p-2.5 text-center" style={{background:heatColor(row.chg)}}>
+            <div className="text-xs font-bold text-white truncate">{row.base}</div>
+            <div className="text-[11px] font-medium text-white/90 tnum">{row.chg>=0?'+':''}{row.chg.toFixed(1)}%</div>
+          </div>)}
+        </div>
+      </Card>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {ordered.map(row=><div key={row.symbol} draggable
           onDragStart={()=>setDrag(row.symbol)} onDragOver={e=>e.preventDefault()} onDrop={()=>onDrop(row.symbol)} onDragEnd={()=>setDrag(null)}
