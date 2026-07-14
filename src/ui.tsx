@@ -395,6 +395,50 @@ function AreaChart({data,positive,height=260,resetKey,benchmark}: any){
   </div>;
 }
 
+// Small inline trend line for a KPI card corner — same index-based X/Y scale approach as
+// AreaChart but stripped of crosshair/zoom/tooltip (this is decoration, not an interactive
+// chart). `positive` overrides the auto up/down color inferred from first vs last point.
+function Sparkline({data,positive,height=32,width=88}: any){
+  if(!data||data.length<2) return <div style={{height,width}}/>;
+  const n=data.length;
+  const min=Math.min(...data),max=Math.max(...data);
+  const pad=(max-min)*0.12||1; const y0=min-pad,y1=max+pad;
+  const X=i=>(i/(n-1))*width; const Y=v=>height-((v-y0)/(y1-y0))*height;
+  const line=data.map((v,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
+  const up = positive!=null ? positive : data[n-1]>=data[0];
+  const color = up?'#10B981':'#EF4444';
+  return <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="overflow-visible">
+    <path d={line} fill="none" stroke={color} strokeWidth="1.75" vectorEffect="non-scaling-stroke"/>
+  </svg>;
+}
+// Radial chart primitive covering two shapes with one component: a multi-segment donut
+// (arc=360, segments sum to the visual whole — Fund Allocation, Exposure by Asset) and a
+// single-value gauge (two segments: the value + a track-colored remainder, optionally a
+// partial arc via `arc<360` — Liquidation Buffer, Fear & Greed). Built with stacked
+// stroke-dasharray circles (the standard SVG donut technique) rather than a library, to
+// match every other hand-rolled chart in this file (see AreaChart above).
+function Donut({segments,size=120,thickness=14,center,arc=360,startAngle=-90,trackColor='#EEF0F3'}: any){
+  const r=(size-thickness)/2, cx=size/2, cy=size/2;
+  const circumference=2*Math.PI*r;
+  const arcLen=circumference*(arc/360);
+  const total=(segments||[]).reduce((s,x)=>s+Math.max(0,x.value||0),0)||1;
+  let offset=0;
+  return <div className="relative inline-grid place-items-center" style={{width:size,height:size}}>
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{transform:`rotate(${startAngle}deg)`}}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={trackColor} strokeWidth={thickness}
+        strokeDasharray={`${arcLen} ${circumference}`} strokeLinecap="round"/>
+      {(segments||[]).map((s,i)=>{
+        const len=(Math.max(0,s.value||0)/total)*arcLen;
+        const el=<circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={thickness}
+          strokeDasharray={`${len} ${circumference-len}`} strokeDashoffset={-offset} strokeLinecap="round"/>;
+        offset+=len;
+        return el;
+      })}
+    </svg>
+    {center&&<div className="absolute inset-0 grid place-items-center pointer-events-none text-center px-2">{center}</div>}
+  </div>;
+}
+
 /* ============================================================
    APP CONTEXT
    ============================================================ */
@@ -828,14 +872,16 @@ function Denied(){ const {t}=useApp(); return <div className="grid place-items-c
 /* ============================================================
    KPI CARD + shared bits
    ============================================================ */
-function KpiCard({label,value,badge,icon,accent}: any){
+function KpiCard({label,value,badge,icon,accent,spark}: any){
   return <Card className="p-4">
     <div className="flex items-center justify-between">
       <span className="text-xs font-medium text-slate-500">{label}</span>
-      {icon&&<Icon name={icon} className="w-4 h-4 text-slate-300"/>}
+      {icon&&(accent? <span className="w-7 h-7 rounded-lg grid place-items-center shrink-0" style={{background:accent+'1A',color:accent}}><Icon name={icon} className="w-4 h-4"/></span>
+        : <Icon name={icon} className="w-4 h-4 text-slate-300"/>)}
     </div>
     <div className="mt-2 text-2xl font-bold text-navy tnum">{value}</div>
     {badge!=null&&<div className="mt-1">{badge}</div>}
+    {spark&&<div className="mt-2">{spark}</div>}
   </Card>;
 }
 function TrendBadge({pct}: any){
@@ -940,5 +986,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };
