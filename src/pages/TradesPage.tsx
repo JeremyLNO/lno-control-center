@@ -120,6 +120,18 @@ function TradesPage(){
     data.openBots.forEach(b=>{ const k=baseOf(b.symbol); m.set(k,(m.get(k)||0)+Math.abs(b.notional||0)); });
     return [...m.entries()].map(([symbol,notional])=>({symbol,notional})).sort((a,b)=>b.notional-a.notional);
   },[data.openBots]);
+  const [moversTab,setMoversTab]=useState('winners');
+  const movers=useMemo(()=>{
+    const list=data.openBots.map(b=>({symbol:b.symbol,pnl:b.unrealizedPnl||0,pct:b.notional?(b.unrealizedPnl||0)/Math.abs(b.notional)*100:0}));
+    return {winners:list.filter(m=>m.pnl>0).sort((a,b)=>b.pnl-a.pnl).slice(0,5),losers:list.filter(m=>m.pnl<0).sort((a,b)=>a.pnl-b.pnl).slice(0,5)};
+  },[data.openBots]);
+  // Liquidation buffer summary — reuses liqInfo() as-is (already used per-row in the
+  // liqDist column above), just aggregated for a portfolio-level gauge.
+  const liqRows=useMemo(()=>data.openBots.map(b=>({symbol:b.symbol,...liqInfo(b)})).filter(r=>r.pct!=null),[data.openBots]);
+  const highRiskCount=liqRows.filter(r=>r.level==='danger').length;
+  const avgBuffer=liqRows.length? liqRows.reduce((s,r)=>s+r.pct,0)/liqRows.length : null;
+  const lowestBuffer=liqRows.length? Math.min(...liqRows.map(r=>r.pct)) : null;
+  const liqColor=(pct)=>pct<10?'#EF4444':pct<25?'#F59E0B':'#10B981';
 
   return <div>
     <PageHead title={t('positions.title')} subtitle={t(data.bots.length===1?'positions.subtitleOne':'positions.subtitle',{shown:rows.length,total:data.bots.length})}
@@ -167,6 +179,7 @@ function TradesPage(){
       {rows.length===0&&<div className="p-10"><EmptyState icon="briefcase" title={data.bots.length===0?t('positions.noPositionsYet'):t('positions.noPositionsMatch')} hint={data.bots.length===0?t('positions.noPositionsHint'):undefined}/></div>}
     </Card>
       </div>
+      <div className="space-y-4">
       <Card className="p-5">
         <SectionTitle>{t('positions.exposureByAsset')}</SectionTitle>
         {byAsset.length===0? <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noExposure')}</div>
@@ -182,6 +195,38 @@ function TradesPage(){
           </div>
         </div>}
       </Card>
+
+      <Card className="p-5">
+        <SectionTitle right={<div className="flex bg-slate-100 rounded-lg p-0.5 text-xs">
+          <button onClick={()=>setMoversTab('winners')} className={`px-2.5 py-1 rounded-md font-medium transition ${moversTab==='winners'?'bg-white text-navy shadow-sm':'text-slate-500'}`}>{t('positions.winners')}</button>
+          <button onClick={()=>setMoversTab('losers')} className={`px-2.5 py-1 rounded-md font-medium transition ${moversTab==='losers'?'bg-white text-navy shadow-sm':'text-slate-500'}`}>{t('positions.losers')}</button>
+        </div>}>{t('positions.topMovers')}</SectionTitle>
+        {(movers[moversTab]||[]).length===0? <div className="text-sm text-slate-400 py-6 text-center">{t('positions.noMovers')}</div>
+        : <div className="space-y-2.5">
+          {movers[moversTab].map(m=><div key={m.symbol} className="flex items-center justify-between text-sm">
+            <span className="font-mono text-xs text-navy">{m.symbol}</span>
+            <span className={`font-medium tnum ${clsPnl(m.pnl)}`}>{fmtSigned(m.pnl)} <span className="text-[11px] opacity-70">({fmtPctPlain(Math.abs(m.pct))})</span></span>
+          </div>)}
+        </div>}
+      </Card>
+
+      <Card className="p-5">
+        <SectionTitle>{t('positions.liquidationBuffer')}</SectionTitle>
+        {liqRows.length===0? <div className="text-sm text-slate-400 py-6 text-center">{t('positions.noLiqData')}</div>
+        : <>
+          <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+            <div><div className="text-[11px] text-slate-400">{t('positions.highRisk')}</div><div className={`text-lg font-bold tnum ${highRiskCount>0?'text-danger':'text-navy'}`}>{highRiskCount}</div></div>
+            <div><div className="text-[11px] text-slate-400">{t('positions.avgBuffer')}</div><div className="text-lg font-bold text-navy tnum">{avgBuffer.toFixed(1)}%</div></div>
+            <div><div className="text-[11px] text-slate-400">{t('positions.lowestBuffer')}</div><div className="text-lg font-bold tnum" style={{color:liqColor(lowestBuffer)}}>{lowestBuffer.toFixed(1)}%</div></div>
+          </div>
+          <div className="flex justify-center">
+            <Donut size={130} thickness={15} arc={180} startAngle={-180}
+              segments={[{value:lowestBuffer,color:liqColor(lowestBuffer)},{value:100-lowestBuffer,color:'#EEF0F3'}]}
+              center={<div className="text-base font-bold text-navy mt-4">{lowestBuffer.toFixed(1)}%</div>}/>
+          </div>
+        </>}
+      </Card>
+      </div>
     </div>
   </div>;
 }
