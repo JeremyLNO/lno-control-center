@@ -215,6 +215,8 @@ ok('editing an exchange without a new secret keeps the secret', !!exAfter && exA
 r = await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } });
 ok('sync creates one bot per OPEN futures position', r.status === 200 && r.body.created === 2 && r.body.positions === 2 && r.body.connected === 1, r.body);
 ok('sync reads account equity (margin balance)', r.body.totalEquity === 125001, r.body);
+const exSynced = (await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId);
+ok('a successful sync records the round-trip latency', !!exSynced && typeof exSynced.latencyMs === 'number' && exSynced.latencyMs >= 0, exSynced);
 r = await call(bots, { method: 'GET', headers: authH });
 const adaBot = r.body.bots.find(b => b.symbol === 'ADAUSDT');
 ok('a detected pair becomes an unassigned bot id "exchange:symbol"', !!adaBot && adaBot.id === 'binance:ADAUSDT' && adaBot.fundId === null && adaBot.side === 'LONG', adaBot);

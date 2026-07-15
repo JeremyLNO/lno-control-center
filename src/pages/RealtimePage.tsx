@@ -76,7 +76,16 @@ function RealtimePage(){
   const [incidents,setIncidents]=useState(null);
   const [chartSymbol,setChartSymbol]=useState('BTCUSDT');
   const [chartInterval,setChartInterval]=useState('1h');
+  const [exchanges,setExchanges]=useState(null);
   useEffect(()=>{ if(!hasPerm(user,'view_realtime'))return; api('alerts').then(r=>setIncidents((r.alerts||[]).slice().sort((a,b)=>+new Date(b.createdAt)-+new Date(a.createdAt)).slice(0,6))).catch(()=>setIncidents([])); },[]);
+  // Exchange Connectivity latency — same admin-gated 30s poll pattern as StatusPage's
+  // "Exchange Connections" card (the /api/exchanges list itself is admin-only).
+  useEffect(()=>{
+    if(user.role!=='admin') return;
+    const load=()=>api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{});
+    load(); const iv=setInterval(load,30000);
+    return ()=>clearInterval(iv);
+  },[user.role]);
   // Default the chart to whichever symbol is actually open, so it's not always showing an
   // unrelated market on first load — but only once, per mount (don't yank the chart out
   // from under the user if their positions change while they're looking at something else).
@@ -202,6 +211,20 @@ function RealtimePage(){
           </div>}
       </Card>
     </div>
+
+    {user.role==='admin'&&<Card className="p-5 mt-5">
+      <SectionTitle>{t('live.exchangeConnectivity')}</SectionTitle>
+      {exchanges==null? <div className="text-sm text-slate-400">{t('common.loading')}</div>
+      : exchanges.length===0? <div className="text-sm text-slate-400">{t('sysstatus.noExchangeConnectionsYet')}</div>
+      : <div className="space-y-2.5">
+        {exchanges.map(e=><div key={e.id} className="flex items-center justify-between text-sm">
+          <span className="flex items-center gap-2 text-navy"><span className={`w-2 h-2 rounded-full ${e.status==='connected'?'bg-success':e.status==='error'?'bg-danger':'bg-slate-300'}`}/>{e.label||e.name}</span>
+          <span className="flex items-center gap-3 text-xs text-slate-400">
+            {e.status==='connected'?<span className={`font-mono ${e.latencyMs>1000?'text-amber-600':'text-slate-500'}`}>{e.latencyMs!=null?e.latencyMs+'ms':'—'}</span>:<span className="capitalize">{e.status}</span>}
+          </span>
+        </div>)}
+      </div>}
+    </Card>}
   </div>;
 }
 

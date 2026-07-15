@@ -107,6 +107,9 @@ export async function migrate() {
   await ddl(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS last_error TEXT`);
   // public wallet/deposit addresses shown on the Exchanges page (not secret — no encryption)
   await ddl(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS wallets JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  // round-trip latency (ms) of the last successful sync's Binance calls — surfaced as
+  // "Exchange Connectivity" on the Status and Live pages
+  await ddl(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS latency_ms INTEGER`);
   await ddl(`CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
     value JSONB NOT NULL DEFAULT '{}'

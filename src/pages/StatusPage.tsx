@@ -83,7 +83,10 @@ function StatusPage(){
         : <div className="space-y-2">
           {exchanges.map(e=><div key={e.id} className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${e.status==='connected'?'bg-success':e.status==='error'?'bg-danger':'bg-slate-300'}`}/>{e.label||e.name}</span>
-            <span className="font-mono text-xs text-slate-400">{e.lastSync?fmtAgo(e.lastSync):'—'}</span>
+            <span className="flex items-center gap-2 font-mono text-xs text-slate-400">
+              {e.status==='connected'&&e.latencyMs!=null&&<span className={e.latencyMs>1000?'text-amber-600':'text-slate-400'}>{e.latencyMs}ms</span>}
+              {e.lastSync?fmtAgo(e.lastSync):'—'}
+            </span>
           </div>)}
         </div>}
       </Card>

@@ -31,12 +31,13 @@ export async function syncExchanges() {
 
   for (const ex of exs) {
     let secret; try { secret = decrypt(ex.api_secret_enc); } catch (e) { await fail(ex, 'Stored API secret could not be decrypted — re-enter it.'); continue; }
-    let pos, acct;
-    try { [pos, acct] = await Promise.all([getPositions(ex.api_key, secret), getAccountEquity(ex.api_key, secret)]); }
+    let pos, acct, latencyMs;
+    const t0 = Date.now();
+    try { [pos, acct] = await Promise.all([getPositions(ex.api_key, secret), getAccountEquity(ex.api_key, secret)]); latencyMs = Date.now() - t0; }
     catch (e) { await fail(ex, (e && e.code ? `[${e.code}] ` : '') + String((e && e.message) || e)); continue; }
 
     connected++; totalEquity += acct.equity; totalWallet += acct.walletBalance; positions += pos.length;
-    await query('UPDATE exchanges SET status=$2, last_sync=$3, last_error=NULL WHERE id=$1', [ex.id, 'connected', Date.now()]);
+    await query('UPDATE exchanges SET status=$2, last_sync=$3, last_error=NULL, latency_ms=$4 WHERE id=$1', [ex.id, 'connected', Date.now(), latencyMs]);
 
     for (const p of pos) {
       const id = `binance:${p.symbol}`; seen.push(id);
