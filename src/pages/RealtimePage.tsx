@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtNum, clsPnl, fmtPrice, fmtAgo, api, Icon, Card, SectionTitle, Badge, Select, CandleChart, useApp,
+  fmtUSD, fmtSigned, fmtNum, fmtPctPlain, clsPnl, fmtPrice, fmtAgo, fmtTime, api, Icon, Card, SectionTitle, Badge, Select, CandleChart, Donut, useApp,
   hasPerm, fundOf, liqInfo, dormantInfo, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag
 } from '../ui'
 
@@ -77,7 +77,17 @@ function RealtimePage(){
   const [chartSymbol,setChartSymbol]=useState('BTCUSDT');
   const [chartInterval,setChartInterval]=useState('1h');
   const [exchanges,setExchanges]=useState(null);
+  const [fills,setFills]=useState(null);
   useEffect(()=>{ if(!hasPerm(user,'view_realtime'))return; api('alerts').then(r=>setIncidents((r.alerts||[]).slice().sort((a,b)=>+new Date(b.createdAt)-+new Date(a.createdAt)).slice(0,6))).catch(()=>setIncidents([])); },[]);
+  // Recent Fills / Trade Stream / Order Flow — real account executions (not a public market
+  // trade tape), synced incrementally per symbol alongside positions (see api/_lib/sync.js).
+  // A plain 30s poll is enough — fills only change as often as the underlying sync does.
+  useEffect(()=>{
+    if(!hasPerm(user,'view_realtime')) return;
+    const load=()=>api('bots?fills=1').then(r=>setFills(r.fills||[])).catch(()=>setFills([]));
+    load(); const iv=setInterval(load,30000);
+    return ()=>clearInterval(iv);
+  },[]);
   // Exchange Connectivity latency — same admin-gated 30s poll pattern as StatusPage's
   // "Exchange Connections" card (the /api/exchanges list itself is admin-only).
   useEffect(()=>{
@@ -133,6 +143,54 @@ function RealtimePage(){
       </div>
       <LiveChart symbol={chartSymbol} interval={chartInterval}/>
     </Card>
+
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+      <Card className="p-5">
+        <SectionTitle>{t('live.recentFills')}</SectionTitle>
+        {fills==null? <div className="text-sm text-slate-400 py-4 text-center">{t('common.loading')}</div>
+        : fills.length===0? <div className="text-sm text-slate-400 py-4 text-center">{t('live.noFills')}</div>
+        : <div className="space-y-2 max-h-72 overflow-y-auto">
+          {fills.slice(0,15).map((f,i)=><div key={i} className="flex items-center justify-between text-xs">
+            <span className="font-mono text-navy">{f.symbol}</span>
+            <span className={`font-medium ${f.side==='BUY'?'text-success':'text-danger'}`}>{f.side}</span>
+            <span className="tnum text-slate-500">{fmtNum(f.qty,f.qty<1?4:2)}</span>
+            <span className="tnum text-slate-500">{fmtPrice(f.price)}</span>
+            <span className="text-slate-400">{fmtTime(f.occurredAt)}</span>
+          </div>)}
+        </div>}
+      </Card>
+      <Card className="p-5">
+        <SectionTitle right={fills&&fills.length>0&&<span className="flex items-center gap-1.5 text-xs text-success"><span className="w-1.5 h-1.5 rounded-full bg-success pulse-dot"/>{t('live.streaming')}</span>}>{t('live.tradeStream')}</SectionTitle>
+        {fills==null? <div className="text-sm text-slate-400 py-4 text-center">{t('common.loading')}</div>
+        : fills.length===0? <div className="text-sm text-slate-400 py-4 text-center">{t('live.noFills')}</div>
+        : <div className="space-y-1.5 max-h-72 overflow-y-auto font-mono text-xs">
+          {fills.slice(0,20).map((f,i)=><div key={i} className={`flex items-center justify-between px-2 py-1 rounded ${f.side==='BUY'?'bg-success/5':'bg-danger/5'}`}>
+            <span className="text-slate-400">{fmtTime(f.occurredAt)}</span>
+            <span className="text-navy">{f.symbol}</span>
+            <span className={f.side==='BUY'?'text-success':'text-danger'}>{f.side}</span>
+            <span className="tnum text-slate-600">{fmtPrice(f.price)}</span>
+          </div>)}
+        </div>}
+      </Card>
+      <Card className="p-5">
+        <SectionTitle>{t('live.orderFlow')}</SectionTitle>
+        {(()=>{
+          if(fills==null) return <div className="text-sm text-slate-400 py-4 text-center">{t('common.loading')}</div>;
+          const buyQty=fills.filter(f=>f.side==='BUY').reduce((s,f)=>s+f.qty,0);
+          const sellQty=fills.filter(f=>f.side==='SELL').reduce((s,f)=>s+f.qty,0);
+          const total=buyQty+sellQty;
+          if(!total) return <div className="text-sm text-slate-400 py-4 text-center">{t('live.noFills')}</div>;
+          return <div className="flex flex-col items-center gap-4">
+            <Donut size={130} thickness={15} segments={[{value:buyQty,color:'#10B981'},{value:sellQty,color:'#EF4444'}]}
+              center={<div><div className="text-xs text-slate-400">{t('live.netFlow')}</div><div className={`text-sm font-bold ${buyQty>=sellQty?'text-success':'text-danger'}`}>{fmtNum(buyQty-sellQty,2)}</div></div>}/>
+            <div className="w-full flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-success"/>{t('live.buys')} {fmtPctPlain(buyQty/total*100)}</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-danger"/>{t('live.sells')} {fmtPctPlain(sellQty/total*100)}</span>
+            </div>
+          </div>;
+        })()}
+      </Card>
+    </div>
 
     <Card className="overflow-hidden">
       <div className="p-5 pb-0"><SectionTitle right={data.live&&data.live.connected>0&&<span className="flex items-center gap-1.5 text-xs text-success"><span className="w-1.5 h-1.5 rounded-full bg-success pulse-dot"/>{t('live.connectedCount',{n:data.live.connected})}</span>}>{t('live.openPositions')}</SectionTitle></div>

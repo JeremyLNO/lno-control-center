@@ -3,7 +3,7 @@
 // Runs daily (cron) and on demand (manual "Sync now").
 import { query } from './db.js';
 import { decrypt } from './crypto.js';
-import { getPositions, getAccountEquity, getIncome } from './binance.js';
+import { getPositions, getAccountEquity, getIncome, getUserTrades } from './binance.js';
 import { migrate } from './schema.js';
 import { detectFundContributions } from './employeeFund.js';
 
@@ -73,6 +73,32 @@ export async function syncExchanges() {
         deltaIncome += Number(inc.income);
       }
     } catch (e) { /* best-effort — a failed income fetch shouldn't break the position sync */ }
+
+    // Recent Fills / Trade Stream / Order Flow (Live page) — real executed trades, one
+    // symbol at a time (futures' userTrades has no all-symbols call, unlike income/
+    // positions). Scope to symbols that matter right now: currently open, or closed within
+    // the last day (catches a just-closed position's final fills) — not every symbol ever
+    // traded, which would grow unbounded. Each symbol resumes from its own MAX(trade_id);
+    // first-ever sync for a symbol just grabs its most recent page (no full backfill).
+    try {
+      const recentlyClosed = (await query(
+        "SELECT DISTINCT symbol FROM bots WHERE exchange='binance' AND status='closed' AND last_seen > now() - interval '1 day'"
+      )).rows.map(r => r.symbol);
+      const fillSymbols = [...new Set([...pos.map(p => p.symbol), ...recentlyClosed])];
+      await Promise.all(fillSymbols.map(async symbol => {
+        try {
+          const cursor = (await query('SELECT MAX(trade_id) AS id FROM fills WHERE exchange=$1 AND symbol=$2', ['binance', symbol])).rows[0].id;
+          const trades = await getUserTrades(ex.api_key, secret, { symbol, fromId: cursor != null ? Number(cursor) + 1 : undefined });
+          for (const tr of trades) {
+            await query(
+              `INSERT INTO fills (exchange,symbol,trade_id,side,qty,price,realized_pnl,commission,occurred_at)
+               VALUES ('binance',$1,$2,$3,$4,$5,$6,$7,to_timestamp($8/1000.0)) ON CONFLICT (exchange,symbol,trade_id) DO NOTHING`,
+              [symbol, tr.tradeId, tr.side, tr.qty, tr.price, tr.realizedPnl, tr.commission, tr.time]
+            );
+          }
+        } catch (e) { /* best-effort per symbol — one bad symbol shouldn't drop the rest */ }
+      }));
+    } catch (e) { /* best-effort — a failed fills fetch shouldn't break the position sync */ }
   }
 
   // any previously-open Binance bot no longer reported is now flat

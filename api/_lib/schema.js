@@ -127,6 +127,24 @@ export async function migrate() {
     occurred_at TIMESTAMPTZ NOT NULL
   )`);
   await ddl(`CREATE INDEX IF NOT EXISTS income_events_symbol_idx ON income_events (symbol)`);
+  // Real account fills (executed trades), fetched incrementally per symbol from Binance's
+  // userTrades endpoint — see api/_lib/sync.js. Powers "Recent Fills"/"Trade Stream"/"Order
+  // Flow" on the Live page. trade_id is Binance's own id, unique per (exchange,symbol); the
+  // composite PK dedupes across syncs (ON CONFLICT DO NOTHING, fills are immutable once
+  // recorded) and also serves as the resume cursor — MAX(trade_id) for a symbol.
+  await ddl(`CREATE TABLE IF NOT EXISTS fills (
+    exchange TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    trade_id BIGINT NOT NULL,
+    side TEXT NOT NULL,
+    qty DOUBLE PRECISION NOT NULL,
+    price DOUBLE PRECISION NOT NULL,
+    realized_pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
+    commission DOUBLE PRECISION NOT NULL DEFAULT 0,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (exchange, symbol, trade_id)
+  )`);
+  await ddl(`CREATE INDEX IF NOT EXISTS fills_occurred_idx ON fills (occurred_at DESC)`);
   // Employee Fund: each employee's capital contribution, recorded as a number of "units"
   // (mutual-fund-style unitisation — see api/_lib/employeeFund.js) rather than a flat euro
   // amount, so joining after the fund has already gained/lost value is priced fairly.

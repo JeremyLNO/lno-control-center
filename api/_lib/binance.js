@@ -87,6 +87,25 @@ export async function getIncome(key, secret, { startTime } = {}) {
   }));
 }
 
+// Account's own executed trades (fills) for one symbol — futures' userTrades endpoint has
+// no all-symbols call, unlike income/positions, so the caller must iterate symbols itself
+// (see sync.js). `fromId` (Binance's own trade id, monotonically increasing per symbol)
+// resumes from just after the last-seen trade — pass the max known trade_id + 1 to avoid
+// re-fetching the same page every sync. Omit both `fromId` and `startTime` to get the most
+// recent `limit` trades (first sync for a symbol, nothing recorded yet).
+export async function getUserTrades(key, secret, { symbol, fromId, startTime, limit = 1000 } = {}) {
+  const params = { symbol, limit: String(limit) };
+  if (fromId != null) params.fromId = String(fromId);
+  else if (startTime) params.startTime = String(startTime);
+  const rows = await signedGet('/fapi/v1/userTrades', key, secret, params);
+  return (Array.isArray(rows) ? rows : []).map(r => ({
+    tradeId: Number(r.id), symbol: r.symbol, side: r.side,
+    qty: parseFloat(r.qty || '0'), price: parseFloat(r.price || '0'),
+    realizedPnl: parseFloat(r.realizedPnl || '0'), commission: parseFloat(r.commission || '0'),
+    time: Number(r.time),
+  }));
+}
+
 // User Data Stream (listenKey) — unlike every call above, these three take ONLY the API-KEY
 // header, no HMAC signature, by Binance's own design: a listenKey is a scoped, revocable,
 // time-limited token meant to be handed to a lower-trust client so it can open its own

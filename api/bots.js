@@ -2,6 +2,7 @@
 //   GET                          -> bots (+ a "live" equity summary)   (any auth)
 //   GET ?attribution=1           -> per-bot/per-fund trade attribution (any auth)
 //   GET ?costs=1                 -> per-bot/per-fund funding/fee drag  (any auth)
+//   GET ?fills=1                 -> most recent executed trades         (any auth)
 //   GET ?listenKey=1             -> mint/reuse a Binance user-data-stream listenKey,
 //                                    for the browser to open its own real-time WebSocket (admin)
 //   POST {action:'sync'}         -> run the position sync now           (admin)
@@ -39,6 +40,13 @@ export default async function handler(req, res) {
       const a = requireAuth(req, res); if (!a) return;
       if (req.query?.attribution) return res.status(200).json(await getAttribution());
       if (req.query?.costs) return res.status(200).json(await getCostAnalytics());
+      if (req.query?.fills) {
+        const { rows } = await query('SELECT * FROM fills ORDER BY occurred_at DESC LIMIT 50');
+        return res.status(200).json({ fills: rows.map(r => ({
+          symbol: r.symbol, side: r.side, qty: Number(r.qty), price: Number(r.price),
+          realizedPnl: Number(r.realized_pnl), commission: Number(r.commission), occurredAt: r.occurred_at,
+        })) });
+      }
       if (req.query?.listenKey) {
         const adm = requireAdmin(req, res); if (!adm) return;
         const apiKey = await primaryBinanceApiKey();

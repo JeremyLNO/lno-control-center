@@ -97,6 +97,13 @@ globalThis.fetch = async (url, opts) => {
     if (u.includes('/fapi/v2/positionRisk')) return { ok: true, status: 200, json: async () => binancePositions };
     if (u.includes('/fapi/v2/account')) return { ok: true, status: 200, json: async () => ({ totalMarginBalance: '125000.50', totalWalletBalance: walletBalance, totalUnrealizedProfit: '5000.50', availableBalance: '90000' }) };
     if (u.endsWith('/fapi/v1/listenKey')) return { ok: true, status: 200, json: async () => (opts && opts.method === 'POST' ? { listenKey: 'fake-listen-key-123' } : {}) };
+    if (u.includes('/fapi/v1/userTrades')) {
+      const symbol = new URL(u).searchParams.get('symbol');
+      return { ok: true, status: 200, json: async () => ([
+        { id: 1001, symbol, side: 'BUY', qty: '100', price: '0.45', realizedPnl: '0', commission: '0.02', time: Date.now() },
+        { id: 1002, symbol, side: 'SELL', qty: '40', price: '0.46', realizedPnl: '4', commission: '0.01', time: Date.now() },
+      ]) };
+    }
     return { ok: true, status: 200, json: async () => ({}) };
   }
   if (u.includes('textmebot.com')) { sentMessages.push({ text: new URL(u).searchParams.get('text') || '' }); return { ok: true, status: 200, text: async () => 'Success! Message Sent.' }; }
@@ -217,6 +224,11 @@ ok('sync creates one bot per OPEN futures position', r.status === 200 && r.body.
 ok('sync reads account equity (margin balance)', r.body.totalEquity === 125001, r.body);
 const exSynced = (await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId);
 ok('a successful sync records the round-trip latency', !!exSynced && typeof exSynced.latencyMs === 'number' && exSynced.latencyMs >= 0, exSynced);
+r = await call(bots, { method: 'GET', headers: authH, query: { fills: '1' } });
+ok('sync records real account fills per open symbol', r.status === 200 && r.body.fills.length >= 2 && r.body.fills.some(f => f.symbol === 'ADAUSDT' && f.side === 'BUY'), r.body);
+r = await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } });
+r = await call(bots, { method: 'GET', headers: authH, query: { fills: '1' } });
+ok('re-syncing does not duplicate already-recorded fills', r.status === 200 && r.body.fills.filter(f => f.symbol === 'ADAUSDT' && f.side === 'BUY').length === 1, r.body.fills);
 r = await call(bots, { method: 'GET', headers: authH });
 const adaBot = r.body.bots.find(b => b.symbol === 'ADAUSDT');
 ok('a detected pair becomes an unassigned bot id "exchange:symbol"', !!adaBot && adaBot.id === 'binance:ADAUSDT' && adaBot.fundId === null && adaBot.side === 'LONG', adaBot);
