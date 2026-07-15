@@ -1,16 +1,15 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtPct, clsPnl, fmtDate, PREF, Icon, Card, SectionTitle, Btn, AreaChart, Donut, Sparkline, FUND_PALETTE, useApp,
+  fmtUSD, fmtSigned, fmtPct, clsPnl, fmtDate, Icon, Card, SectionTitle, Btn, AreaChart, Donut, Sparkline, FUND_PALETTE, useApp,
   hasPerm, fundOf, sliceByPeriod, RiskPanel, Underwater, PnlCalendar, MarketTicker, PageHead, Denied, KpiCard, TrendBadge, EmptyState,
-  SideTag, FundTag, PeriodControls, OnboardingCard
+  SideTag, FundTag, OnboardingCard
 } from '../ui'
 
 function ActivityPage(){
-  const {funds,navigate,user,data,refreshTick,refreshMs,t}=useApp();
-  const [period,setPeriod]=useState(()=>PREF.get('activity_period2','90'));
-  const [custom,setCustom]=useState({start:null,end:null});
-  useEffect(()=>{ PREF.set('activity_period2',period); },[period]);
+  // period/custom now live in AppContext (rendered once, globally, in Header) rather than
+  // page-local state — see types.ts's AppContextValue for why.
+  const {funds,navigate,user,data,refreshTick,refreshMs,period,custom,t}=useApp();
   if(!hasPerm(user,'view_activity')) return <Denied/>;
 
   const {series,equity,openBots,byFund,bots}=data;
@@ -35,8 +34,7 @@ function ActivityPage(){
 
   return <div>
     <PageHead title={t('activity.title')} subtitle={t('activity.subtitle')}
-      refresh={{ms:refreshMs,tick:refreshTick}}
-      actions={hasHistory&&<PeriodControls {...{period,setPeriod,custom,setCustom}}/>}/>
+      refresh={{ms:refreshMs,tick:refreshTick}}/>
 
     <OnboardingCard/>
     <MarketTicker/>

@@ -229,6 +229,12 @@ function Root(){
   const [booting,setBooting]=useState(true);
   const {data,funds,setFunds,reloadData,reloadFunds,dataStatus,refreshTick,refreshMs}=useData(!!user,!!(user&&user.role==='admin'));
 
+  // Global period filter — rendered once in Header rather than per-page (was Activity-page-
+  // local); persisted the same way the old page-local version was, just under a shared key.
+  const [period,setPeriod]=useState<string>(()=>PREF.get('global_period','90'));
+  const [custom,setCustom]=useState<{start:number|null;end:number|null}>({start:null,end:null});
+  useEffect(()=>{ PREF.set('global_period',period); },[period]);
+
   // Language: defaults to the browser's language; once a user explicitly picks one (the
   // sidebar switcher), it's persisted both locally (instant on next visit, incl. logged out)
   // and server-side on their account (users.language) — so it's also their default on any
@@ -279,7 +285,7 @@ function Root(){
   function logout(){ api('auth',{method:'POST',body:{action:'logout'}}).catch(()=>{}); setToken(null); setUser(null); window.location.hash='#/activity'; }
   function navigate(to){ window.location.hash='#'+to; }
 
-  const ctx={route,navigate,user,setUser,login,loginGoogle,logout,api,funds,setFunds,reloadFunds,reloadData,data,dataStatus,refreshTick,refreshMs,lang,setLang,t};
+  const ctx={route,navigate,user,setUser,login,loginGoogle,logout,api,funds,setFunds,reloadFunds,reloadData,data,dataStatus,refreshTick,refreshMs,period,setPeriod,custom,setCustom,lang,setLang,t};
 
   const content = booting ? <LoadingScreen/>
     : !user ? <Login/>

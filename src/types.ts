@@ -150,6 +150,15 @@ export interface AppContextValue {
    *  page shows a time-to-next-refresh progress bar. */
   refreshTick: number;
   refreshMs: number;
+  /** Global period filter, rendered once in the Header (PeriodControls) rather than
+   *  per-page — pages that chart history (currently Activity) read it here instead of
+   *  keeping their own local state; real-time pages (Live/Positions/Prices) simply don't
+   *  consume it, matching the mockups where the control is visually global but not every
+   *  panel reacts to it. */
+  period: string;
+  setPeriod: (period: string) => void;
+  custom: { start: number | null; end: number | null };
+  setCustom: Dispatch<SetStateAction<{ start: number | null; end: number | null }>>;
   lang: Lang;
   setLang: (lang: Lang) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;

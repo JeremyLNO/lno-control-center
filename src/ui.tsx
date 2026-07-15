@@ -815,7 +815,7 @@ function GlobalSearch(){
 }
 
 function Header(){
-  const {user,navigate,logout,dataStatus,t}=useApp();
+  const {user,navigate,logout,dataStatus,period,setPeriod,custom,setCustom,t}=useApp();
   const [bell,setBell]=useState(false); const [menu,setMenu]=useState(false);
   const [alerts,setAlerts]=useState([]);
   const [readIds,setReadIds]=useState<Set<any>>(()=>new Set(PREF.get('read_alerts',[])));
@@ -831,7 +831,8 @@ function Header(){
     <Logo className="lg:hidden h-6 text-navy"/>
     <GlobalSearch/>
     <div className="ml-auto flex items-center gap-4">
-    {user.firstName&&<div className="hidden md:block text-sm text-slate-500">{t('common.hello')}, <span className="font-semibold text-navy">{user.firstName}</span></div>}
+    <div className="hidden md:block"><PeriodControls period={period} setPeriod={setPeriod} custom={custom} setCustom={setCustom}/></div>
+    {user.firstName&&<div className="hidden lg:block text-sm text-slate-500">{t('common.hello')}, <span className="font-semibold text-navy">{user.firstName}</span></div>}
     <LiveBadge status={dataStatus}/>
     <div ref={bref} className="relative">
       <button onClick={()=>setBell(!bell)} className="relative p-2 rounded-lg hover:bg-slate-100"><Icon name="bell" className="w-5 h-5 text-slate-600"/>{unread>0&&<span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-danger text-white text-[10px] rounded-full grid place-items-center">{unread}</span>}</button>
