@@ -24,8 +24,17 @@ async function proxyDispatcher() {
   return _dispatcher || undefined;
 }
 
+// Every outbound Binance call gets a hard timeout — fetch() has none by default, so a single
+// stalled response (rare, but exchange APIs do hang sometimes) would otherwise block whatever
+// awaited it indefinitely. This matters far more since getUserTrades() started firing one call
+// PER SYMBOL every sync (see sync.js): with no timeout, one stuck symbol blocks the entire
+// sync — and since the cron alert-check hits this on every trigger, a single hang can silently
+// break 24/7 alerting until Vercel's own platform timeout eventually kills the request (which
+// takes minutes, not seconds — exactly the failure mode this fixes).
+const REQUEST_TIMEOUT_MS = 10000;
+
 async function signedGet(path, key, secret, params = {}) {
-  const opts = { headers: { 'X-MBX-APIKEY': key } };
+  const opts = { headers: { 'X-MBX-APIKEY': key }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) };
   const d = await proxyDispatcher(); if (d) opts.dispatcher = d;
   const r = await fetch(`${FAPI}${path}?${signedQS(params, secret)}`, opts);
   let body; try { body = await r.json(); } catch (e) { body = null; }
@@ -112,7 +121,7 @@ export async function getUserTrades(key, secret, { symbol, fromId, startTime, li
 // WebSocket for real-time ACCOUNT_UPDATE/ORDER_TRADE_UPDATE events. The account's actual
 // key+secret never leave the server — only this derived token does.
 async function listenKeyRequest(key, method) {
-  const opts = { method, headers: { 'X-MBX-APIKEY': key } };
+  const opts = { method, headers: { 'X-MBX-APIKEY': key }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) };
   const d = await proxyDispatcher(); if (d) opts.dispatcher = d;
   const r = await fetch(`${FAPI}/fapi/v1/listenKey`, opts);
   let body; try { body = await r.json(); } catch (e) { body = null; }
