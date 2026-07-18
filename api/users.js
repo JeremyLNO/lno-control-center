@@ -1,6 +1,6 @@
 // User administration (admin only). Internal roles sign in with Google (@lno.company,
-// no usable password). Shareholders have EXTERNAL emails so an admin creates them with a
-// policy-checked password (they can't use Google sign-in).
+// no usable password). Shareholders have EXTERNAL emails and sign in with an emailed
+// one-time code (see api/auth.js requestOtp/verifyOtp) — no password at all.
 import { query } from './_lib/db.js';
 import { requireAdmin, hashPassword, sanitizeUser, passwordIssues } from './_lib/auth.js';
 import { ROLE_PERMS } from './_lib/constants.js';
@@ -27,13 +27,12 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       // the email IS the identity (no username concept)
       const email = String(body.email || '').trim();
-      const { firstName = '', lastName = '', role = 'viewer', password } = body;
+      const { firstName = '', lastName = '', role = 'viewer' } = body;
       const isShareholder = role === 'shareholder';
       if (isShareholder) {
-        // external emails are allowed for shareholders; a valid password is required
+        // external emails are allowed for shareholders — no password to validate, they sign
+        // in with an emailed one-time code
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'A valid email is required' });
-        const issues = passwordIssues(password);
-        if (issues.length) return res.status(400).json({ error: 'Password needs ' + issues.join(', ') });
       } else {
         if (!email.endsWith('@lno.company')) return res.status(400).json({ error: 'Email must end with @lno.company' });
       }
@@ -41,9 +40,10 @@ export default async function handler(req, res) {
       if (exists.rows[0]) return res.status(409).json({ error: 'An account with this email already exists' });
       const id = 'u' + Date.now();
       const perms = ROLE_PERMS[role] || ROLE_PERMS.viewer;
-      // shareholders sign in with email + password; internal roles use Google (no usable password)
-      const provider = isShareholder ? 'password' : 'google';
-      const hash = isShareholder ? await hashPassword(password) : await hashPassword('google:' + id + ':' + Math.random());
+      // shareholders sign in with an emailed code; internal roles use Google — neither has a
+      // usable password, so both get a random unusable hash
+      const provider = isShareholder ? 'otp' : 'google';
+      const hash = await hashPassword(provider + ':' + id + ':' + Math.random());
       await query(
         `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,password_hash,auth_provider)
          VALUES ($1,$2,$3,$4,$5,$6,true,$7::jsonb,$8,$9)`,
@@ -68,11 +68,14 @@ export default async function handler(req, res) {
         else { sets.push(`${map[k]}=$${i}`); vals.push(patch[k]); }
         i++;
       }
-      // admin-set a new password — only for password (non-Google) accounts, policy-checked
+      // admin-set a new password — only accounts still on the legacy 'password' provider
+      // (the seeded admin, break-glass) have one to set; allow-listed rather than
+      // block-listed so any account type other than 'password' (google, otp, and anything
+      // added later) is rejected by default instead of silently allowed.
       if (typeof password === 'string' && password !== '') {
         const tgt = (await query('SELECT auth_provider FROM users WHERE id=$1', [id])).rows[0];
         if (!tgt) return res.status(404).json({ error: 'user not found' });
-        if ((tgt.auth_provider || 'password') === 'google') return res.status(400).json({ error: 'This user signs in with Google — there is no password to set' });
+        if ((tgt.auth_provider || 'password') !== 'password') return res.status(400).json({ error: 'This account does not sign in with a password' });
         const issues = passwordIssues(password);
         if (issues.length) return res.status(400).json({ error: 'Password needs ' + issues.join(', ') });
         sets.push(`password_hash=$${i}`); vals.push(await hashPassword(password)); i++;

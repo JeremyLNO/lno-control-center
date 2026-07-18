@@ -113,6 +113,8 @@ function AdminUsers(){
             <div className="text-xs font-medium text-slate-500 mb-2">{t('users.signInPassword')}</div>
             {u.authProvider==='google'
               ? <div className="text-sm text-slate-500 flex items-center gap-2"><Icon name="shield" className="w-4 h-4 text-slate-400 shrink-0"/>{t('users.signsInWithGoogle',{email:u.email})}</div>
+              : u.authProvider==='otp'
+              ? <div className="text-sm text-slate-500 flex items-center gap-2"><Icon name="mail" className="w-4 h-4 text-slate-400 shrink-0"/>{t('users.signsInWithCode',{email:u.email})}</div>
               : <AdminSetPassword user={u}/>}
           </div>
           <div>
@@ -171,16 +173,15 @@ function genPassword(){
 function AddUserModal({open,onClose,onCreated}: any){
   const {t}=useApp();
   const roleOpts=ROLE_OPTIONS.map(o=>({...o,label:t('role.'+o.value)}));
-  const [v,setV]=useState({email:'',firstName:'',lastName:'',role:'viewer',password:''}); const [err,setErr]=useState(''); const [busy,setBusy]=useState(false); const [showPw,setShowPw]=useState(false);
-  useEffect(()=>{ if(open){setV({email:'',firstName:'',lastName:'',role:'viewer',password:''});setErr('');setShowPw(false);} },[open]);
+  const [v,setV]=useState({email:'',firstName:'',lastName:'',role:'viewer'}); const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
+  useEffect(()=>{ if(open){setV({email:'',firstName:'',lastName:'',role:'viewer'});setErr('');} },[open]);
   const isShareholder=v.role==='shareholder';
   async function submit(){
     if(isShareholder){
       if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email))return setErr(t('users.validEmailRequired'));
-      if(!passwordOk(v.password))return setErr(t('users.passwordRequirementsErr'));
     } else if(!v.email.endsWith('@lno.company')) return setErr(t('users.emailMustEndWith'));
     setBusy(true);
-    try{ const body: any={email:v.email.trim(),firstName:v.firstName,lastName:v.lastName,role:v.role}; if(isShareholder) body.password=v.password; const r=await api('users',{method:'POST',body}); onCreated(r.user); }
+    try{ const body: any={email:v.email.trim(),firstName:v.firstName,lastName:v.lastName,role:v.role}; const r=await api('users',{method:'POST',body}); onCreated(r.user); }
     catch(e){ setErr(e.message); } finally{ setBusy(false); }
   }
   return <Modal open={open} onClose={onClose} title={t('users.addUserTitle')}>
@@ -191,20 +192,8 @@ function AddUserModal({open,onClose,onCreated}: any){
         <Field label={t('users.firstName')}><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
         <Field label={t('users.lastName')}><Input value={v.lastName} onChange={e=>setV({...v,lastName:e.target.value})}/></Field>
       </div>
-      {isShareholder&&<Field label={t('users.passwordRequired')}>
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Input type={showPw?'text':'password'} value={v.password} onChange={e=>setV({...v,password:e.target.value})} placeholder={t('users.setStrongPassword')} className="pr-9 font-mono"/>
-            <button type="button" onClick={()=>setShowPw(s=>!s)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-navy"><Icon name={showPw?'eyeoff':'eye'} className="w-4 h-4"/></button>
-          </div>
-          <Btn type="button" variant="outline" size="sm" onClick={()=>{setV(x=>({...x,password:genPassword()}));setShowPw(true);}}><Icon name="refresh" className="w-3.5 h-3.5"/>{t('users.generate')}</Btn>
-        </div>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2">
-          {PW_RULES.map(([label,fn])=>{ const ok=fn(v.password||''); return <div key={label} className={`flex items-center gap-1.5 text-[11px] ${ok?'text-success':'text-slate-400'}`}><Icon name={ok?'check':'x'} className="w-3 h-3 shrink-0"/>{t(label)}</div>; })}
-        </div>
-      </Field>}
       {err&&<div className="text-sm text-danger">{err}</div>}
-      <div className="text-[11px] text-slate-400">{isShareholder? t('users.shareholderCredentialsHint') : t('users.internalAccountHint',{domain:'@lno.company'})}</div>
+      <div className="text-[11px] text-slate-400 flex items-start gap-1.5">{isShareholder&&<Icon name="mail" className="w-3.5 h-3.5 shrink-0 mt-0.5"/>}{isShareholder? t('users.shareholderOtpHint') : t('users.internalAccountHint',{domain:'@lno.company'})}</div>
       <div className="flex justify-end gap-2 pt-1"><Btn variant="outline" onClick={onClose}>{t('common.cancel')}</Btn><Btn onClick={submit} disabled={busy}>{busy?t('users.creating'):t('users.createUser')}</Btn></div>
     </div>
   </Modal>;

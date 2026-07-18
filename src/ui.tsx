@@ -649,10 +649,74 @@ function LoadingScreen(){
 /* ============================================================
    LOGIN
    ============================================================ */
+// 6-digit OTP entry — CSS-only "liquid fill" animation per cell as each digit lands (no
+// framer-motion/animation library; every other animation in this file is hand-rolled CSS,
+// see index.css's otp-* keyframes), auto-advance/backspace/paste, and a staggered green
+// pulse across all cells on `status='success'` (a brief "connect" moment before the app
+// moves on, matching the reference video's "digits fill then connect" framing).
+function OtpInput({length=6,value,onChange,onComplete,status='idle',disabled}: any){
+  const refs=useRef<any[]>([]);
+  const digits=useMemo(()=>{ const a=String(value||'').split(''); while(a.length<length) a.push(''); return a.slice(0,length); },[value,length]);
+  const setDigit=(i,v)=>{
+    const next=digits.slice(); next[i]=v; const code=next.join('');
+    onChange(code);
+    if(v&&i<length-1) refs.current[i+1]?.focus();
+    if(next.every(d=>d)) onComplete(code);
+  };
+  const onKeyDown=(i,e)=>{ if(e.key==='Backspace'&&!digits[i]&&i>0) refs.current[i-1]?.focus(); };
+  const onPaste=(e)=>{
+    const text=(e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,length);
+    if(!text) return; e.preventDefault();
+    onChange(text); refs.current[Math.min(text.length,length-1)]?.focus();
+    if(text.length===length) onComplete(text);
+  };
+  return <div className={`flex items-center justify-center gap-2 ${status==='error'?'otp-shake':''}`}>
+    {digits.map((d,i)=><div key={i}
+        className={`relative w-11 h-14 rounded-xl border-2 overflow-hidden bg-white transition-colors ${status==='error'?'border-danger':status==='success'?'border-success':d?'border-gold':'border-slate-200'}`}
+        style={status==='success'?{animation:`otp-pulse .6s ease-out ${i*0.06}s`}:undefined}>
+      {d&&<div className="otp-liquid">
+        <span className="otp-bubble" style={{left:'30%',animationDelay:'0s'}}/>
+        <span className="otp-bubble" style={{left:'60%',animationDelay:'.15s'}}/>
+      </div>}
+      <input ref={el=>refs.current[i]=el} value={d} disabled={disabled}
+        onChange={e=>setDigit(i,e.target.value.replace(/\D/g,'').slice(-1))}
+        onKeyDown={e=>onKeyDown(i,e)} onPaste={onPaste}
+        inputMode="numeric" autoComplete="one-time-code" maxLength={1}
+        className="relative z-10 w-full h-full text-center text-xl font-bold text-navy bg-transparent focus:outline-none"/>
+    </div>)}
+  </div>;
+}
 function Login(){
-  const {login,loginGoogle,lang,t}=useApp();
+  const {login,loginGoogle,api,setUser,lang,t}=useApp();
   const [u,setU]=useState(''); const [p,setP]=useState(''); const [err,setErr]=useState(''); const [warn,setWarn]=useState(false);
   const [busy,setBusy]=useState(false); const attemptsRef=useRef(0);
+  // 'password' = internal/admin break-glass form (unchanged); 'otp-email'/'otp-code' =
+  // shareholder sign-in — password auth was removed for those accounts entirely, so this
+  // toggle just routes to the flow that actually works for the account being used.
+  const [mode,setMode]=useState('password');
+  const [otpEmail,setOtpEmail]=useState(''); const [otpCode,setOtpCode]=useState('');
+  const [otpStatus,setOtpStatus]=useState('idle'); const [otpBusy,setOtpBusy]=useState(false);
+  const [resendIn,setResendIn]=useState(0);
+  useEffect(()=>{ if(resendIn<=0) return; const t=setTimeout(()=>setResendIn(r=>r-1),1000); return ()=>clearTimeout(t); },[resendIn]);
+  async function sendCode(e){
+    e?.preventDefault(); if(otpBusy||resendIn>0) return; setOtpBusy(true); setErr('');
+    try{ await api('auth',{method:'POST',body:{action:'requestOtp',email:otpEmail.trim()}}); setMode('otp-code'); setOtpCode(''); setOtpStatus('idle'); setResendIn(60); }
+    catch(ex){ setErr(ex.message||t('login.otpSendFailed')); }
+    finally{ setOtpBusy(false); }
+  }
+  async function submitCode(code){
+    if(otpBusy) return; setOtpBusy(true); setErr('');
+    try{
+      const r=await api('auth',{method:'POST',body:{action:'verifyOtp',email:otpEmail.trim(),code}});
+      setOtpStatus('success');
+      // let the success animation play before the app swaps this page out for the Shell
+      await new Promise(res=>setTimeout(res,650));
+      setToken(r.token); setUser(r.user);
+    }catch(ex){
+      setOtpStatus('error'); setErr(ex.message||t('login.otpInvalid')); setOtpCode('');
+      setTimeout(()=>setOtpStatus('idle'),400);
+    } finally{ setOtpBusy(false); }
+  }
   const clientId=GOOGLE_CLIENT_ID;
   const gref=useRef<any>(null);
   useEffect(()=>{
@@ -697,20 +761,44 @@ function Login(){
         <div className="text-slate-300 text-sm mt-1">{t('login.controlCenter')}</div>
       </div>
       <div className="bg-white rounded-2xl shadow-2xl p-6 space-y-4">
-        <h1 className="text-lg font-semibold text-navy">{t('login.signIn')}</h1>
-        {clientId&&<>
-          <div className="flex justify-center min-h-[44px]" ref={gref}/>
-          <p className="text-[11px] text-slate-400 text-center">{t('login.googleHint',{domain:'@lno.company'})}</p>
+        {mode==='password'? <>
+          <h1 className="text-lg font-semibold text-navy">{t('login.signIn')}</h1>
+          {clientId&&<>
+            <div className="flex justify-center min-h-[44px]" ref={gref}/>
+            <p className="text-[11px] text-slate-400 text-center">{t('login.googleHint',{domain:'@lno.company'})}</p>
+          </>}
+          {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4 shrink-0"/>{err}</div>}
+          <form onSubmit={submit} className="space-y-4">
+            {clientId&&<div className="flex items-center gap-2 pt-1"><div className="flex-1 border-t border-slate-200"/><span className="text-[10px] uppercase tracking-wide text-slate-400">{t('login.emailSignIn')}</span><div className="flex-1 border-t border-slate-200"/></div>}
+            <Field label={t('login.email')}><Input type="email" value={u} onChange={e=>setU(e.target.value)} placeholder="you@example.com" autoFocus={!clientId}/></Field>
+            <Field label={t('login.password')}><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="••••••"/></Field>
+            <Btn className="w-full" type="submit" disabled={busy}>{busy?t('login.signingIn'):t('login.signIn')}</Btn>
+          </form>
+          {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>{t('login.securityWarning')}</span></div>}
+          {!clientId&&<div className="text-[11px] text-slate-400 text-center">{t('login.defaultAdmin')}: <span className="font-mono">admin@lno.company / admin</span></div>}
+          <button type="button" onClick={()=>{setMode('otp-email');setErr('');}} className="w-full text-center text-xs text-slate-400 hover:text-navy pt-1">{t('login.useCodeInstead')}</button>
+        </> : mode==='otp-email'? <>
+          <h1 className="text-lg font-semibold text-navy">{t('login.signInWithCode')}</h1>
+          <p className="text-xs text-slate-400">{t('login.otpEmailHint')}</p>
+          {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4 shrink-0"/>{err}</div>}
+          <form onSubmit={sendCode} className="space-y-4">
+            <Field label={t('login.email')}><Input type="email" value={otpEmail} onChange={e=>setOtpEmail(e.target.value)} placeholder="you@example.com" autoFocus/></Field>
+            <Btn className="w-full" type="submit" disabled={otpBusy||!otpEmail.trim()}>{otpBusy?t('login.sendingCode'):t('login.sendCode')}</Btn>
+          </form>
+          <button type="button" onClick={()=>{setMode('password');setErr('');}} className="w-full text-center text-xs text-slate-400 hover:text-navy pt-1">{t('login.usePasswordInstead')}</button>
+        </> : <>
+          <h1 className="text-lg font-semibold text-navy text-center">{t('login.enterCode')}</h1>
+          <p className="text-xs text-slate-400 text-center">{t('login.otpCodeHint',{email:otpEmail})}</p>
+          {err&&<div className="text-sm text-danger flex items-center justify-center gap-2"><Icon name="triangle" className="w-4 h-4 shrink-0"/>{err}</div>}
+          <OtpInput value={otpCode} onChange={setOtpCode} onComplete={submitCode} status={otpStatus} disabled={otpBusy||otpStatus==='success'}/>
+          {otpStatus==='success'&&<div className="text-sm text-success text-center font-medium flex items-center justify-center gap-1.5"><Icon name="check" className="w-4 h-4"/>{t('login.codeVerified')}</div>}
+          <div className="text-center">
+            <button type="button" onClick={sendCode} disabled={resendIn>0||otpBusy} className="text-xs text-gold hover:underline disabled:text-slate-300 disabled:no-underline">
+              {resendIn>0? t('login.resendIn',{n:resendIn}) : t('login.resendCode')}
+            </button>
+          </div>
+          <button type="button" onClick={()=>{setMode('otp-email');setOtpCode('');setErr('');setOtpStatus('idle');}} className="w-full text-center text-xs text-slate-400 hover:text-navy pt-1">{t('login.changeEmail')}</button>
         </>}
-        {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4 shrink-0"/>{err}</div>}
-        <form onSubmit={submit} className="space-y-4">
-          {clientId&&<div className="flex items-center gap-2 pt-1"><div className="flex-1 border-t border-slate-200"/><span className="text-[10px] uppercase tracking-wide text-slate-400">{t('login.emailSignIn')}</span><div className="flex-1 border-t border-slate-200"/></div>}
-          <Field label={t('login.email')}><Input type="email" value={u} onChange={e=>setU(e.target.value)} placeholder="you@example.com" autoFocus={!clientId}/></Field>
-          <Field label={t('login.password')}><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="••••••"/></Field>
-          <Btn className="w-full" type="submit" disabled={busy}>{busy?t('login.signingIn'):t('login.signIn')}</Btn>
-        </form>
-        {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>{t('login.securityWarning')}</span></div>}
-        {!clientId&&<div className="text-[11px] text-slate-400 text-center">{t('login.defaultAdmin')}: <span className="font-mono">admin@lno.company / admin</span></div>}
       </div>
     </div>
   </div>;

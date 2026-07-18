@@ -1,10 +1,14 @@
-// Auth: GET = current user (me); POST {action:login|google|logout|changePassword}.
+// Auth: GET = current user (me); POST {action:login|google|otp|logout|changePassword}.
+import crypto from 'crypto';
 import { query } from './_lib/db.js';
-import { verifyPassword, signToken, hashPassword, requireAuth, sanitizeUser, passwordIssues, clientIp } from './_lib/auth.js';
+import { verifyPassword, signToken, hashPassword, hashOtpCode, requireAuth, sanitizeUser, passwordIssues, clientIp } from './_lib/auth.js';
 import { verifyGoogleToken, ALLOWED_DOMAIN } from './_lib/google.js';
 import { ROLE_PERMS } from './_lib/constants.js';
 import { notify } from './_lib/notify.js';
 import { loginFailureText } from './_lib/notifyText.js';
+import { sendOtpEmail } from './_lib/mailer.js';
+
+const MAX_ATTEMPTS = 5, LOCK_MINUTES = 15;
 
 // record a successful sign-in: reset failures, stamp last login/seen/IP, append an audit row
 async function recordLogin(u, req, method) {
@@ -15,6 +19,17 @@ async function recordLogin(u, req, method) {
     await query('INSERT INTO login_events (user_id,username,ip,method) VALUES ($1,$2,$3,$4)', [u.id, u.email, ip, method]);
   } catch (e) { /* audit columns/table not migrated yet — don't block sign-in */ }
   return (await query('SELECT * FROM users WHERE id=$1', [u.id])).rows[0];
+}
+
+// Shared brute-force bookkeeping for BOTH password login and OTP verification failures —
+// one lockout mechanism, not two that could drift apart. Alerts admins on the 3rd
+// consecutive failure, locks the account at MAX_ATTEMPTS. Caller always responds with a
+// generic error regardless of what happened here.
+async function registerFailedAttempt(u) {
+  const up = await query('UPDATE users SET failed_attempts=failed_attempts+1 WHERE id=$1 RETURNING failed_attempts', [u.id]);
+  const n = up.rows[0]?.failed_attempts || 0;
+  if (n === 3) await notify((lang) => loginFailureText(lang, u.email), { type: 'login' });
+  if (n >= MAX_ATTEMPTS) { try { await query(`UPDATE users SET locked_until = now() + interval '${LOCK_MINUTES} minutes' WHERE id=$1`, [u.id]); } catch (e) {} }
 }
 
 export default async function handler(req, res) {
@@ -31,8 +46,10 @@ export default async function handler(req, res) {
       const action = body.action;
 
       if (action === 'login') {
-        const MAX_ATTEMPTS = 5, LOCK_MINUTES = 15;
-        // shareholders (external email) sign in with email + password; internal users use Google
+        // The seeded admin account (and any other 'password'-provider account) signs in with
+        // email + password — this is the internal break-glass path. Shareholders moved to
+        // OTP (see 'requestOtp'/'verifyOtp' below); an account still on auth_provider='password'
+        // simply isn't a shareholder (that provider is only ever assigned to the admin seed).
         const { rows } = await query('SELECT * FROM users WHERE lower(email)=lower($1)', [String(body.email || '').trim()]);
         const u = rows[0];
         // brute-force lockout (account-based): block while locked, regardless of password
@@ -42,17 +59,63 @@ export default async function handler(req, res) {
         }
         const ok = u && u.active && await verifyPassword(body.password, u.password_hash);
         if (!ok) {
-          if (u) {
-            const up = await query('UPDATE users SET failed_attempts=failed_attempts+1 WHERE id=$1 RETURNING failed_attempts', [u.id]);
-            const n = up.rows[0]?.failed_attempts || 0;
-            // alert admins on the 3rd consecutive failure (spec: after 3 failed attempts)
-            if (n === 3) await notify((lang) => loginFailureText(lang, u.email), { type: 'login' });
-            // lock the account after MAX_ATTEMPTS (best-effort: column may be pre-migration)
-            if (n >= MAX_ATTEMPTS) { try { await query(`UPDATE users SET locked_until = now() + interval '${LOCK_MINUTES} minutes' WHERE id=$1`, [u.id]); } catch (e) {} }
-          }
+          if (u) await registerFailedAttempt(u);
           return res.status(401).json({ error: 'Invalid email or password' });
         }
         const fresh = await recordLogin(u, req, 'password');
+        return res.status(200).json({ token: signToken(fresh), user: sanitizeUser(fresh) });
+      }
+
+      // Shareholder sign-in, step 1: email -> emailed 6-digit code. Always returns {ok:true}
+      // regardless of whether the account exists/qualifies, to avoid leaking which emails
+      // have accounts — the only observable difference for an unknown/ineligible email is
+      // that no email arrives.
+      if (action === 'requestOtp') {
+        const email = String(body.email || '').trim();
+        const { rows } = await query('SELECT * FROM users WHERE lower(email)=lower($1)', [email]);
+        const u = rows[0];
+        if (u && u.active && (u.auth_provider || 'password') === 'otp') {
+          try {
+            // rate-limit: don't issue (or send) a new code within 60s of the last one
+            const recent = await query("SELECT 1 FROM otp_codes WHERE user_id=$1 AND created_at > now() - interval '60 seconds' LIMIT 1", [u.id]);
+            if (!recent.rows[0]) {
+              const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+              await query(`INSERT INTO otp_codes (user_id,code_hash,expires_at) VALUES ($1,$2, now() + interval '10 minutes')`, [u.id, hashOtpCode(code)]);
+              await sendOtpEmail(u.email, code).catch(() => {}); // best-effort — a mail-provider hiccup shouldn't surface here
+            }
+          } catch (e) { /* never leak errors on this endpoint either */ }
+        }
+        return res.status(200).json({ ok: true });
+      }
+
+      // Shareholder sign-in, step 2: email + code -> token. Shares the exact same
+      // account-lockout mechanism as password login (registerFailedAttempt above).
+      if (action === 'verifyOtp') {
+        const email = String(body.email || '').trim();
+        const code = String(body.code || '').trim();
+        const { rows } = await query('SELECT * FROM users WHERE lower(email)=lower($1)', [email]);
+        const u = rows[0];
+        if (u && u.locked_until && new Date(u.locked_until).getTime() > Date.now()) {
+          const mins = Math.ceil((new Date(u.locked_until).getTime() - Date.now()) / 60000);
+          return res.status(429).json({ error: `Too many failed attempts. Try again in ${mins} min.` });
+        }
+        let ok = false;
+        if (u && u.active && (u.auth_provider || 'password') === 'otp') {
+          const otpRow = (await query(
+            `SELECT * FROM otp_codes WHERE user_id=$1 AND consumed_at IS NULL AND expires_at > now() ORDER BY created_at DESC LIMIT 1`, [u.id]
+          )).rows[0];
+          if (otpRow && otpRow.attempts < 5 && otpRow.code_hash === hashOtpCode(code)) {
+            await query('UPDATE otp_codes SET consumed_at=now() WHERE id=$1', [otpRow.id]);
+            ok = true;
+          } else if (otpRow) {
+            await query('UPDATE otp_codes SET attempts=attempts+1 WHERE id=$1', [otpRow.id]);
+          }
+        }
+        if (!ok) {
+          if (u) await registerFailedAttempt(u);
+          return res.status(401).json({ error: 'Invalid or expired code' });
+        }
+        const fresh = await recordLogin(u, req, 'otp');
         return res.status(200).json({ token: signToken(fresh), user: sanitizeUser(fresh) });
       }
 

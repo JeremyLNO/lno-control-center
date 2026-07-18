@@ -1,11 +1,21 @@
 // Password hashing (bcrypt) + stateless JWT auth. Secrets from env only.
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 
 function jwtSecret() {
   const s = process.env.JWT_SECRET || '';
   if (!s || s.length < 16) throw new Error('JWT_SECRET must be set (>= 16 chars)');
   return s;
+}
+
+// OTP login codes (shareholder accounts — see api/auth.js requestOtp/verifyOtp) are hashed
+// with SHA-256, peppered with JWT_SECRET, rather than bcrypt: a 6-digit code is already only
+// 1e6 possibilities, so hash cost buys little — the real protection is a short expiry, a
+// per-code attempt cap, and the account-level lockout already used by password login. The
+// pepper just means a raw otp_codes dump alone isn't enough to precompute a rainbow table.
+export function hashOtpCode(code) {
+  return crypto.createHash('sha256').update(String(code) + jwtSecret()).digest('hex');
 }
 
 // Password policy (shareholder accounts created by an admin). Returns the list of

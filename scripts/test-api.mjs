@@ -5,6 +5,7 @@ import { PGlite } from '@electric-sql/pglite';
 
 process.env.JWT_SECRET = 'test-jwt-secret-please-change-1234567890';
 process.env.APP_ENCRYPTION_KEY = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
+process.env.RESEND_API_KEY = 'test-resend-key';
 
 const db = new PGlite();
 globalThis.__DB_QUERY__ = (t, p) => db.query(t, p);
@@ -83,6 +84,7 @@ ok('openwa config has a notification matrix + no default recipient', r.status ==
 
 // ── Alerts: mock exchange klines + TextMeBot sends so the suite stays offline ──
 const sentMessages = [];
+const sentEmails = []; // {to, subject, code} — code extracted from the subject line for OTP tests
 let binancePositions = [
   { symbol: 'ADAUSDT', positionAmt: '1000',  entryPrice: '0.45', markPrice: '0.47',  unRealizedProfit: '20', leverage: '5',  notional: '470' },
   { symbol: 'XRPUSDT', positionAmt: '-2000', entryPrice: '0.62', markPrice: '0.60',  unRealizedProfit: '40', leverage: '3',  notional: '-1200' },
@@ -107,6 +109,12 @@ globalThis.fetch = async (url, opts) => {
     return { ok: true, status: 200, json: async () => ({}) };
   }
   if (u.includes('textmebot.com')) { sentMessages.push({ text: new URL(u).searchParams.get('text') || '' }); return { ok: true, status: 200, text: async () => 'Success! Message Sent.' }; }
+  if (u.includes('api.resend.com')) {
+    const payload = JSON.parse(opts.body);
+    const code = (payload.subject.match(/^(\d{6})/) || [])[1] || null;
+    sentEmails.push({ to: payload.to, subject: payload.subject, code });
+    return { ok: true, status: 200, json: async () => ({ id: 'email_test_' + sentEmails.length }) };
+  }
   if (u.includes('binance.com')) { const a = []; let t = 1, p = 60000; for (let i = 0; i < 365; i++) { p *= 1 + Math.sin(i / 9) * 0.012; a.push([t, '0', '0', '0', String(p), '0']); t += 86400000; } return { ok: true, json: async () => a }; }
   if (u.includes('bybit.com')) { const list = []; let t = 365 * 86400000, p = 100; for (let i = 0; i < 365; i++) { p *= 1 + Math.cos(i / 7) * 0.01; list.push([String(t), '0', '0', '0', String(p)]); t -= 86400000; } return { ok: true, json: async () => ({ result: { list } }) }; }
   const data = []; let t = 300 * 86400000, p = 600; for (let i = 0; i < 300; i++) { p *= 1 + Math.sin(i / 5) * 0.011; data.push([String(t), '0', '0', '0', String(p)]); t -= 86400000; } return { ok: true, json: async () => ({ data }) };
@@ -322,17 +330,42 @@ await call(cronDaily, { method: 'POST', headers: authH });
 const rep = sentMessages.find(m => /DAILY REPORT/i.test(m.text))?.text || '';
 ok('report groups bots under their fund with a colour emoji', /🟢 \*Greens\*/.test(rep) && /ADAUSDT/.test(rep), rep.slice(0, 240));
 
-// shareholder role — admin-created, EXTERNAL email, policy-checked password (no username)
-r = await call(users, { method: 'POST', headers: authH, body: { email: 'investor@example.com', role: 'shareholder', password: 'Str0ng#Passw0rd!' } });
-ok('shareholder created with external email + password (auth_provider=password)',
-  r.status === 201 && r.body.user.authProvider === 'password' && r.body.user.email === 'investor@example.com', r.body.user);
+// shareholder role — admin-created, EXTERNAL email, no password (signs in via emailed OTP)
+r = await call(users, { method: 'POST', headers: authH, body: { email: 'investor@example.com', role: 'shareholder' } });
+ok('shareholder created with external email, no password (auth_provider=otp)',
+  r.status === 201 && r.body.user.authProvider === 'otp' && r.body.user.email === 'investor@example.com', r.body.user);
 ok('shareholder role grants exactly [view_activity, view_reports]',
   r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_reports']), r.body.user && r.body.user.permissions);
-// the shareholder signs in with their EMAIL + password
-r = await call(auth, { method: 'POST', body: { action: 'login', email: 'investor@example.com', password: 'Str0ng#Passw0rd!' } });
-ok('shareholder signs in with email + password', r.status === 200 && !!r.body.token, r.status);
-// shareholder opts into WhatsApp -> gets a "new report available" notice when a report is generated
+
+// the shareholder signs in via an emailed 6-digit code: request -> extract from the mocked
+// Resend send -> verify. shH (this session) is reused below for the WhatsApp opt-in test.
+sentEmails.length = 0;
+r = await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'investor@example.com' } });
+ok('requestOtp emails a 6-digit code to an eligible otp account', r.status === 200 && r.body.ok === true && sentEmails.length === 1 && /^\d{6}$/.test(sentEmails[0].code || ''), sentEmails);
+const otpCode1 = sentEmails[0].code;
+r = await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'investor@example.com', code: otpCode1 === '000000' ? '111111' : '000000' } });
+ok('verifyOtp rejects a wrong code -> 401', r.status === 401, r.body);
+r = await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'investor@example.com', code: otpCode1 } });
+ok('shareholder signs in with the emailed code', r.status === 200 && !!r.body.token, r.status);
 const shH = { authorization: 'Bearer ' + r.body.token };
+r = await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'investor@example.com', code: otpCode1 } });
+ok('a consumed code cannot be reused', r.status === 401, r.body);
+
+// requestOtp never reveals whether an account exists/qualifies (email enumeration)
+sentEmails.length = 0;
+r = await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'no-such-account@example.com' } });
+ok('requestOtp for an unknown email still returns {ok:true} but sends nothing', r.status === 200 && r.body.ok === true && sentEmails.length === 0, r.body);
+r = await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'nina.test@lno.company' } }); // a real GOOGLE-provider account
+ok('requestOtp for a non-otp account also returns {ok:true} but sends nothing', r.status === 200 && r.body.ok === true && sentEmails.length === 0, r.body);
+
+// resend cooldown: a second request for the same (fresh) account within 60s doesn't duplicate
+await call(users, { method: 'POST', headers: authH, body: { email: 'cooldown.test@example.com', role: 'shareholder' } });
+sentEmails.length = 0;
+await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'cooldown.test@example.com' } });
+await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'cooldown.test@example.com' } });
+ok('requesting a second code within 60s does not send a duplicate email', sentEmails.length === 1, sentEmails);
+
+// shareholder opts into WhatsApp -> gets a "new report available" notice when a report is generated
 await call(profile, { method: 'PATCH', headers: shH, body: { phone: '+33655555555', notify: true } });
 sentMessages.length = 0;
 await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
@@ -344,24 +377,27 @@ await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generat
 ok('disabling a type in the matrix stops that notification', !sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
 await call(openwa, { method: 'PUT', headers: authH, body: { notifMatrix: { new_report: ['shareholder'] } } }); // restore
 
-// admin sets a NEW password for a password (non-Google) account; Google accounts are refused
+// admin sets a NEW password — only accounts still on the legacy 'password' provider have one
+// to set (no longer creatable via the API — simulate a pre-existing legacy row directly).
+// Google and OTP (shareholder) accounts are both refused.
 const allUsers = (await call(users, { method: 'GET', headers: authH })).body.users;
 const shUser = allUsers.find(u => u.email === 'investor@example.com');
 const googleUser = allUsers.find(u => u.email === 'nina.test@lno.company');
-r = await call(users, { method: 'PATCH', headers: authH, body: { id: shUser.id, password: 'N3w#Strong#Pass!' } });
-ok('admin sets a new password for a non-Google user', r.status === 200, r.body);
-r = await call(auth, { method: 'POST', body: { action: 'login', email: 'investor@example.com', password: 'N3w#Strong#Pass!' } });
-ok('user can sign in with the admin-set password', r.status === 200 && !!r.body.token, r.status);
-r = await call(auth, { method: 'POST', body: { action: 'login', email: 'investor@example.com', password: 'Str0ng#Passw0rd!' } });
-ok('the previous password no longer works', r.status === 401, r.status);
-r = await call(users, { method: 'PATCH', headers: authH, body: { id: shUser.id, password: 'weak' } });
+await db.query(
+  `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,password_hash,auth_provider)
+   VALUES ('u_legacy','legacy@lno.company','legacy@lno.company','Legacy','Pw','viewer',true,'[]'::jsonb,'x','password')`
+);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: 'u_legacy', password: 'N3w#Strong#Pass!' } });
+ok('admin sets a new password for a legacy password-provider account', r.status === 200, r.body);
+r = await call(auth, { method: 'POST', body: { action: 'login', email: 'legacy@lno.company', password: 'N3w#Strong#Pass!' } });
+ok('that account can sign in with the newly-set password', r.status === 200 && !!r.body.token, r.status);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: 'u_legacy', password: 'weak' } });
 ok('admin-set weak password rejected by policy -> 400', r.status === 400, r.body);
 r = await call(users, { method: 'PATCH', headers: authH, body: { id: googleUser.id, password: 'N3w#Strong#Pass!' } });
 ok('admin cannot set a password on a Google account -> 400', r.status === 400, r.body);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: shUser.id, password: 'N3w#Strong#Pass!' } });
+ok('admin cannot set a password on an OTP (shareholder) account -> 400', r.status === 400, r.body);
 
-// weak password is rejected by the policy
-r = await call(users, { method: 'POST', headers: authH, body: { email: 'weak@example.com', role: 'shareholder', password: 'short' } });
-ok('weak shareholder password rejected -> 400', r.status === 400 && /Password needs/.test(r.body.error || ''), r.body);
 // internal roles still must use an @lno.company email (Google)
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'someone@gmail.com', role: 'viewer' } });
 ok('non-shareholder external email rejected -> 400', r.status === 400 && /@lno\.company/.test(r.body.error || ''), r.body);
@@ -402,11 +438,12 @@ r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcr
 ok('Google sign-in links an existing account by email (keeps admin role)', r.status === 200 && r.body.user.email === 'admin@lno.company' && r.body.user.role === 'admin', r.body.user);
 delete globalThis.__GOOGLE_VERIFY__;
 
-// ── P3: account lockout after repeated failed logins ──
-await call(users, { method: 'POST', headers: authH, body: { email: 'lock.test@external.com', role: 'shareholder', password: 'Str0ng!Passw0rd' } });
-for (let i = 0; i < 5; i++) await call(auth, { method: 'POST', body: { action: 'login', email: 'lock.test@external.com', password: 'wrong' } });
-const lockedTry = await call(auth, { method: 'POST', body: { action: 'login', email: 'lock.test@external.com', password: 'Str0ng!Passw0rd' } });
-ok('account locks after 5 failed logins (correct pw still -> 429)', lockedTry.status === 429, lockedTry.body);
+// ── P3: account lockout after repeated failed logins — shared between password login and
+// OTP verification (registerFailedAttempt in api/auth.js), tested via each path ──
+r = await call(users, { method: 'POST', headers: authH, body: { email: 'lock.test@external.com', role: 'shareholder' } });
+for (let i = 0; i < 5; i++) await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'lock.test@external.com', code: '000000' } });
+const lockedTry = await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'lock.test@external.com', code: '000000' } });
+ok('account locks after 5 failed OTP verifications -> 429', lockedTry.status === 429, lockedTry.body);
 
 // ── P3: admin actions are recorded in the audit log ──
 const auditLog = (await call(users, { method: 'GET', headers: authH, query: { audit: '1' } })).body.audit || [];

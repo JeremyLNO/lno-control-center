@@ -226,6 +226,24 @@ export async function migrate() {
     pdf_base64 TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
+  // Emailed one-time login codes for 'otp' accounts (shareholders — see auth.js
+  // requestOtp/verifyOtp). code_hash is SHA-256 of the 6-digit code peppered with
+  // JWT_SECRET (not bcrypt — a 6-digit space is already small; the real protection is
+  // expiry + attempts + rate-limited issuance, not hash cost).
+  await ddl(`CREATE TABLE IF NOT EXISTS otp_codes (
+    id BIGSERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    attempts INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+  await ddl(`CREATE INDEX IF NOT EXISTS otp_codes_user_idx ON otp_codes (user_id, created_at DESC)`);
+  // One-time backfill: shareholders used to sign in with an admin-assigned password
+  // (auth_provider='password'); they now sign in with an emailed code instead. Re-point
+  // any account still on the old provider — idempotent, becomes a no-op after the first run.
+  await ddl(`UPDATE users SET auth_provider='otp' WHERE role='shareholder' AND auth_provider='password'`);
 }
 
 export async function seedIfEmpty() {
