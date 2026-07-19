@@ -687,12 +687,10 @@ function OtpInput({length=6,value,onChange,onComplete,status='idle',disabled}: a
   </div>;
 }
 function Login(){
-  const {login,loginGoogle,api,setUser,lang,t}=useApp();
-  const [u,setU]=useState(''); const [p,setP]=useState(''); const [err,setErr]=useState(''); const [warn,setWarn]=useState(false);
-  const [busy,setBusy]=useState(false); const attemptsRef=useRef(0);
-  // 'otp-email'/'otp-code' = default shareholder sign-in flow (password auth was removed
-  // for those accounts entirely); 'password' = internal/admin break-glass form, reachable
-  // only via the small link — it's no longer the default view.
+  const {loginGoogle,api,setUser,lang,t}=useApp();
+  const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
+  // Password auth no longer exists anywhere in the product — sign-in is Google
+  // (@lno.company) or an emailed one-time code. 'otp-email' = email entry, 'otp-code' = code entry.
   const [mode,setMode]=useState('otp-email');
   const [otpEmail,setOtpEmail]=useState(''); const [otpCode,setOtpCode]=useState('');
   const [otpStatus,setOtpStatus]=useState('idle'); const [otpBusy,setOtpBusy]=useState(false);
@@ -720,9 +718,9 @@ function Login(){
   const clientId=GOOGLE_CLIENT_ID;
   const gref=useRef<any>(null);
   useEffect(()=>{
-    // gref's <div> only exists while mode==='otp-email' (it's the default/primary view) — when
-    // the user toggles to the password break-glass form and back, the div remounts fresh, so
-    // this effect must re-run on that transition too, not just on clientId/lang.
+    // gref's <div> only exists while mode==='otp-email' (the email-entry step) — when the
+    // user moves on to the code-entry step and back, the div remounts fresh, so this effect
+    // must re-run on that transition too, not just on clientId/lang.
     if(!clientId||mode!=='otp-email') return; let cancelled=false;
     const init=()=>{
       if(cancelled||!window.google?.accounts?.id||!gref.current) return;
@@ -747,15 +745,6 @@ function Login(){
     }
     return ()=>{ cancelled=true; };
   },[clientId,lang,mode]);
-  async function submit(e){
-    e.preventDefault(); if(busy) return; setBusy(true); setErr('');
-    try{ await login(u.trim(),p); attemptsRef.current=0; }
-    catch(ex){
-      attemptsRef.current+=1;
-      setErr(ex.message||'Invalid email or password.');
-      if(attemptsRef.current>=3) setWarn(true);
-    } finally{ setBusy(false); }
-  }
   return <div className="min-h-full grid place-items-center bg-navy relative overflow-hidden p-4">
     <div className="absolute inset-0 opacity-[0.07]" style={{backgroundImage:'radial-gradient(circle at 20% 20%, #C9A24D 0, transparent 40%), radial-gradient(circle at 80% 70%, #3B82F6 0, transparent 40%)'}}/>
     <div className="relative w-full max-w-sm">
@@ -776,18 +765,6 @@ function Login(){
             <Field label={t('login.email')}><Input type="email" value={otpEmail} onChange={e=>setOtpEmail(e.target.value)} placeholder="you@example.com" autoFocus={!clientId}/></Field>
             <Btn className="w-full" type="submit" disabled={otpBusy||!otpEmail.trim()}>{otpBusy?t('login.sendingCode'):t('login.sendCode')}</Btn>
           </form>
-          <button type="button" onClick={()=>{setMode('password');setErr('');}} className="w-full text-center text-xs text-slate-400 hover:text-navy pt-1">{t('login.usePasswordInstead')}</button>
-        </> : mode==='password'? <>
-          <h1 className="text-lg font-semibold text-navy">{t('login.signIn')}</h1>
-          {err&&<div className="text-sm text-danger flex items-center gap-2"><Icon name="triangle" className="w-4 h-4 shrink-0"/>{err}</div>}
-          <form onSubmit={submit} className="space-y-4">
-            <Field label={t('login.email')}><Input type="email" value={u} onChange={e=>setU(e.target.value)} placeholder="you@example.com" autoFocus/></Field>
-            <Field label={t('login.password')}><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="••••••"/></Field>
-            <Btn className="w-full" type="submit" disabled={busy}>{busy?t('login.signingIn'):t('login.signIn')}</Btn>
-          </form>
-          {warn&&<div className="text-xs bg-danger/10 text-danger rounded-lg p-2.5 flex items-start gap-2"><Icon name="shield" className="w-4 h-4 mt-0.5 shrink-0"/><span>{t('login.securityWarning')}</span></div>}
-          {!clientId&&<div className="text-[11px] text-slate-400 text-center">{t('login.defaultAdmin')}: <span className="font-mono">admin@lno.company / admin</span></div>}
-          <button type="button" onClick={()=>{setMode('otp-email');setErr('');}} className="w-full text-center text-xs text-slate-400 hover:text-navy pt-1">{t('login.useCodeInstead')}</button>
         </> : <>
           <h1 className="text-lg font-semibold text-navy text-center">{t('login.enterCode')}</h1>
           <p className="text-xs text-slate-400 text-center">{t('login.otpCodeHint',{email:otpEmail})}</p>
