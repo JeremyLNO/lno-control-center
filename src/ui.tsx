@@ -654,6 +654,7 @@ function LoadingScreen(){
 // see index.css's otp-* keyframes), auto-advance/backspace/paste, and a staggered green
 // pulse across all cells on `status='success'` (a brief "connect" moment before the app
 // moves on, matching the reference video's "digits fill then connect" framing).
+const OTP_CELL=44, OTP_GAP=8;
 function OtpInput({length=6,value,onChange,onComplete,status='idle',disabled}: any){
   const refs=useRef<any[]>([]);
   const digits=useMemo(()=>{ const a=String(value||'').split(''); while(a.length<length) a.push(''); return a.slice(0,length); },[value,length]);
@@ -670,20 +671,27 @@ function OtpInput({length=6,value,onChange,onComplete,status='idle',disabled}: a
     onChange(text); refs.current[Math.min(text.length,length-1)]?.focus();
     if(text.length===length) onComplete(text);
   };
-  return <div className={`flex items-center justify-center gap-2 ${status==='error'?'otp-shake':''}`}>
-    {digits.map((d,i)=><div key={i}
-        className={`relative w-11 h-14 rounded-xl border-2 overflow-hidden bg-white transition-colors ${status==='error'?'border-danger':status==='success'?'border-success':d?'border-gold':'border-slate-200'}`}
-        style={status==='success'?{animation:`otp-pulse .6s ease-out ${i*0.06}s`}:undefined}>
-      {d&&<div className="otp-liquid">
-        <span className="otp-bubble" style={{left:'30%',animationDelay:'0s'}}/>
-        <span className="otp-bubble" style={{left:'60%',animationDelay:'.15s'}}/>
-      </div>}
-      <input ref={el=>refs.current[i]=el} value={d} disabled={disabled}
-        onChange={e=>setDigit(i,e.target.value.replace(/\D/g,'').slice(-1))}
-        onKeyDown={e=>onKeyDown(i,e)} onPaste={onPaste}
-        inputMode="numeric" autoComplete="one-time-code" maxLength={1}
-        className="relative z-10 w-full h-full text-center text-xl font-bold text-navy bg-transparent focus:outline-none"/>
-    </div>)}
+  const statusClass=status==='success'?'otp-success':status==='error'?'otp-error':'';
+  return <div className={`relative mx-auto ${status==='error'?'otp-shake':''}`} style={{width:length*OTP_CELL+(length-1)*OTP_GAP,height:56}}>
+    {digits.slice(0,-1).map((_,i)=>{
+      const active=!!(digits[i]&&digits[i+1]);
+      const left=OTP_CELL*(i+1)+OTP_GAP*i+OTP_GAP/2;
+      return <span key={i} className={`otp-connector ${active?'is-active':''} ${statusClass}`} style={{left}}/>;
+    })}
+    <div className="relative z-10 flex items-center gap-2">
+      {digits.map((d,i)=><div key={i}
+          className={`otp-cell relative w-11 h-14 rounded-xl border-2 bg-white transition-colors ${status==='error'?'border-danger':status==='success'?'border-success':d?'border-gold':'border-slate-200'} ${d?'has-value':''}`}
+          style={status==='success'?{animation:`otp-pulse .6s ease-out ${i*0.06}s`}:undefined}>
+        <span className={`otp-liquid ${statusClass}`}/>
+        <span className="otp-bubbles"/>
+        <input ref={el=>refs.current[i]=el} value={d} disabled={disabled}
+          onChange={e=>setDigit(i,e.target.value.replace(/\D/g,'').slice(-1))}
+          onKeyDown={e=>onKeyDown(i,e)} onPaste={onPaste}
+          inputMode="numeric" autoComplete="one-time-code" maxLength={1}
+          style={{textShadow:'0 1px 2px rgba(0,0,0,.18)'}}
+          className="relative z-10 w-full h-full text-center text-xl font-bold text-white bg-transparent focus:outline-none"/>
+      </div>)}
+    </div>
   </div>;
 }
 function Login(){

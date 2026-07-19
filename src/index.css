@@ -17,12 +17,44 @@ html,body,#root{height:100%}
   @keyframes fadein{from{opacity:0}to{opacity:1}}
   [data-tip]{position:relative}
   @keyframes lno-refresh-bar{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-  /* OTP liquid-fill entry animation — height overshoots past 100% then settles, clipped by
-     the cell's own overflow-hidden, which reads as liquid sloshing up and calming down. */
-  .otp-liquid{position:absolute;inset:0 0 0 0;background:linear-gradient(180deg,rgba(201,162,77,.9),rgba(201,162,77,.55));animation:otp-fill .45s cubic-bezier(.34,1.56,.64,1) forwards;transform-origin:bottom}
-  @keyframes otp-fill{from{transform:scaleY(0)}60%{transform:scaleY(1.12)}to{transform:scaleY(1)}}
-  .otp-bubble{position:absolute;bottom:10%;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.75);animation:otp-bubble 1.1s ease-in infinite}
-  @keyframes otp-bubble{0%{transform:translateY(0);opacity:.8}100%{transform:translateY(-34px);opacity:0}}
-  .otp-shake{animation:otp-shake .4s ease}
+  /* OTP liquid-fill animation (per-cell rising/waving liquid + bubbles + connectors between
+     filled cells), ported from the reference demo and recolored to the brand palette: gold
+     while typing, success/danger once the code is verified. */
+  .otp-cell{position:relative;overflow:hidden}
+  .otp-liquid{position:absolute;left:-18%;bottom:-122%;width:136%;height:128%;
+    border-radius:44% 56% 0 0/12% 12% 0 0;
+    background:
+      radial-gradient(circle at 18% 24%, rgba(255,255,255,.85) 0 2px, transparent 3px),
+      radial-gradient(circle at 72% 38%, rgba(255,255,255,.55) 0 2px, transparent 3px),
+      linear-gradient(180deg,#ddc17e,#C9A24D);
+    transform-origin:center bottom;
+    transition:bottom .5s cubic-bezier(.6,0,.22,1), background .3s ease;
+    animation:otp-wave 1.45s infinite linear;
+  }
+  .otp-cell.has-value .otp-liquid{bottom:-4%}
+  .otp-liquid.otp-success{background:
+      radial-gradient(circle at 18% 24%, rgba(255,255,255,.85) 0 2px, transparent 3px),
+      radial-gradient(circle at 72% 38%, rgba(255,255,255,.55) 0 2px, transparent 3px),
+      linear-gradient(180deg,#34d399,#059669)}
+  .otp-liquid.otp-error{background:
+      radial-gradient(circle at 18% 24%, rgba(255,255,255,.82) 0 2px, transparent 3px),
+      radial-gradient(circle at 72% 38%, rgba(255,255,255,.5) 0 2px, transparent 3px),
+      linear-gradient(180deg,#fb7185,#dc2626)}
+  @keyframes otp-wave{50%{transform:translateX(-7%) rotate(2deg)}100%{transform:translateX(0) rotate(0)}}
+  .otp-bubbles{position:absolute;inset:0;opacity:0;pointer-events:none;
+    background:
+      radial-gradient(circle at 25% 76%, rgba(255,255,255,.95) 0 2px, transparent 3px),
+      radial-gradient(circle at 73% 68%, rgba(255,255,255,.7) 0 2px, transparent 3px),
+      radial-gradient(circle at 48% 88%, rgba(255,255,255,.55) 0 1.5px, transparent 2.5px);
+    transform:translateY(12px);transition:opacity .28s ease}
+  .otp-cell.has-value .otp-bubbles{opacity:1;animation:otp-bubbles-up 1.5s infinite ease-in-out}
+  @keyframes otp-bubbles-up{0%{transform:translateY(10px);opacity:.35}55%{transform:translateY(-5px);opacity:1}100%{transform:translateY(-14px);opacity:.2}}
+  .otp-connector{position:absolute;top:50%;width:14px;height:6px;margin-left:-7px;border-radius:999px;background:#C9A24D;
+    opacity:0;transform:translateY(-50%) scaleX(0);transform-origin:left center;
+    transition:transform .35s cubic-bezier(.4,0,.2,1), opacity .25s ease, background .3s ease}
+  .otp-connector.is-active{opacity:1;transform:translateY(-50%) scaleX(1)}
+  .otp-connector.otp-success{background:#059669}
+  .otp-connector.otp-error{background:#dc2626}
+  .otp-shake{animation:otp-shake .5s cubic-bezier(.36,.07,.19,.97) both}
   @keyframes otp-shake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,50%,70%{transform:translateX(-6px)}40%,60%{transform:translateX(6px)}}
   @keyframes otp-pulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}70%{box-shadow:0 0 0 10px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}
