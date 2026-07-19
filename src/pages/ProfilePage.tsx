@@ -42,6 +42,11 @@ function ProfilePage(){
           <div className="flex items-center gap-3 text-sm text-slate-600"><span className="w-9 h-9 rounded-lg bg-gold/15 text-gold grid place-items-center shrink-0"><Icon name="shield" className="w-5 h-5"/></span>
             <div>{t('profile.signInGoogleBody',{email:user.email})}</div></div>
         </Card>
+      : user.authProvider==='otp'
+      ? <Card className="p-5 mb-4"><SectionTitle>{t('profile.signInTitle')}</SectionTitle>
+          <div className="flex items-center gap-3 text-sm text-slate-600"><span className="w-9 h-9 rounded-lg bg-gold/15 text-gold grid place-items-center shrink-0"><Icon name="mail" className="w-5 h-5"/></span>
+            <div>{t('profile.signInOtpBody',{email:user.email})}</div></div>
+        </Card>
       : <Card className="p-5 mb-4">
           <SectionTitle>{t('profile.changePasswordTitle')}</SectionTitle>
           <div className="grid sm:grid-cols-3 gap-3">
