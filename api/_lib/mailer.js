@@ -33,6 +33,9 @@ function otpEmailHtml(code) {
 // the caller logs/ignores the error and the request still returns {ok:true} either way
 // (masking whether the account exists is more important than surfacing a send failure).
 export async function sendOtpEmail(to, code) {
-  const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@lno.company>';
+  // wearelno.com is the domain verified on Resend (SPF/DKIM) — noreply@lno.company would
+  // fail to send since that domain was never added there. RESEND_FROM still overrides this
+  // if that ever changes.
+  const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
   await client().emails.send({ from, to, subject: `${code} is your LNO Control Center code`, html: otpEmailHtml(code) });
 }
