@@ -19,7 +19,7 @@ const GOLD = '#C9A24D';
 function otpEmailHtml(code) {
   return `<div style="background:#F8F7F4;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
     <div style="max-width:420px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px;text-align:center">
-      <div style="font-size:15px;font-weight:700;color:${NAVY};letter-spacing:0.02em">LNO Control Center</div>
+      <img src="https://cc.lno.company/logo.svg" alt="LNO Control Center" width="120" style="height:auto;display:block;margin:0 auto"/>
       <div style="margin-top:20px;font-size:14px;color:#475569">Your sign-in code is</div>
       <div style="margin:16px 0;font-size:36px;font-weight:700;letter-spacing:0.3em;color:${NAVY};font-variant-numeric:tabular-nums">${code}</div>
       <div style="height:3px;width:48px;background:${GOLD};margin:0 auto 16px;border-radius:2px"></div>
