@@ -49,9 +49,14 @@ export async function buildReportData(days = 1) {
   const pctOver = (d) => { const base = eqv[Math.max(0, eqv.length - 1 - d)] || 0; return base ? (pnlOver(d) / base) * 100 : 0; };
   const positions = port.bots.map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
   const { rows: incidentRows } = await query("SELECT count(*)::int AS n FROM alerts WHERE created_at > now() - interval '24 hours'");
+  // Equity trend for the report's chart — a wider trailing window than `days` itself so even
+  // a daily report's chart has enough points to read as a trend, not two dots (14d floor,
+  // capped to however much history actually exists).
+  const chartLen = Math.min(eqv.length, Math.max(days * 2, 14));
   return {
     equity: port.equity, pnl: pnlOver(days), pct: pctOver(days), openPnl: port.openPnl, exposure: port.exposure,
     funds: port.funds, positions, incidentCount: incidentRows[0]?.n || 0, dateLabel: new Date().toISOString().slice(0, 10),
+    series: eqv.slice(-chartLen),
   };
 }
 
@@ -59,5 +64,5 @@ export async function buildReportData(days = 1) {
 // field names — kept so those callers don't need to change.
 export async function buildDailyReportData() {
   const d = await buildReportData(1);
-  return { equity: d.equity, pnlDay: d.pnl, pctDay: d.pct, openPnl: d.openPnl, exposure: d.exposure, funds: d.funds, positions: d.positions, incidentCount: d.incidentCount, dateLabel: d.dateLabel };
+  return { equity: d.equity, pnlDay: d.pnl, pctDay: d.pct, openPnl: d.openPnl, exposure: d.exposure, funds: d.funds, positions: d.positions, incidentCount: d.incidentCount, dateLabel: d.dateLabel, series: d.series };
 }

@@ -112,7 +112,7 @@ globalThis.fetch = async (url, opts) => {
   if (u.includes('api.resend.com')) {
     const payload = JSON.parse(opts.body);
     const code = (payload.subject.match(/^(\d{6})/) || [])[1] || null;
-    sentEmails.push({ to: payload.to, subject: payload.subject, code });
+    sentEmails.push({ to: payload.to, subject: payload.subject, code, html: payload.html });
     return { ok: true, status: 200, json: async () => ({ id: 'email_test_' + sentEmails.length }) };
   }
   if (u.includes('binance.com')) { const a = []; let t = 1, p = 60000; for (let i = 0; i < 365; i++) { p *= 1 + Math.sin(i / 9) * 0.012; a.push([t, '0', '0', '0', String(p), '0']); t += 86400000; } return { ok: true, json: async () => a }; }
@@ -233,6 +233,13 @@ ok('a fresh re-breach after recovery alerts again', r.body.sent.some(s => s.type
 r = await call(snapshots, { method: 'GET', headers: authH });
 ok('cron wrote an equity snapshot (history accrues)', r.status === 200 && r.body.snapshots.length >= 1 && typeof r.body.snapshots[0].equity === 'number', r.body && r.body.snapshots);
 
+// seed some equity history so report charts have more than the single "today" point to draw
+// (every cronDaily call above landed on the same real calendar day, ON CONFLICT-upserting the
+// same row — these are distinct past days, inserted directly rather than via the cron)
+for (let i = 13; i >= 1; i--) {
+  await db.query(`INSERT INTO equity_snapshots (day,equity,pnl_day,metrics) VALUES (CURRENT_DATE - $1::int, $2, 0, '{}'::jsonb) ON CONFLICT (day) DO NOTHING`, [i, Math.round(1000000 + Math.sin(i) * 20000 + i * 500)]);
+}
+
 // report archive: admin generates a report -> it lists -> the PDF downloads
 r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
 const genReport = r.body.report;
@@ -241,6 +248,7 @@ r = await call(snapshots, { method: 'GET', headers: authH, query: { reports: 'li
 ok('report archive lists the generated report', r.status === 200 && (r.body.reports || []).some(x => x.id === genReport.id), r.body && r.body.reports);
 r = await call(snapshots, { method: 'GET', headers: authH, query: { report: String(genReport.id) } });
 ok('archived report downloads as a valid %PDF', r.status === 200 && Buffer.from(r.body.pdfBase64, 'base64').slice(0, 5).toString() === '%PDF-', r.body && r.body.filename);
+ok('the PDF is larger than a chart-less baseline — it actually drew the equity chart', r.body.pdfBase64.length > 2500, r.body.pdfBase64.length);
 r = await call(snapshots, { method: 'GET', query: { reports: 'list' } });
 ok('report archive requires auth -> 401', r.status === 401, r.status);
 
@@ -278,6 +286,7 @@ ok('deleting an already-deleted report -> 404', r.status === 404, r.status);
 sentEmails.length = 0;
 r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'testEmail' } });
 ok('admin can send a test daily-report email to themselves', r.status === 200 && r.body.email === 'admin@lno.company', r.body);
+ok('the test email includes the equity sparkline chart (inline SVG)', sentEmails.some(e => e.to === 'admin@lno.company' && /<svg/.test(e.html || '')), sentEmails.map(e => e.to));
 ok('the test email actually went out with the daily report subject', sentEmails.some(e => e.to === 'admin@lno.company' && /LNO Daily Report/i.test(e.subject)), sentEmails.map(e => ({ to: e.to, subject: e.subject })));
 ok('a test email send does NOT also email other admin/operator/viewer accounts', sentEmails.filter(e => /LNO Daily Report/i.test(e.subject)).length === 1, sentEmails.map(e => e.to));
 r = await call(snapshots, { method: 'POST', body: { action: 'testEmail' } });
@@ -439,6 +448,12 @@ sentMessages.length = 0;
 await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'weekly' } });
 const rep = sentMessages.find(m => /WEEKLY REPORT/i.test(m.text))?.text || '';
 ok('weekly report groups bots under their fund with a colour emoji', /🟢 \*Greens\*/.test(rep) && /ADAUSDT/.test(rep), rep.slice(0, 240));
+
+// with a real fund now assigned (ADAUSDT -> Greens), the daily report email's fund bars
+// actually render (they were empty above since no funds/bots existed yet at that point)
+sentEmails.length = 0;
+await call(snapshots, { method: 'POST', headers: authH, body: { action: 'testEmail' } });
+ok('the daily report email renders fund bars once a fund actually has bots', sentEmails.some(e => /background:#F1F3F6/.test(e.html || '') && /Greens/.test(e.html || '')), sentEmails.map(e => e.to));
 
 // shareholder role — admin-created, EXTERNAL email, no password (signs in via emailed OTP)
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'investor@example.com', role: 'shareholder' } });

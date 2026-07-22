@@ -146,7 +146,7 @@ export default async function handler(req, res) {
         // role, and a short digest on WhatsApp (admin/operator) — three different formats of
         // the same underlying numbers, matched to what each channel is good at.
         try {
-          const b64 = await buildDailyPdf({ equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today });
+          const b64 = await buildDailyPdf({ equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today, series: eqv.slice(-14) });
           await query("INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,status,verified_by,verified_at) VALUES ('daily',$1,$2,$3,$4,'verified','system',now())",
             [today, Math.round(port.equity), Math.round(pnlDay24), b64]);
           sent.push({ type: 'daily-pdf', archived: true, bytes: b64.length });
@@ -154,7 +154,7 @@ export default async function handler(req, res) {
 
         try {
           const recipients = await getUsersByRole(['admin', 'operator', 'viewer']);
-          for (const r of recipients) await sendDailyReportEmail(r.email, { equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today }).catch(() => {});
+          for (const r of recipients) await sendDailyReportEmail(r.email, { equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today, series: eqv.slice(-14) }).catch(() => {});
           sent.push({ type: 'daily-email', recipients: recipients.length });
         } catch (e) { sent.push({ type: 'daily-email', error: String(e.message || e) }); }
 
@@ -169,7 +169,7 @@ export default async function handler(req, res) {
         const pnl30 = pnlOver(30);
         if (cfg.enabled) sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
         try {
-          const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: today });
+          const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: today, series: eqv.slice(-60) });
           // status stays the column default ('not_verified') — monthly is the shareholder-
           // facing kind, so an admin must verify it (see api/snapshots.js) before shareholders
           // are notified; that's what used to happen automatically right here.

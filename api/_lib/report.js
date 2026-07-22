@@ -1,11 +1,53 @@
-// Report PDF (pdf-lib, pure JS — serverless-safe). Returns base64. Shared builder for both
-// the monthly report (account equity, 30d PnL, risk metrics, funds) and the daily report
-// (24h PnL, funds, open positions list, incident flag) — the two kinds this app archives.
+// Report PDF (pdf-lib, pure JS — serverless-safe). Returns base64. Shared builder for the
+// daily/weekly/monthly reports — same vector-drawn equity line + fund bar chart in all three,
+// matching the look already used for the WhatsApp/email digests and the Activity Dashboard.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 const grp  = (n) => Math.round(Math.abs(n)).toLocaleString('en-US').replace(/,/g, ' ');
 const fUSD = (n) => grp(n) + ' USDT';
 const fmt  = (n) => (n >= 0 ? '+' : '-') + grp(n) + ' USDT';
+
+// Equity line chart drawn as vector primitives (no embedded image, no new dependency) — pdf-lib's
+// coordinate origin is bottom-left with y growing upward, same convention the rest of this file
+// already uses for its own `y` cursor, so no axis flip is needed. `yTop` is the chart's top edge;
+// it occupies the `height` below that. Returns the y just below the chart, for the next element.
+function drawEquityChart(page, { x, yTop, width, height, series, gold, gridColor }) {
+  if (!series || series.length < 2) return yTop - height;
+  const min = Math.min(...series), max = Math.max(...series);
+  const range = (max - min) || Math.max(1, Math.abs(min) * 0.01) || 1;
+  const n = series.length;
+  const px = (i) => x + (i / (n - 1)) * width;
+  const py = (v) => (yTop - height) + ((v - min) / range) * (height - 8) + 4; // 4px padding top/bottom
+  [0.25, 0.5, 0.75].forEach((f) => {
+    const gy = (yTop - height) + height * f;
+    page.drawLine({ start: { x, y: gy }, end: { x: x + width, y: gy }, thickness: 0.5, color: gridColor });
+  });
+  for (let i = 1; i < n; i++) {
+    page.drawLine({ start: { x: px(i - 1), y: py(series[i - 1]) }, end: { x: px(i), y: py(series[i]) }, thickness: 1.7, color: gold });
+  }
+  page.drawCircle({ x: px(n - 1), y: py(series[n - 1]), size: 2.5, color: gold });
+  return yTop - height;
+}
+
+// Horizontal fund bars — width proportional to each fund's notional, coloured by its PnL sign.
+// Returns the y position after the last row, for whatever's drawn next.
+function drawFundBars(page, { x, yTop, width, funds, font, slate, green, red, rowH = 18 }) {
+  const rows = (funds || []).filter((f) => (f.bots || []).length || f.uPnl || f.notional);
+  if (!rows.length) { page.drawText('No open positions', { x, y: yTop - 12, size: 10, font, color: slate }); return yTop - rowH; }
+  const maxAbs = Math.max(...rows.map((f) => Math.abs(f.notional || 0)), 1);
+  const labelW = 90, barX = x + labelW, barW = width - labelW - 90;
+  let y = yTop;
+  rows.forEach((f) => {
+    const w = Math.max(2, (Math.abs(f.notional || 0) / maxAbs) * barW);
+    const color = (f.uPnl || 0) >= 0 ? green : red;
+    page.drawText(f.name.length > 13 ? f.name.slice(0, 12) + '…' : f.name, { x, y: y - 9, size: 9, font, color: slate });
+    page.drawRectangle({ x: barX, y: y - 11, width: barW, height: 5, color: rgb(0.93, 0.94, 0.95) });
+    page.drawRectangle({ x: barX, y: y - 11, width: w, height: 5, color, opacity: 0.55 });
+    page.drawText(fmt(f.uPnl || 0), { x: barX + barW + 8, y: y - 9, size: 9, font, color });
+    y -= rowH;
+  });
+  return y;
+}
 
 export async function buildMonthlyPdf(d) {
   const doc = await PDFDocument.create();
@@ -30,20 +72,17 @@ export async function buildMonthlyPdf(d) {
   row('Max drawdown', `${(d.maxDrawdownPct || 0).toFixed(1)}%  (${d.ddDurationDays || 0} days)`, red);
   row('Sharpe / Sortino', `${(d.sharpe || 0).toFixed(2)}  /  ${(d.sortino || 0).toFixed(2)}`);
 
-  y -= 32; at('Funds', 40, 13, bold, navy);
-  const funds = (d.funds || []).filter(f => (f.bots || []).length || f.uPnl || f.notional);
-  if (!funds.length) { y -= 20; at('No open positions', 40, 11, font, slate); }
-  funds.forEach(f => {
-    const nb = (f.bots || []).length;
-    y -= 20; at(`${f.name}  (${nb} bot${nb === 1 ? '' : 's'})`, 40, 11, font, slate);
-    at(`${fmt(f.uPnl || 0)} · ${fUSD(f.notional || 0)}`, 300, 11, font, (f.uPnl || 0) >= 0 ? green : red);
-  });
+  y -= 30; at('Equity — 30 days', 40, 11, bold, navy);
+  y -= 10; y = drawEquityChart(page, { x: 40, yTop: y, width: 515, height: 85, series: d.series, gold, gridColor: rgb(0.91, 0.91, 0.93) });
+
+  y -= 26; at('Funds', 40, 13, bold, navy);
+  y -= 6; y = drawFundBars(page, { x: 40, yTop: y, width: 515, funds: d.funds, font, slate, green, red });
 
   page.drawText('LNO Trading Systems — Internal Use Only', { x: 40, y: 40, size: 9, font, color: slate });
   return Buffer.from(await doc.save()).toString('base64');
 }
 
-// d: { equity, pnl7, openPnl, exposure, funds, dateLabel }
+// d: { equity, pnl7, openPnl, exposure, funds, dateLabel, series }
 export async function buildWeeklyPdf(d) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]); // A4
@@ -65,20 +104,17 @@ export async function buildWeeklyPdf(d) {
   row('Open PnL', fmt(d.openPnl || 0), (d.openPnl || 0) >= 0 ? green : red);
   row('Exposure (notional)', fUSD(d.exposure || 0));
 
-  y -= 32; at('Funds', 40, 13, bold, navy);
-  const funds = (d.funds || []).filter(f => (f.bots || []).length || f.uPnl || f.notional);
-  if (!funds.length) { y -= 20; at('No open positions', 40, 11, font, slate); }
-  funds.forEach(f => {
-    const nb = (f.bots || []).length;
-    y -= 20; at(`${f.name}  (${nb} bot${nb === 1 ? '' : 's'})`, 40, 11, font, slate);
-    at(`${fmt(f.uPnl || 0)} · ${fUSD(f.notional || 0)}`, 300, 11, font, (f.uPnl || 0) >= 0 ? green : red);
-  });
+  y -= 30; at('Equity — 7 days', 40, 11, bold, navy);
+  y -= 10; y = drawEquityChart(page, { x: 40, yTop: y, width: 515, height: 85, series: d.series, gold, gridColor: rgb(0.91, 0.91, 0.93) });
+
+  y -= 26; at('Funds', 40, 13, bold, navy);
+  y -= 6; y = drawFundBars(page, { x: 40, yTop: y, width: 515, funds: d.funds, font, slate, green, red });
 
   page.drawText('LNO Trading Systems — Internal Use Only', { x: 40, y: 40, size: 9, font, color: slate });
   return Buffer.from(await doc.save()).toString('base64');
 }
 
-// d: { equity, pnlDay, pctDay, openPnl, exposure, funds, positions, incidentCount, dateLabel }
+// d: { equity, pnlDay, pctDay, openPnl, exposure, funds, positions, incidentCount, dateLabel, series }
 export async function buildDailyPdf(d) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]); // A4
@@ -101,16 +137,13 @@ export async function buildDailyPdf(d) {
   row('Exposure (notional)', fUSD(d.exposure || 0));
   if (d.incidentCount) row('Incidents (24h)', String(d.incidentCount), red);
 
-  y -= 32; at('Funds', 40, 13, bold, navy);
-  const funds = (d.funds || []).filter(f => (f.bots || []).length || f.uPnl || f.notional);
-  if (!funds.length) { y -= 20; at('No open positions', 40, 11, font, slate); }
-  funds.forEach(f => {
-    const nb = (f.bots || []).length;
-    y -= 20; at(`${f.name}  (${nb} bot${nb === 1 ? '' : 's'})`, 40, 11, font, slate);
-    at(`${fmt(f.uPnl || 0)} · ${fUSD(f.notional || 0)}`, 300, 11, font, (f.uPnl || 0) >= 0 ? green : red);
-  });
+  y -= 30; at('Equity — recent', 40, 11, bold, navy);
+  y -= 10; y = drawEquityChart(page, { x: 40, yTop: y, width: 515, height: 75, series: d.series, gold, gridColor: rgb(0.91, 0.91, 0.93) });
 
-  y -= 32; at('Open positions', 40, 13, bold, navy);
+  y -= 24; at('Funds', 40, 13, bold, navy);
+  y -= 6; y = drawFundBars(page, { x: 40, yTop: y, width: 515, funds: d.funds, font, slate, green, red, rowH: 15 });
+
+  y -= 18; at('Open positions', 40, 13, bold, navy);
   const positions = d.positions || [];
   if (!positions.length) { y -= 20; at('No open positions', 40, 11, font, slate); }
   positions.slice(0, 25).forEach(p => {
