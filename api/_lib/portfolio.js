@@ -34,14 +34,14 @@ export async function buildPortfolio() {
   };
 }
 
-// Same shape/fields the real once-daily cron send builds inline (api/cron/daily.js) for the
-// PDF/email/WhatsApp digest — used here by the admin "send test" buttons on the Reports page
-// (api/snapshots.js) so a test send reflects the same numbers a real send would. pnlDay/pctDay
-// diff against yesterday's distinct equity_snapshots row (NOT port.pnlDay, which compares
-// against whatever row is "most recent" — that row gets continuously overwritten intraday by
-// the every-~10-minute alerts-only cron, so it can end up reflecting the last few minutes
-// rather than a true ~24h-ago comparison).
-export async function buildDailyReportData() {
+// Shared shape for a report over the last `days` (1/7/30 for daily/weekly/monthly) — used by
+// the real once-daily cron send (api/cron/daily.js), the admin "send test" buttons, and the
+// admin "generate report now" action (all in api/snapshots.js), so every one of those is built
+// exactly the same way. pnl/pct diff against the equity_snapshots row `days` back (NOT
+// port.pnlDay, which compares against whatever row is "most recent" — that row gets
+// continuously overwritten intraday by the every-~10-minute alerts-only cron, so it can end up
+// reflecting the last few minutes rather than a true N-days-ago comparison).
+export async function buildReportData(days = 1) {
   const port = await buildPortfolio();
   const { rows: snaps } = await query('SELECT equity FROM equity_snapshots ORDER BY day ASC');
   const eqv = snaps.map(r => Number(r.equity));
@@ -50,7 +50,14 @@ export async function buildDailyReportData() {
   const positions = port.bots.map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
   const { rows: incidentRows } = await query("SELECT count(*)::int AS n FROM alerts WHERE created_at > now() - interval '24 hours'");
   return {
-    equity: port.equity, pnlDay: pnlOver(1), pctDay: pctOver(1), openPnl: port.openPnl, exposure: port.exposure,
+    equity: port.equity, pnl: pnlOver(days), pct: pctOver(days), openPnl: port.openPnl, exposure: port.exposure,
     funds: port.funds, positions, incidentCount: incidentRows[0]?.n || 0, dateLabel: new Date().toISOString().slice(0, 10),
   };
+}
+
+// Thin wrapper matching sendDailyReportEmail()/dailyDigestText()'s existing pnlDay/pctDay
+// field names — kept so those callers don't need to change.
+export async function buildDailyReportData() {
+  const d = await buildReportData(1);
+  return { equity: d.equity, pnlDay: d.pnl, pctDay: d.pct, openPnl: d.openPnl, exposure: d.exposure, funds: d.funds, positions: d.positions, incidentCount: d.incidentCount, dateLabel: d.dateLabel };
 }

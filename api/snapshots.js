@@ -4,24 +4,29 @@
 //                           can view (view_reports_daily/weekly/monthly — see rolePerms.js)
 //   GET ?report=<id>     -> a single archived report's PDF (base64); 403 if the caller's
 //                           role lacks view_reports_<kind> for that report's kind
-//   POST {action:'generateReport'} -> build + store a monthly report now (admin), not_verified
+//   POST {action:'generateReport', kind:'daily'|'weekly'|'monthly'} -> build + store a report
+//     now (admin). daily/weekly auto-verify (internal-only); monthly stays not_verified.
 //   POST {action:'verifyReport', id} -> mark verified (admin); if the report's kind is
 //     shareholder-facing (monthly), THIS is what notifies shareholders — not generation.
+//   POST {action:'unverifyReport', id} -> revert a verified report back to not_verified
+//     (admin) — does not un-send any WhatsApp/email already sent, just resets the flag.
+//   POST {action:'deleteReport', id} -> permanently remove an archived report (admin).
 //   POST {action:'testEmail'|'testWhatsApp'} -> send the current daily report to the
 //     REQUESTING ADMIN ONLY (their own email/phone) — Reports page "send test" buttons.
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
 import { riskMetrics } from './_lib/metrics.js';
-import { buildPortfolio, buildDailyReportData } from './_lib/portfolio.js';
-import { buildMonthlyPdf } from './_lib/report.js';
+import { buildReportData, buildDailyReportData } from './_lib/portfolio.js';
+import { buildMonthlyPdf, buildWeeklyPdf, buildDailyPdf } from './_lib/report.js';
 import { notify, REPORT_AVAILABLE, getOpenWAConfig, getApiKey, sendTextMeBot } from './_lib/notify.js';
 import { dailyDigestText } from './_lib/notifyText.js';
 import { sendDailyReportEmail } from './_lib/mailer.js';
 import { permsForRole } from './_lib/rolePerms.js';
 
 // Which report kinds are ever shown/sent to shareholders — only these need the shareholder
-// "new report available" notice fired on verification. Daily reports are internal-only.
+// "new report available" notice fired on verification. Daily/weekly are internal-only.
 const SHAREHOLDER_KINDS = new Set(['monthly']);
+const DAYS_FOR_KIND = { daily: 1, weekly: 7, monthly: 30 };
 
 export default async function handler(req, res) {
   try {
@@ -58,19 +63,32 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const a = requireAdmin(req, res); if (!a) return;
       if (req.body?.action === 'generateReport') {
-        const port = await buildPortfolio();
-        const snaps = (await query('SELECT equity FROM equity_snapshots ORDER BY day ASC')).rows;
-        const series = snaps.map(r => ({ equity: Number(r.equity) }));
-        const m = riskMetrics(series);
-        const eq = series.map(x => x.equity);
-        const pnl30 = eq.length ? eq[eq.length - 1] - eq[Math.max(0, eq.length - 1 - 30)] : 0;
-        const label = new Date().toISOString().slice(0, 10);
-        const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: label });
-        // status stays the column default ('not_verified') — an admin must verify a
-        // shareholder-facing report (see 'verifyReport' below) before shareholders hear about it.
-        const { rows } = await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at,status',
-          ['monthly', label, Math.round(port.equity), Math.round(pnl30), b64]);
-        return res.status(200).json({ ok: true, report: { id: Number(rows[0].id), kind: 'monthly', periodLabel: label, equity: Math.round(port.equity), pnl: Math.round(pnl30), createdAt: rows[0].created_at, status: rows[0].status } });
+        const kind = Object.keys(DAYS_FOR_KIND).includes(req.body?.kind) ? req.body.kind : 'monthly';
+        const data = await buildReportData(DAYS_FOR_KIND[kind]);
+        const label = data.dateLabel;
+        let b64;
+        if (kind === 'daily') {
+          b64 = await buildDailyPdf({ equity: data.equity, pnlDay: data.pnl, pctDay: data.pct, openPnl: data.openPnl, exposure: data.exposure, funds: data.funds, positions: data.positions, incidentCount: data.incidentCount, dateLabel: label });
+        } else if (kind === 'weekly') {
+          b64 = await buildWeeklyPdf({ equity: data.equity, pnl7: data.pnl, openPnl: data.openPnl, exposure: data.exposure, funds: data.funds, dateLabel: label });
+        } else {
+          const snaps = (await query('SELECT equity FROM equity_snapshots ORDER BY day ASC')).rows;
+          const m = riskMetrics(snaps.map(r => ({ equity: Number(r.equity) })));
+          b64 = await buildMonthlyPdf({ equity: data.equity, pnl30: data.pnl, openPnl: data.openPnl, exposure: data.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: data.funds, dateLabel: label });
+        }
+        let rows;
+        if (kind === 'monthly') {
+          // status stays the column default ('not_verified') — an admin must verify the
+          // shareholder-facing kind (see 'verifyReport' below) before shareholders hear about it.
+          ({ rows } = await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at,status',
+            [kind, label, Math.round(data.equity), Math.round(data.pnl), b64]));
+        } else {
+          // daily/weekly are internal-only — no shareholder is ever waiting on them.
+          ({ rows } = await query(`INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,status,verified_by,verified_at)
+             VALUES ($1,$2,$3,$4,$5,'verified',$6,now()) RETURNING id,created_at,status`,
+            [kind, label, Math.round(data.equity), Math.round(data.pnl), b64, a.username || a.id]));
+        }
+        return res.status(200).json({ ok: true, report: { id: Number(rows[0].id), kind, periodLabel: label, equity: Math.round(data.equity), pnl: Math.round(data.pnl), createdAt: rows[0].created_at, status: rows[0].status } });
       }
       if (req.body?.action === 'verifyReport') {
         const id = req.body?.id; if (!id) return res.status(400).json({ error: 'id required' });
@@ -89,6 +107,30 @@ export default async function handler(req, res) {
           id: Number(r.id), kind: r.kind, periodLabel: r.period_label, equity: Number(r.equity), pnl: Number(r.pnl),
           createdAt: r.created_at, status: r.status, verifiedBy: r.verified_by, verifiedAt: r.verified_at,
         } });
+      }
+      if (req.body?.action === 'unverifyReport') {
+        const id = req.body?.id; if (!id) return res.status(400).json({ error: 'id required' });
+        const { rows } = await query('SELECT status FROM reports WHERE id=$1', [id]);
+        if (!rows.length) return res.status(404).json({ error: 'report not found' });
+        if (rows[0].status !== 'verified') return res.status(400).json({ error: 'not verified' });
+        // resets the flag only — a WhatsApp/email already sent on verification can't be
+        // un-sent; this is for "I verified the wrong report" / re-review, not damage control.
+        await query("UPDATE reports SET status='not_verified', verified_by=NULL, verified_at=NULL WHERE id=$1", [id]);
+        const { rows: fresh } = await query('SELECT id,kind,period_label,equity,pnl,status,verified_by,verified_at,created_at FROM reports WHERE id=$1', [id]);
+        const r = fresh[0];
+        return res.status(200).json({ ok: true, report: {
+          id: Number(r.id), kind: r.kind, periodLabel: r.period_label, equity: Number(r.equity), pnl: Number(r.pnl),
+          createdAt: r.created_at, status: r.status, verifiedBy: r.verified_by, verifiedAt: r.verified_at,
+        } });
+      }
+      if (req.body?.action === 'deleteReport') {
+        const id = req.body?.id; if (!id) return res.status(400).json({ error: 'id required' });
+        // check-then-delete rather than trusting DELETE's own row count — that's reported
+        // under different keys (rowCount vs affectedRows) across drivers/environments.
+        const { rows } = await query('SELECT id FROM reports WHERE id=$1', [id]);
+        if (!rows.length) return res.status(404).json({ error: 'report not found' });
+        await query('DELETE FROM reports WHERE id=$1', [id]);
+        return res.status(200).json({ ok: true, id: Number(id) });
       }
       if (req.body?.action === 'testEmail') {
         const { rows } = await query('SELECT email FROM users WHERE id=$1', [a.id]);

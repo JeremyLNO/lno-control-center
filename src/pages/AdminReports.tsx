@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, clsPnl, fmtDT, downloadBlob, b64ToBlob, api, toast, Icon, Card, Btn, Select, useApp,
+  fmtUSD, fmtSigned, clsPnl, fmtDT, downloadBlob, b64ToBlob, api, toast, Icon, Card, Btn, Select, Confirm, useApp,
   hasPerm, PageHead, Denied, Loader
 } from '../ui'
 
@@ -13,6 +13,8 @@ function AdminReports(){
   const isAdmin=user.role==='admin';
   const [reports,setReports]=useState(null); const [busy,setBusy]=useState(false); const [dl,setDl]=useState(null); const [verifying,setVerifying]=useState(null);
   const [testingEmail,setTestingEmail]=useState(false); const [testingWa,setTestingWa]=useState(false);
+  const [genKind,setGenKind]=useState('monthly');
+  const [del,setDel]=useState(null); const [deleting,setDeleting]=useState(false);
   const [kindFilter,setKindFilter]=useState('all');
   const [statusFilter,setStatusFilter]=useState(()=>route.params?.status==='not_verified'?'not_verified':route.params?.status==='verified'?'verified':'all');
   const REPORT_KINDS=['daily','weekly','monthly'];
@@ -21,9 +23,11 @@ function AdminReports(){
   const load=()=>api('snapshots?reports=list').then(r=>setReports(r.reports||[])).catch(()=>setReports([]));
   useEffect(()=>{ if(canView) load(); },[]);
   if(!canView) return <Denied/>;
-  async function generate(){ setBusy(true); try{ await api('snapshots',{method:'POST',body:{action:'generateReport'}}); toast.success(t('reports.generatedArchived')); load(); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
+  async function generate(){ setBusy(true); try{ await api('snapshots',{method:'POST',body:{action:'generateReport',kind:genKind}}); toast.success(t('reports.generatedArchived')); load(); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
   async function download(rep){ setDl(rep.id); try{ const r=await api('snapshots?report='+rep.id); downloadBlob(b64ToBlob(r.pdfBase64), r.filename||('lno-report-'+rep.periodLabel+'.pdf')); toast.success(t('reports.downloaded')); }catch(e){ toast.error(e.message); } finally{ setDl(null); } }
   async function verify(rep){ setVerifying(rep.id); try{ await api('snapshots',{method:'POST',body:{action:'verifyReport',id:rep.id}}); toast.success(t('reports.verified')); load(); }catch(e){ toast.error(e.message); } finally{ setVerifying(null); } }
+  async function unverify(rep){ setVerifying(rep.id); try{ await api('snapshots',{method:'POST',body:{action:'unverifyReport',id:rep.id}}); toast.success(t('reports.unverified')); load(); }catch(e){ toast.error(e.message); } finally{ setVerifying(null); } }
+  async function doDelete(){ setDeleting(true); try{ await api('snapshots',{method:'POST',body:{action:'deleteReport',id:del.id}}); toast.success(t('reports.deleted')); setDel(null); load(); }catch(e){ toast.error(e.message); } finally{ setDeleting(false); } }
   async function testEmail(){ setTestingEmail(true); try{ const r=await api('snapshots',{method:'POST',body:{action:'testEmail'}}); toast.success(t('reports.testEmailSent',{email:r.email})); }catch(e){ toast.error(e.message); } finally{ setTestingEmail(false); } }
   async function testWhatsApp(){ setTestingWa(true); try{ const r=await api('snapshots',{method:'POST',body:{action:'testWhatsApp'}}); toast.success(t('reports.testWhatsAppSent',{phone:r.phone})); }catch(e){ toast.error(e.message); } finally{ setTestingWa(false); } }
   const visible=(reports||[]).filter(r=>allowedKinds.includes(r.kind));
@@ -33,6 +37,7 @@ function AdminReports(){
       actions={isAdmin&&<>
         <Btn variant="outline" onClick={testEmail} disabled={testingEmail}><Icon name="mail" className="w-4 h-4"/>{testingEmail?t('reports.testing'):t('reports.testEmail')}</Btn>
         <Btn variant="outline" onClick={testWhatsApp} disabled={testingWa}><Icon name="msg" className="w-4 h-4"/>{testingWa?t('reports.testing'):t('reports.testWhatsApp')}</Btn>
+        <Select value={genKind} onChange={setGenKind} className="w-32" options={[{value:'daily',label:t('reports.kindDaily')},{value:'weekly',label:t('reports.kindWeekly')},{value:'monthly',label:t('reports.kindMonthly')}]}/>
         <Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?t('reports.generating'):t('reports.generateNow')}</Btn>
       </>}/>
     {visible.length>0&&<div className="flex items-center gap-2 mb-3">
@@ -47,7 +52,7 @@ function AdminReports(){
           <th className="px-4 py-2.5 text-left font-medium">{t('reports.kind')}</th>
           <th className="px-4 py-2.5 text-left font-medium">{t('reports.period')}</th>
           <th className="px-4 py-2.5 text-right font-medium">{t('activity.equity')}</th>
-          <th className="px-4 py-2.5 text-right font-medium">{t('reports.pnl30d')}</th>
+          <th className="px-4 py-2.5 text-right font-medium">{t('reports.pnl')}</th>
           <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">{t('reports.generated')}</th>
           <th className="px-4 py-2.5 text-left font-medium">{t('reports.status')}</th>
           <th className="px-4 py-2.5"></th>
@@ -64,11 +69,14 @@ function AdminReports(){
               : <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded"><Icon name="clock" className="w-3 h-3"/>{t('reports.statusNotVerified')}</span>}</td>
             <td className="px-4 py-2.5 text-right whitespace-nowrap">
               {isAdmin&&r.status!=='verified'&&<Btn size="sm" variant="outline" className="mr-1.5" disabled={verifying===r.id} onClick={()=>verify(r)}><Icon name="check" className="w-3.5 h-3.5"/>{verifying===r.id?'…':t('reports.verify')}</Btn>}
-              <Btn size="sm" variant="outline" disabled={dl===r.id} onClick={()=>download(r)}><Icon name="download" className="w-4 h-4"/>{dl===r.id?'…':'PDF'}</Btn>
+              {isAdmin&&r.status==='verified'&&<Btn size="sm" variant="outline" className="mr-1.5" disabled={verifying===r.id} onClick={()=>unverify(r)}><Icon name="clock" className="w-3.5 h-3.5"/>{verifying===r.id?'…':t('reports.unverify')}</Btn>}
+              <Btn size="sm" variant="outline" className={isAdmin?'mr-1.5':''} disabled={dl===r.id} onClick={()=>download(r)}><Icon name="download" className="w-4 h-4"/>{dl===r.id?'…':'PDF'}</Btn>
+              {isAdmin&&<Btn size="sm" variant="outline" onClick={()=>setDel(r)}><Icon name="trash" className="w-3.5 h-3.5"/></Btn>}
             </td>
           </tr>)}
         </tbody>
       </table></div></Card>}
+    <Confirm open={!!del} title={t('reports.deleteTitle')} message={t('reports.deleteConfirm',{period:del?.periodLabel})} confirmLabel={deleting?'…':t('reports.delete')} onCancel={()=>setDel(null)} onConfirm={doDelete}/>
   </div>;
 }
 

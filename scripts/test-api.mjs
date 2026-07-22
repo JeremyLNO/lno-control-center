@@ -244,6 +244,35 @@ ok('archived report downloads as a valid %PDF', r.status === 200 && Buffer.from(
 r = await call(snapshots, { method: 'GET', query: { reports: 'list' } });
 ok('report archive requires auth -> 401', r.status === 401, r.status);
 
+// admin can pick the periodicity when generating on demand — daily/weekly are internal-only
+// (no shareholder ever waits on them) so they auto-verify, unlike monthly above
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport', kind: 'daily' } });
+ok('admin can generate a DAILY report on demand, auto-verified', r.status === 200 && r.body.report.kind === 'daily' && r.body.report.status === 'verified', r.body);
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport', kind: 'weekly' } });
+const genWeekly = r.body.report;
+ok('admin can generate a WEEKLY report on demand, auto-verified', r.status === 200 && genWeekly.kind === 'weekly' && genWeekly.status === 'verified', r.body);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { report: String(genWeekly.id) } });
+ok('the generated weekly report downloads as a valid %PDF', r.status === 200 && Buffer.from(r.body.pdfBase64, 'base64').slice(0, 5).toString() === '%PDF-', r.body && r.body.filename);
+
+// unverify: admin can revert a verified report back to not_verified (re-review, not damage
+// control — it doesn't un-send anything already emailed/WhatsApped)
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'unverifyReport', id: genWeekly.id } });
+ok('admin can unverify a report', r.status === 200 && r.body.report.status === 'not_verified' && r.body.report.verifiedBy === null, r.body);
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'unverifyReport', id: genWeekly.id } });
+ok('unverifying an already-not_verified report is rejected -> 400', r.status === 400, r.body);
+r = await call(snapshots, { method: 'POST', body: { action: 'unverifyReport', id: genWeekly.id } });
+ok('non-admin cannot unverify -> 401/403', [401, 403].includes(r.status), r.status);
+
+// delete: admin can permanently remove an archived report
+r = await call(snapshots, { method: 'POST', body: { action: 'deleteReport', id: genWeekly.id } });
+ok('non-admin cannot delete a report -> 401/403', [401, 403].includes(r.status), r.status);
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'deleteReport', id: genWeekly.id } });
+ok('admin can delete a report', r.status === 200 && r.body.id === genWeekly.id, r.body);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { reports: 'list' } });
+ok('deleted report no longer appears in the archive', !(r.body.reports || []).some(x => x.id === genWeekly.id), r.body.reports);
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'deleteReport', id: genWeekly.id } });
+ok('deleting an already-deleted report -> 404', r.status === 404, r.status);
+
 // Reports page "send test" buttons — sent ONLY to the requesting admin, not the real
 // recipient list (admin's phone was set to +33611111111 / notify email above)
 sentEmails.length = 0;
