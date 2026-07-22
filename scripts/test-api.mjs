@@ -151,23 +151,32 @@ ok('3 failed logins -> WhatsApp alert sent', sentMessages.some(m => /failed logi
 sentMessages.length = 0;
 r = await call(cronDaily, { method: 'POST', headers: authH });
 ok('cron computes risk metrics (sharpe/sortino/drawdown)', r.status === 200 && typeof r.body.metrics.sharpe === 'number' && typeof r.body.metrics.sortino === 'number' && typeof r.body.metrics.maxDrawdownPct === 'number', r.body && r.body.metrics);
-ok('cron sends daily report via OpenWA', sentMessages.some(m => /daily report/i.test(m.text)), sentMessages.map(m => (m.text || '').slice(0, 20)));
-// report format: bold title, global section, then one bold section per fund (Equity + PnL in USDT • %)
-const daily = sentMessages.find(m => /DAILY REPORT/i.test(m.text))?.text || '';
-ok('daily report uses the new format (bold title, USDT, PnL day • %)',
-  daily.startsWith('*📊 LNO DAILY REPORT*') && /Equity [\d ]+ USDT/.test(daily) && /PnL day [+-][\d ]+ USDT • [+-][\d.]+%/.test(daily),
-  daily.slice(0, 120));
+ok('cron sends a synthetic daily digest via WhatsApp', sentMessages.some(m => /LNO Daily/i.test(m.text)), sentMessages.map(m => (m.text || '').slice(0, 30)));
+// digest format (item 14): headline numbers only, no per-fund/per-bot breakdown — that
+// detail moved to the email body (sendDailyReportEmail) and the archived PDF instead.
+const daily = sentMessages.find(m => /LNO Daily/i.test(m.text))?.text || '';
+ok('daily WhatsApp digest is synthetic (equity, 24h PnL %, open count, incidents — no fund/bot lines)',
+  /Equity [\d ]+ USDT/.test(daily) && /PnL 24h [+-][\d ]+ USDT \([+-][\d.]+%\)/.test(daily) && /\d+ open/.test(daily) && !/\*Greens\*/.test(daily),
+  daily);
 ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { method: 'POST' })).status === 401);
 
-// per-recipient localization: the same cron run renders the report in the RECIPIENT's own
+// the daily report is also emailed in full HTML to admin/operator/viewer
+ok('daily report emails admin/operator/viewer with the full breakdown', sentEmails.some(e => /LNO Daily Report/i.test(e.subject)), sentEmails.map(e => e.subject));
+
+// and archived as a PDF report, auto-verified (internal-only kind — no shareholder ever waits on it)
+r = await call(snapshots, { method: 'GET', headers: authH, query: { reports: 'list' } });
+const dailyRow = r.body.reports.find(x => x.kind === 'daily');
+ok('daily report archived with status=verified (auto)', !!dailyRow && dailyRow.status === 'verified' && dailyRow.verifiedBy === 'system', dailyRow);
+
+// per-recipient localization: the same cron run renders the digest in the RECIPIENT's own
 // users.language, not a single fixed locale — switch the admin to French and confirm.
 await call(profile, { method: 'PATCH', headers: authH, body: { language: 'fr' } });
 sentMessages.length = 0;
 await call(cronDaily, { method: 'POST', headers: authH });
-const dailyFr = sentMessages.find(m => /RAPPORT QUOTIDIEN LNO/i.test(m.text))?.text || '';
-ok('daily report renders in the recipient\'s own language (fr)',
-  dailyFr.startsWith('*📊 RAPPORT QUOTIDIEN LNO*') && /Equity [\d ]+ USDT/.test(dailyFr) && /PnL jour [+-][\d ]+ USDT • [+-][\d.]+%/.test(dailyFr),
-  dailyFr.slice(0, 120));
+const dailyFr = sentMessages.find(m => /LNO Quotidien/i.test(m.text))?.text || '';
+ok('daily digest renders in the recipient\'s own language (fr)',
+  /Equity [\d ]+ USDT/.test(dailyFr) && /PnL 24h [+-][\d ]+ USDT \([+-][\d.]+%\)/.test(dailyFr),
+  dailyFr);
 await call(profile, { method: 'PATCH', headers: authH, body: { language: 'en' } });
 // every WhatsApp send is recorded in the admin-only message log
 r = await call(openwa, { method: 'GET', headers: authH, query: { log: '1' } });
@@ -338,13 +347,14 @@ r = await call(funds, { method: 'DELETE', headers: authH, body: { id: growth.id 
 ok('deleting a fund unassigns its bots', r.status === 200 && !r.body.funds.some(f => f.id === growth.id), r.body.funds);
 ok('the bot is unassigned after its fund is deleted', (await call(bots, { method: 'GET', headers: authH })).body.bots.find(b => b.id === 'binance:ADAUSDT').fundId === null);
 
-// the WhatsApp report groups open bots under their fund, with the fund's colour emoji
+// the WhatsApp weekly/monthly report (still the detailed reportText() format — only the
+// daily digest was made synthetic) groups open bots under their fund, with a colour emoji
 await call(funds, { method: 'POST', headers: authH, body: { id: 'fg', name: 'Greens', color: '#10B981' } });
 await call(bots, { method: 'PATCH', headers: authH, body: { id: 'binance:ADAUSDT', fundId: 'fg' } });
 sentMessages.length = 0;
-await call(cronDaily, { method: 'POST', headers: authH });
-const rep = sentMessages.find(m => /DAILY REPORT/i.test(m.text))?.text || '';
-ok('report groups bots under their fund with a colour emoji', /🟢 \*Greens\*/.test(rep) && /ADAUSDT/.test(rep), rep.slice(0, 240));
+await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'weekly' } });
+const rep = sentMessages.find(m => /WEEKLY REPORT/i.test(m.text))?.text || '';
+ok('weekly report groups bots under their fund with a colour emoji', /🟢 \*Greens\*/.test(rep) && /ADAUSDT/.test(rep), rep.slice(0, 240));
 
 // shareholder role — admin-created, EXTERNAL email, no password (signs in via emailed OTP)
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'investor@example.com', role: 'shareholder' } });
@@ -417,15 +427,21 @@ await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'cooldow
 await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'cooldown.test@example.com' } });
 ok('requesting a second code within 60s does not send a duplicate email', sentEmails.length === 1, sentEmails);
 
-// shareholder opts into WhatsApp -> gets a "new report available" notice when a report is generated
+// shareholder opts into WhatsApp -> gets a "new report available" notice, but only once an
+// admin VERIFIES the report — not at generation time (item 15's verification workflow)
 await call(profile, { method: 'PATCH', headers: shH, body: { phone: '+33655555555', notify: true } });
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
+const genForVerify = r.body.report;
 sentMessages.length = 0;
-await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
-ok('shareholder gets a "new report available" WhatsApp on report generation', sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
+ok('freshly generated report is not_verified and did not notify shareholders yet', genForVerify.status === 'not_verified' && sentMessages.length === 0, r.body);
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'verifyReport', id: genForVerify.id } });
+ok('admin verifies the report', r.status === 200 && r.body.report.status === 'verified' && r.body.report.verifiedBy, r.body);
+ok('shareholder gets a "new report available" WhatsApp when the report is verified', sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
 // per-type/per-role matrix: disabling new_report stops the notice (no shareholder gets it)
 await call(openwa, { method: 'PUT', headers: authH, body: { notifMatrix: { new_report: [] } } });
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
 sentMessages.length = 0;
-await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
+await call(snapshots, { method: 'POST', headers: authH, body: { action: 'verifyReport', id: r.body.report.id } });
 ok('disabling a type in the matrix stops that notification', !sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
 await call(openwa, { method: 'PUT', headers: authH, body: { notifMatrix: { new_report: ['shareholder'] } } }); // restore
 

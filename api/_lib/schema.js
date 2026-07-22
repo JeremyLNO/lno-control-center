@@ -232,6 +232,19 @@ export async function migrate() {
     pdf_base64 TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
+  // Verification workflow (Reports page) — a report must be 'verified' by an admin before
+  // it can be sent/shown to shareholders (monthly reports are the only shareholder-facing
+  // kind today). Admin-only kinds (daily) are auto-verified at generation, since no
+  // shareholder is ever waiting on them.
+  await ddl(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'not_verified'`);
+  await ddl(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS verified_by TEXT`);
+  await ddl(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ`);
+  // One-time backfill: reports created before this feature shipped were already sent to
+  // shareholders (the old auto-notify-on-generate behavior) — mark them verified rather
+  // than surfacing years of history as "to verify". Date-gated so it's idempotent without
+  // needing a separate migration-run flag; new rows after this date keep the real default.
+  await ddl(`UPDATE reports SET status='verified', verified_by='system', verified_at=created_at
+             WHERE status='not_verified' AND verified_by IS NULL AND created_at < '2026-07-22'::date`);
   // Emailed one-time login codes for 'otp' accounts (shareholders — see auth.js
   // requestOtp/verifyOtp). code_hash is SHA-256 of the 6-digit code peppered with
   // JWT_SECRET (not bcrypt — a 6-digit space is already small; the real protection is

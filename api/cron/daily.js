@@ -12,13 +12,16 @@
 // real Vercel Cron (no ?mode=alerts) at its scheduled time.
 import { riskMetrics } from '../_lib/metrics.js';
 import { buildPortfolio } from '../_lib/portfolio.js';
-import { getOpenWAConfig, notify, REPORT_AVAILABLE } from '../_lib/notify.js';
-import { reportText, breachAlertText, dormantAlertText } from '../_lib/notifyText.js';
+import { getOpenWAConfig, notify, getUsersByRole, rolesForType } from '../_lib/notify.js';
+import { reportText, breachAlertText, dormantAlertText, dailyDigestText, verifyReminderText } from '../_lib/notifyText.js';
 import { syncExchanges } from '../_lib/sync.js';
 import { recordDailyFundSnapshot } from '../_lib/employeeFund.js';
-import { buildMonthlyPdf } from '../_lib/report.js';
+import { buildMonthlyPdf, buildDailyPdf } from '../_lib/report.js';
+import { sendDailyReportEmail, sendVerifyReminderEmail } from '../_lib/mailer.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
+
+const REPORTS_URL = 'https://cc.lno.company/#/admin/reports?status=not_verified';
 
 function authorized(req) {
   const secret = process.env.CRON_SECRET;
@@ -106,24 +109,71 @@ export default async function handler(req, res) {
         // overwritten intraday by the every-5-minute alerts-only cron — so port.pnlDay can
         // end up reflecting the last few minutes rather than a full day. pnlOver(1) always
         // diffs against yesterday's distinct snapshot row, a true ~24h-ago comparison.
-        sent.push({ type: 'report', ...(await notify((lang) => reportText(lang, 'daily', port, { pnl: pnlOver(1), pct: pctOver(1), labelKey: 'periodDay' }), { type: 'daily' })) });
+        const pnlDay24 = pnlOver(1), pctDay24 = pctOver(1);
+        const openPositions = port.bots.filter(b => b.status === 'open').map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
+        const { rows: incidentRows } = await query("SELECT count(*)::int AS n FROM alerts WHERE created_at > now() - interval '24 hours'");
+        const incidentCount = incidentRows[0]?.n || 0;
+
+        // Daily report: PDF archived (auto-verified — internal-only, no shareholder ever
+        // waits on it), full HTML in the email body (not a PDF attachment) to every internal
+        // role, and a short digest on WhatsApp (admin/operator) — three different formats of
+        // the same underlying numbers, matched to what each channel is good at.
+        try {
+          const b64 = await buildDailyPdf({ equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today });
+          await query("INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,status,verified_by,verified_at) VALUES ('daily',$1,$2,$3,$4,'verified','system',now())",
+            [today, Math.round(port.equity), Math.round(pnlDay24), b64]);
+          sent.push({ type: 'daily-pdf', archived: true, bytes: b64.length });
+        } catch (e) { sent.push({ type: 'daily-pdf', error: String(e.message || e) }); }
+
+        try {
+          const recipients = await getUsersByRole(['admin', 'operator', 'viewer']);
+          for (const r of recipients) await sendDailyReportEmail(r.email, { equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today }).catch(() => {});
+          sent.push({ type: 'daily-email', recipients: recipients.length });
+        } catch (e) { sent.push({ type: 'daily-email', error: String(e.message || e) }); }
+
+        sent.push({ type: 'report', ...(await notify((lang) => dailyDigestText(lang, { equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openCount: openPositions.length, incidentCount }), { type: 'daily' })) });
       }
       const force = req.query?.force;
       const dt = new Date();
       if (cfg.enabled && (dt.getUTCDay() === 1 || force === 'weekly' || force === 'all')) {
         sent.push({ type: 'weekly', ...(await notify((lang) => reportText(lang, 'weekly', port, { pnl: pnlOver(7), pct: pctOver(7), labelKey: 'period7d' }), { type: 'weekly' })) });
       }
-      if (cfg.enabled && (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all')) {
+      if (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all') {
         const pnl30 = pnlOver(30);
-        sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
+        if (cfg.enabled) sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
         try {
           const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: today });
+          // status stays the column default ('not_verified') — monthly is the shareholder-
+          // facing kind, so an admin must verify it (see api/snapshots.js) before shareholders
+          // are notified; that's what used to happen automatically right here.
           try { await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5)', ['monthly', today, Math.round(port.equity), Math.round(pnl30), b64]); } catch (e) {}
-          const shr = await notify(REPORT_AVAILABLE, { type: 'new_report' });
-          sent.push({ type: 'monthly-pdf', archived: true, bytes: b64.length, shareholdersNotified: shr.sent || 0 });
+          sent.push({ type: 'monthly-pdf', archived: true, bytes: b64.length });
         } catch (e) { sent.push({ type: 'monthly-pdf', error: String(e.message || e) }); }
       }
     }
+
+    // 5) 8am verification reminder (item 15) — runs in EITHER mode (so the frequent
+    // alerts-only cron catches the window too), gated to a 5-minute slot once a day so it
+    // matches the alerts-only cron's own cadence without spamming on every invocation.
+    try {
+      const now = new Date();
+      if (now.getUTCHours() === 8 && now.getUTCMinutes() < 5) {
+        const todayKey = today;
+        const flagRow = (await query("SELECT value FROM app_config WHERE key='lastVerifyReminderDay'")).rows[0];
+        if ((flagRow?.value) !== todayKey) {
+          const { rows: unverified } = await query("SELECT kind, period_label FROM reports WHERE status='not_verified' ORDER BY created_at ASC");
+          if (unverified.length) {
+            const names = unverified.map(r => `${r.kind} — ${r.period_label}`);
+            const admins = await getUsersByRole(await rolesForType(cfg, 'verify_reminder'));
+            for (const a2 of admins) await sendVerifyReminderEmail(a2.email, names, REPORTS_URL).catch(() => {});
+            const waResult = await notify((lang) => verifyReminderText(lang, names, REPORTS_URL), { type: 'verify_reminder' });
+            sent.push({ type: 'verify-reminder', count: unverified.length, emailed: admins.length, ...waResult });
+          }
+          await query(`INSERT INTO app_config (key,value) VALUES ('lastVerifyReminderDay',$1::jsonb)
+             ON CONFLICT (key) DO UPDATE SET value=$1::jsonb`, [JSON.stringify(todayKey)]);
+        }
+      }
+    } catch (e) { sent.push({ type: 'verify-reminder', error: String(e.message || e) }); }
 
     res.status(200).json({ ok: true, alertsOnly, synced, equity: port.equity, pnlDay: port.pnlDay, metrics: m, breaches, sent });
   } catch (e) {

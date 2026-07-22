@@ -56,6 +56,7 @@ const WA_MSG_TYPES = [
   {key:'new_report',label:'New report available'},
   {key:'api_error',label:'API/exchange error'},
   {key:'new_signup',label:'New sign-up'},
+  {key:'verify_reminder',label:'Report verification reminder'},
 ];
 const WA_ROLE_COLS = [['admin','Admin'],['operator','Operator'],['viewer','Viewer'],['shareholder','Shareholder']];
 

@@ -28,6 +28,9 @@ const STR = {
     staleFooterMany: 'Check whether the strategy behind these positions is still running.',
     apiErrorHeader: '🔴 LNO API ERROR', apiErrorLine: '{exchange} failed to sync: {message}',
     newSignupHeader: '👋 LNO NEW SIGN-UP', newSignupLine: '{name} ({email}) just signed up via Google — created as Viewer.',
+    dailyDigest: '📊 LNO Daily — Equity {equity} · PnL 24h {pnl} ({pct}) · {n} open · {incidents}',
+    incidentsNone: '0 incidents', incidentsSome: '{n} incident(s) ⚠️',
+    verifyReminderHeader: '📋 LNO — reports awaiting verification', verifyReminderLine: '{names}', verifyReminderFooter: 'Review: {link}',
   },
   fr: {
     welcome: '🎉 Bienvenue dans les alertes LNO Control Center ! Votre WhatsApp est configuré — vous recevrez vos alertes ici.',
@@ -45,6 +48,9 @@ const STR = {
     staleFooterMany: 'Vérifiez que la stratégie derrière ces positions fonctionne toujours.',
     apiErrorHeader: '🔴 ERREUR API LNO', apiErrorLine: '{exchange} : échec de synchronisation : {message}',
     newSignupHeader: '👋 NOUVELLE INSCRIPTION LNO', newSignupLine: '{name} ({email}) vient de s\'inscrire via Google — créé en tant que Viewer.',
+    dailyDigest: '📊 LNO Quotidien — Equity {equity} · PnL 24h {pnl} ({pct}) · {n} ouvert(es) · {incidents}',
+    incidentsNone: '0 incident', incidentsSome: '{n} incident(s) ⚠️',
+    verifyReminderHeader: '📋 LNO — rapports à vérifier', verifyReminderLine: '{names}', verifyReminderFooter: 'Vérifier : {link}',
   },
   de: {
     welcome: '🎉 Willkommen bei den LNO Control Center-Benachrichtigungen! Ihr WhatsApp ist eingerichtet — Sie erhalten Ihre Alarme hier.',
@@ -62,6 +68,9 @@ const STR = {
     staleFooterMany: 'Prüfen Sie, ob die Strategie hinter diesen Positionen noch läuft.',
     apiErrorHeader: '🔴 LNO API-FEHLER', apiErrorLine: '{exchange}: Synchronisierung fehlgeschlagen: {message}',
     newSignupHeader: '👋 LNO NEUE REGISTRIERUNG', newSignupLine: '{name} ({email}) hat sich gerade über Google registriert — als Viewer angelegt.',
+    dailyDigest: '📊 LNO Täglich — Kontostand {equity} · PnL 24h {pnl} ({pct}) · {n} offen · {incidents}',
+    incidentsNone: '0 Vorfälle', incidentsSome: '{n} Vorfall/Vorfälle ⚠️',
+    verifyReminderHeader: '📋 LNO — zu verifizierende Berichte', verifyReminderLine: '{names}', verifyReminderFooter: 'Prüfen: {link}',
   },
   es: {
     welcome: '🎉 ¡Bienvenido a las alertas de LNO Control Center! Tu WhatsApp está configurado — recibirás tus alertas aquí.',
@@ -79,6 +88,9 @@ const STR = {
     staleFooterMany: 'Comprueba si la estrategia detrás de estas posiciones sigue en marcha.',
     apiErrorHeader: '🔴 ERROR DE API LNO', apiErrorLine: '{exchange}: fallo al sincronizar: {message}',
     newSignupHeader: '👋 NUEVO REGISTRO LNO', newSignupLine: '{name} ({email}) se acaba de registrar con Google — creado como Viewer.',
+    dailyDigest: '📊 LNO Diario — Patrimonio {equity} · PnL 24h {pnl} ({pct}) · {n} abiertas · {incidents}',
+    incidentsNone: '0 incidentes', incidentsSome: '{n} incidente(s) ⚠️',
+    verifyReminderHeader: '📋 LNO — informes por verificar', verifyReminderLine: '{names}', verifyReminderFooter: 'Revisar: {link}',
   },
 };
 
@@ -93,6 +105,17 @@ export function reportAvailableText(lang) { return t(lang, 'reportAvailable'); }
 export function loginFailureText(lang, email) { return t(lang, 'loginFailure', { email }); }
 export function apiErrorText(lang, exchangeLabel, message) { return `${t(lang, 'apiErrorHeader')}\n${t(lang, 'apiErrorLine', { exchange: exchangeLabel, message })}`; }
 export function newSignupText(lang, name, email) { return `${t(lang, 'newSignupHeader')}\n${t(lang, 'newSignupLine', { name: name || email, email })}`; }
+
+// Very synthetic daily digest for WhatsApp (item 14) — the full breakdown goes out by
+// email instead; this is headline numbers only, no per-fund/per-bot lines.
+export function dailyDigestText(lang, { equity, pnlDay, pctDay, openCount, incidentCount }) {
+  const incidents = incidentCount ? t(lang, 'incidentsSome', { n: incidentCount }) : t(lang, 'incidentsNone');
+  return t(lang, 'dailyDigest', { equity: fUSD(equity), pnl: fmt(pnlDay), pct: (pctDay >= 0 ? '+' : '') + pctDay.toFixed(1) + '%', n: openCount, incidents });
+}
+export function verifyReminderText(lang, reportNames, link) {
+  const names = reportNames.map(n => `• ${n}`).join('\n');
+  return `${t(lang, 'verifyReminderHeader')}\n${t(lang, 'verifyReminderLine', { names })}\n${t(lang, 'verifyReminderFooter', { link })}`;
+}
 
 // kind: 'daily' | 'weekly' | 'monthly'; period: { pnl, pct, labelKey: 'periodDay'|'period7d'|'period30d' }
 export function reportText(lang, kind, port, period) {

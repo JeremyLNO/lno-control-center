@@ -2,7 +2,9 @@
 //   GET                  -> equity snapshots (any auth)
 //   GET ?reports=list    -> archived report metadata (any auth)
 //   GET ?report=<id>     -> a single archived report's PDF (base64) (any auth)
-//   POST {action:'generateReport'} -> build + store a report now (admin); notifies shareholders
+//   POST {action:'generateReport'} -> build + store a monthly report now (admin), not_verified
+//   POST {action:'verifyReport', id} -> mark verified (admin); if the report's kind is
+//     shareholder-facing (monthly), THIS is what notifies shareholders — not generation.
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
 import { riskMetrics } from './_lib/metrics.js';
@@ -10,16 +12,21 @@ import { buildPortfolio } from './_lib/portfolio.js';
 import { buildMonthlyPdf } from './_lib/report.js';
 import { notify, REPORT_AVAILABLE } from './_lib/notify.js';
 
+// Which report kinds are ever shown/sent to shareholders — only these need the shareholder
+// "new report available" notice fired on verification. Daily reports are internal-only.
+const SHAREHOLDER_KINDS = new Set(['monthly']);
+
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const a = requireAuth(req, res); if (!a) return;
 
       if (req.query?.reports === 'list') {
-        const { rows } = await query('SELECT id,kind,period_label,equity,pnl,created_at FROM reports ORDER BY created_at DESC LIMIT 100');
+        const { rows } = await query('SELECT id,kind,period_label,equity,pnl,status,verified_by,verified_at,created_at FROM reports ORDER BY created_at DESC LIMIT 200');
         return res.status(200).json({ reports: rows.map(r => ({
           id: Number(r.id), kind: r.kind, periodLabel: r.period_label,
           equity: Number(r.equity), pnl: Number(r.pnl), createdAt: r.created_at,
+          status: r.status || 'verified', verifiedBy: r.verified_by || null, verifiedAt: r.verified_at || null,
         })) });
       }
       if (req.query?.report) {
@@ -47,10 +54,29 @@ export default async function handler(req, res) {
         const pnl30 = eq.length ? eq[eq.length - 1] - eq[Math.max(0, eq.length - 1 - 30)] : 0;
         const label = new Date().toISOString().slice(0, 10);
         const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: label });
-        const { rows } = await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at',
+        // status stays the column default ('not_verified') — an admin must verify a
+        // shareholder-facing report (see 'verifyReport' below) before shareholders hear about it.
+        const { rows } = await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at,status',
           ['monthly', label, Math.round(port.equity), Math.round(pnl30), b64]);
-        await notify(REPORT_AVAILABLE, { type: 'new_report' });
-        return res.status(200).json({ ok: true, report: { id: Number(rows[0].id), kind: 'monthly', periodLabel: label, equity: Math.round(port.equity), pnl: Math.round(pnl30), createdAt: rows[0].created_at } });
+        return res.status(200).json({ ok: true, report: { id: Number(rows[0].id), kind: 'monthly', periodLabel: label, equity: Math.round(port.equity), pnl: Math.round(pnl30), createdAt: rows[0].created_at, status: rows[0].status } });
+      }
+      if (req.body?.action === 'verifyReport') {
+        const id = req.body?.id; if (!id) return res.status(400).json({ error: 'id required' });
+        const { rows } = await query('SELECT * FROM reports WHERE id=$1', [id]);
+        if (!rows.length) return res.status(404).json({ error: 'report not found' });
+        const rep = rows[0];
+        if (rep.status === 'verified') return res.status(400).json({ error: 'already verified' });
+        await query("UPDATE reports SET status='verified', verified_by=$2, verified_at=now() WHERE id=$1", [id, a.username || a.id]);
+        // shareholder-facing kinds only find out about a report once it's verified — this
+        // used to fire automatically at generation time.
+        let shareholdersNotified = 0;
+        if (SHAREHOLDER_KINDS.has(rep.kind)) { const r2 = await notify(REPORT_AVAILABLE, { type: 'new_report' }); shareholdersNotified = r2.sent || 0; }
+        const { rows: fresh } = await query('SELECT id,kind,period_label,equity,pnl,status,verified_by,verified_at,created_at FROM reports WHERE id=$1', [id]);
+        const r = fresh[0];
+        return res.status(200).json({ ok: true, shareholdersNotified, report: {
+          id: Number(r.id), kind: r.kind, periodLabel: r.period_label, equity: Number(r.equity), pnl: Number(r.pnl),
+          createdAt: r.created_at, status: r.status, verifiedBy: r.verified_by, verifiedAt: r.verified_at,
+        } });
       }
       return res.status(400).json({ error: 'unknown action' });
     }

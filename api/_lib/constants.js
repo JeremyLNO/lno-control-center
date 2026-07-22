@@ -32,7 +32,7 @@ export const DEFAULT_USERS = [
 // drawdownPct / pnlDayThreshold drive automated alerts; dailyReport toggles the daily summary.
 // WhatsApp notification routing: which roles receive each message type.
 export const WA_ROLES = ['admin','operator','viewer','shareholder'];
-export const WA_MSG_TYPES = ['login','breach','stale','daily','weekly','monthly','new_report','api_error','new_signup'];
+export const WA_MSG_TYPES = ['login','breach','stale','daily','weekly','monthly','new_report','api_error','new_signup','verify_reminder'];
 export const DEFAULT_MATRIX = {
   login:      ['admin'],
   breach:     ['admin','operator'],
@@ -43,5 +43,6 @@ export const DEFAULT_MATRIX = {
   new_report: ['shareholder'],
   api_error:  ['admin','operator'],
   new_signup: ['admin'],
+  verify_reminder: ['admin'],
 };
 export const DEFAULT_OPENWA = { enabled:false, drawdownPct:10, pnlDayThreshold:-5000, dailyReport:true, notifMatrix: DEFAULT_MATRIX };
