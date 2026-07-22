@@ -66,8 +66,8 @@ const WA_ROLE_COLS = [['admin','Admin'],['operator','Operator'],['viewer','Viewe
 const fmtUSD = (n,d=0)=> (n<0?'-':'')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+' USDT';
 const fmtSigned = (n,d=0)=> (n>=0?'+':'-')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+' USDT';
 const fmtNum = (n,d=0)=> Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-const fmtPct = (n,d=1)=> (n>=0?'+':'')+n.toFixed(d)+'%';
-const fmtPctPlain = (n,d=1)=> n.toFixed(d)+'%';
+const fmtPct = (n,d=1)=> n==null?'—':(n>=0?'+':'')+n.toFixed(d)+'%';
+const fmtPctPlain = (n,d=1)=> n==null?'—':n.toFixed(d)+'%';
 const clsPnl = (n)=> n>0?'text-success':n<0?'text-danger':'text-slate-500';
 const fmtPrice = (p)=>{ if(p==null||!isFinite(p))return '—'; const d=p>=1000?2:p>=1?3:p>=0.01?5:8; return p.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+' USDT'; };
 const fmtDate = (t)=> new Date(t).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
@@ -694,7 +694,7 @@ function PnlCalendar({series}: any){
   if(col.length){ while(col.length<7) col.push(null); cols.push(col); }
   return <div>
     <div className="overflow-x-auto pb-1"><div className="inline-flex gap-1">
-      {cols.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:pctHeatColor(p&&p.pct)}} title={p?`${fmtDate(p.t)} · ${fmtSigned(p.pnl)} (${fmtPct(p.pct)})`:''}/>)}</div>)}
+      {cols.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:pctHeatColor(p&&p.pct)}} title={p?`${fmtDate(p.t)} · ${fmtSigned(p.pnl)}${p.pct!=null?` (${fmtPct(p.pct)})`:''}`:''}/>)}</div>)}
     </div></div>
     <HeatmapLegend/>
   </div>;
