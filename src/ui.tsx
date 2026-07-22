@@ -598,21 +598,48 @@ function Underwater({series,height=120}: any){
     <path d={line} fill="none" stroke="#EF4444" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
   </svg>;
 }
-// GitHub-style daily-PnL heatmap (columns = weeks, rows = Mon..Sun).
+// Shared cell-color scale for the two GitHub-style heatmaps below — intensity is |pct|
+// clamped at 5% (past which it just reads as "very green/red", same convention as the
+// Prices page's market heatmap) rather than scaled to the single largest value in the set,
+// so one outlier day/position doesn't wash out the color of every other cell.
+function pctHeatColor(pct){ if(pct==null) return '#f1f5f9'; const f=0.18+Math.min(Math.abs(pct)/5,1)*0.82; return pct>=0?`rgba(16,185,129,${f})`:`rgba(239,68,68,${f})`; }
+function HeatmapLegend(){
+  return <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-2"><span>loss</span><span className="w-3 h-3 rounded-sm" style={{background:'rgba(239,68,68,0.9)'}}/><span className="w-3 h-3 rounded-sm bg-slate-100"/><span className="w-3 h-3 rounded-sm" style={{background:'rgba(16,185,129,0.9)'}}/><span>gain</span></div>;
+}
+// GitHub-style daily-PnL heatmap (columns = weeks, rows = Mon..Sun). Intensity is the day's
+// PnL as a % of the equity it started the day with, not raw $ — a $500 day means very
+// different things at $10k vs $1M equity.
 function PnlCalendar({series}: any){
   if(!series||series.length<2) return <div className="text-slate-300 text-sm">No data</div>;
-  const pnls=[]; for(let i=1;i<series.length;i++) pnls.push({t:series[i].t, pnl:series[i].equity-series[i-1].equity});
-  const max=Math.max(1,...pnls.map(p=>Math.abs(p.pnl)));
-  const cellColor=(p)=>{ if(!p) return '#f1f5f9'; const f=0.18+Math.min(1,Math.abs(p.pnl)/max)*0.82; return (p.pnl>=0?`rgba(16,185,129,${f})`:`rgba(239,68,68,${f})`); };
+  const pnls=[]; for(let i=1;i<series.length;i++){ const prev=series[i-1].equity; const pnl=series[i].equity-prev; pnls.push({t:series[i].t, pnl, pct:prev?pnl/prev*100:null}); }
   const dow=t=>{ const d=new Date(t).getUTCDay(); return (d+6)%7; };
   const cols=[]; let col=new Array(dow(pnls[0].t)).fill(null);
   pnls.forEach(p=>{ col.push(p); if(col.length===7){ cols.push(col); col=[]; } });
   if(col.length){ while(col.length<7) col.push(null); cols.push(col); }
   return <div>
     <div className="overflow-x-auto pb-1"><div className="inline-flex gap-1">
-      {cols.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:cellColor(p)}} title={p?`${fmtDate(p.t)} · ${fmtSigned(p.pnl)}`:''}/>)}</div>)}
+      {cols.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:pctHeatColor(p&&p.pct)}} title={p?`${fmtDate(p.t)} · ${fmtSigned(p.pnl)} (${fmtPct(p.pct)})`:''}/>)}</div>)}
     </div></div>
-    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-2"><span>loss</span><span className="w-3 h-3 rounded-sm" style={{background:'rgba(239,68,68,0.9)'}}/><span className="w-3 h-3 rounded-sm bg-slate-100"/><span className="w-3 h-3 rounded-sm" style={{background:'rgba(16,185,129,0.9)'}}/><span>gain</span></div>
+    <HeatmapLegend/>
+  </div>;
+}
+// GitHub-style heatmap where each cell is one CLOSED position (not a day), colored by its
+// realized PnL % (return on the margin committed to that position). Chronological, oldest
+// first — same column-of-7 layout as the daily calendar, just not calendar-anchored since
+// positions don't map 1:1 to dates.
+function PositionsHeatmap({bots}: any){
+  const {t}=useApp();
+  const closed=(bots||[]).filter(b=>b.status==='closed').sort((a,b)=>new Date(a.lastChanged||a.lastSeen).getTime()-new Date(b.lastChanged||b.lastSeen).getTime());
+  if(!closed.length) return <div className="text-slate-300 text-sm">{t('activity.noClosedPositions')}</div>;
+  const withPct=closed.map(b=>{ const base=b.initialMargin||Math.abs(b.notional)||null; return {...b, pct: base?(b.unrealizedPnl/base*100):null}; });
+  const cols=[]; let col=[];
+  withPct.forEach(p=>{ col.push(p); if(col.length===7){ cols.push(col); col=[]; } });
+  if(col.length){ while(col.length<7) col.push(null); cols.push(col); }
+  return <div>
+    <div className="overflow-x-auto pb-1"><div className="inline-flex gap-1">
+      {cols.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:p?pctHeatColor(p.pct):'transparent'}} title={p?`${p.symbol} · ${p.side} · ${fmtSigned(p.unrealizedPnl)}${p.pct!=null?` (${fmtPct(p.pct)})`:''}`:''}/>)}</div>)}
+    </div></div>
+    <HeatmapLegend/>
   </div>;
 }
 
@@ -1109,5 +1136,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };

@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, fmtPct, clsPnl, fmtDate, Icon, Card, SectionTitle, Btn, AreaChart, Donut, Sparkline, FUND_PALETTE, useApp,
-  hasPerm, fundOf, sliceByPeriod, RiskPanel, Underwater, PnlCalendar, MarketTicker, PageHead, Denied, KpiCard, TrendBadge, EmptyState,
+  hasPerm, fundOf, sliceByPeriod, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, MarketTicker, PageHead, Denied, KpiCard, TrendBadge, EmptyState,
   SideTag, FundTag, OnboardingCard
 } from '../ui'
 
@@ -109,6 +109,9 @@ function ActivityPage(){
         <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.underwater')}</span>}>{t('activity.drawdown')}</SectionTitle><Underwater series={view}/></Card>
         <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.daily')}</span>}>{t('activity.pnlCalendar')}</SectionTitle><PnlCalendar series={view}/></Card>
       </div>}
+
+      {/* Closed-positions heatmap — same GitHub-style grid, but each cell is a position */}
+      <Card className="p-5 mb-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.realizedPct')}</span>}>{t('activity.positionsHeatmap')}</SectionTitle><PositionsHeatmap bots={bots}/></Card>
 
       {/* Open positions snapshot */}
       <Card className="overflow-hidden">
