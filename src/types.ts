@@ -5,7 +5,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 
 export type Role = 'admin' | 'operator' | 'viewer' | 'shareholder';
-export type Permission = string; // e.g. 'view_activity' | 'view_trades' | 'view_reports' | …
+export type Permission = string; // e.g. 'view_activity' | 'view_trades' | 'view_reports_daily' | …
 export type AuthProvider = 'password' | 'google' | 'otp';
 export type DataStatus = 'live' | 'partial' | 'offline';
 export type Side = string;

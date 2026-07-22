@@ -397,15 +397,15 @@ ok('weekly report groups bots under their fund with a colour emoji', /🟢 \*Gre
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'investor@example.com', role: 'shareholder' } });
 ok('shareholder created with external email, no password (auth_provider=otp)',
   r.status === 201 && r.body.user.authProvider === 'otp' && r.body.user.email === 'investor@example.com', r.body.user);
-ok('shareholder role grants Exchanges/Funds/Live/Status/Reports by default',
-  r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_exchanges', 'view_realtime', 'view_reports', 'view_trades']), r.body.user && r.body.user.permissions);
+ok('shareholder role grants Exchanges/Funds/Live/Status/monthly Reports by default',
+  r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_exchanges', 'view_realtime', 'view_reports_monthly', 'view_trades']), r.body.user && r.body.user.permissions);
 ok('an admin-created account with no photo gets a random style-2 preset avatar', /^\/avatars\/style2\/s2-\d{2}\.jpg$/.test(r.body.user.avatar || ''), r.body.user.avatar);
 r = await call(users, { method: 'PATCH', headers: authH, body: { id: r.body.user.id, avatar: '/avatars/style1/s1-05.jpg' } });
 ok('admin can set a user\'s avatar to a specific preset', r.status === 200 && r.body.user.avatar === '/avatars/style1/s1-05.jpg', r.body.user);
 
 // ── Rules (role -> permission mapping) — permissions are per-role, not per-user ──
 r = await call(users, { method: 'GET', headers: authH, query: { rules: '1' } });
-ok('non-admin cannot view rules -> handled by requireAdmin (sanity: admin CAN)', r.status === 200 && Array.isArray(r.body.permissions) && r.body.rolePerms.shareholder.includes('view_reports'), r.body);
+ok('non-admin cannot view rules -> handled by requireAdmin (sanity: admin CAN)', r.status === 200 && Array.isArray(r.body.permissions) && r.body.rolePerms.shareholder.includes('view_reports_monthly'), r.body);
 r = await call(users, { method: 'GET', query: { rules: '1' } });
 ok('unauthenticated cannot view rules -> 401', r.status === 401, r.status);
 r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { shareholder: ['view_activity'], viewer: ['view_activity', 'view_trades'], operator: ['view_activity', 'export_data', 'not_a_real_perm'] } } });
@@ -422,8 +422,21 @@ r = await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'rule
 ok('a role permission change takes effect immediately for existing users of that role (no per-user storage)',
   r.status === 200 && JSON.stringify(r.body.user.permissions) === JSON.stringify(['view_activity']), r.body.user && r.body.user.permissions);
 // restore defaults so later tests (and the reset section) aren't affected by this probe
-r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_logs', 'export_data'], viewer: ['view_activity', 'view_realtime', 'view_trades', 'view_logs'], shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports', 'view_exchanges'] } } });
+r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_logs', 'export_data'], viewer: ['view_activity', 'view_realtime', 'view_trades', 'view_logs'], shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_monthly', 'view_exchanges'] } } });
 ok('restore default role permissions', r.status === 200, r.body);
+
+// migration: a role customized (via the Rules page) before 'view_reports' was split into
+// daily/weekly/monthly must keep the same effective access (daily+monthly, the two kinds
+// that actually get archived) rather than silently losing it once the old key stops matching
+// any known permission — see the app_config.rolePerms backfill in schema.js's migrate().
+await db.query(`UPDATE app_config SET value = jsonb_set(value, '{shareholder}', '["view_activity","view_reports"]'::jsonb) WHERE key='rolePerms'`);
+await call(init, { method: 'POST' }); // re-runs migrate()
+r = await call(users, { method: 'GET', headers: authH, query: { rules: '1' } });
+ok('legacy "view_reports" in a saved role config is migrated to daily+monthly, not dropped',
+  r.body.rolePerms.shareholder.includes('view_reports_daily') && r.body.rolePerms.shareholder.includes('view_reports_monthly') && !r.body.rolePerms.shareholder.includes('view_reports'),
+  r.body.rolePerms.shareholder);
+r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_monthly', 'view_exchanges'] } } });
+ok('restore shareholder defaults after the migration probe', r.status === 200, r.body);
 
 // the shareholder signs in via an emailed 6-digit code: request -> extract from the mocked
 // Resend send -> verify. shH (this session) is reused below for the WhatsApp opt-in test.
@@ -513,6 +526,17 @@ r = await call(snapshots, { method: 'POST', headers: opH, body: { action: 'gener
 ok('non-admin cannot generate a report -> 403', r.status === 403, r.status);
 r = await call(snapshots, { method: 'GET', headers: opH, query: { reports: 'list' } });
 ok('any authenticated user can list the report archive', r.status === 200 && Array.isArray(r.body.reports), r.status);
+// reports rights are split by periodicity (daily/weekly/monthly) — operator has none of the
+// three by default, so the archive is visible (200) but filtered down to nothing
+ok('operator sees an empty archive with no view_reports_* permission', (r.body.reports || []).length === 0, r.body.reports);
+r = await call(snapshots, { method: 'GET', headers: opH, query: { report: String(genReport.id) } });
+ok('operator cannot download a report kind they lack permission for -> 403', r.status === 403, r.status);
+await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_logs', 'export_data', 'view_reports_daily'] } } });
+r = await call(snapshots, { method: 'GET', headers: opH, query: { reports: 'list' } });
+ok('granting view_reports_daily surfaces daily reports but not monthly', r.body.reports.length > 0 && r.body.reports.every(x => x.kind === 'daily'), r.body.reports.map(x => x.kind));
+r = await call(snapshots, { method: 'GET', headers: opH, query: { report: String(genReport.id) } });
+ok('still cannot download the monthly report without view_reports_monthly -> 403', r.status === 403, r.status);
+await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_logs', 'export_data'] } } }); // restore
 r = await call(exchanges, { method: 'GET', headers: opH });
 ok('operator has no view_exchanges by default -> 403', r.status === 403, r.status);
 

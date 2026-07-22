@@ -1,7 +1,9 @@
 // Recorded daily equity history (written by the daily cron) + report archive.
 //   GET                  -> equity snapshots (any auth)
-//   GET ?reports=list    -> archived report metadata (any auth)
-//   GET ?report=<id>     -> a single archived report's PDF (base64) (any auth)
+//   GET ?reports=list    -> archived report metadata, filtered to kinds the caller's role
+//                           can view (view_reports_daily/weekly/monthly — see rolePerms.js)
+//   GET ?report=<id>     -> a single archived report's PDF (base64); 403 if the caller's
+//                           role lacks view_reports_<kind> for that report's kind
 //   POST {action:'generateReport'} -> build + store a monthly report now (admin), not_verified
 //   POST {action:'verifyReport', id} -> mark verified (admin); if the report's kind is
 //     shareholder-facing (monthly), THIS is what notifies shareholders — not generation.
@@ -11,6 +13,7 @@ import { riskMetrics } from './_lib/metrics.js';
 import { buildPortfolio } from './_lib/portfolio.js';
 import { buildMonthlyPdf } from './_lib/report.js';
 import { notify, REPORT_AVAILABLE } from './_lib/notify.js';
+import { permsForRole } from './_lib/rolePerms.js';
 
 // Which report kinds are ever shown/sent to shareholders — only these need the shareholder
 // "new report available" notice fired on verification. Daily reports are internal-only.
@@ -20,10 +23,14 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const a = requireAuth(req, res); if (!a) return;
+      const isAdmin = a.role === 'admin';
+      const canSeeKind = async (kind) => isAdmin || (await permsForRole(a.role)).includes('view_reports_' + kind);
 
       if (req.query?.reports === 'list') {
         const { rows } = await query('SELECT id,kind,period_label,equity,pnl,status,verified_by,verified_at,created_at FROM reports ORDER BY created_at DESC LIMIT 200');
-        return res.status(200).json({ reports: rows.map(r => ({
+        const rolePerms = isAdmin ? null : await permsForRole(a.role);
+        const allowed = rows.filter(r => isAdmin || rolePerms.includes('view_reports_' + r.kind));
+        return res.status(200).json({ reports: allowed.map(r => ({
           id: Number(r.id), kind: r.kind, periodLabel: r.period_label,
           equity: Number(r.equity), pnl: Number(r.pnl), createdAt: r.created_at,
           status: r.status || 'verified', verifiedBy: r.verified_by || null, verifiedAt: r.verified_at || null,
@@ -32,6 +39,7 @@ export default async function handler(req, res) {
       if (req.query?.report) {
         const { rows } = await query('SELECT pdf_base64,period_label,kind FROM reports WHERE id=$1', [req.query.report]);
         if (!rows.length) return res.status(404).json({ error: 'report not found' });
+        if (!(await canSeeKind(rows[0].kind))) return res.status(403).json({ error: 'forbidden' });
         return res.status(200).json({ pdfBase64: rows[0].pdf_base64, filename: `lno-${rows[0].kind}-report-${rows[0].period_label}.pdf` });
       }
 

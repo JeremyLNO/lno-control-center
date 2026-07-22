@@ -1,6 +1,7 @@
 // Shared backend constants (mirror of the frontend's defaults, server-authoritative)
 export const PERMISSIONS = [
-  'view_activity','view_realtime','view_trades','view_logs','view_reports','view_exchanges','export_data',
+  'view_activity','view_realtime','view_trades','view_logs',
+  'view_reports_daily','view_reports_weekly','view_reports_monthly','view_exchanges','export_data',
   'manage_users','manage_exchanges','manage_whatsapp','manage_funds',
 ];
 export const ROLE_PERMS = {
@@ -9,8 +10,9 @@ export const ROLE_PERMS = {
   viewer: ['view_activity','view_realtime','view_trades','view_logs'],
   // shareholder default: Exchanges (view_exchanges — wallets only, no keys), Funds
   // (view_trades — read-only), Live (view_realtime), System Status + dashboard (view_activity),
-  // plus read-only reports
-  shareholder: ['view_activity','view_realtime','view_trades','view_reports','view_exchanges'],
+  // plus monthly reports only — the only kind ever sent to shareholders (SHAREHOLDER_KINDS
+  // in api/snapshots.js); daily/weekly stay internal-only by default.
+  shareholder: ['view_activity','view_realtime','view_trades','view_reports_monthly','view_exchanges'],
 };
 export const FUND_PALETTE = ['#C9A24D','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444','#EC4899','#6366F1'];
 // Preset avatar gallery (public/avatars/style{1,2}/s{1,2}-01..30.jpg), grouped by style —

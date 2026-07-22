@@ -14,22 +14,26 @@ function AdminReports(){
   const [reports,setReports]=useState(null); const [busy,setBusy]=useState(false); const [dl,setDl]=useState(null); const [verifying,setVerifying]=useState(null);
   const [kindFilter,setKindFilter]=useState('all');
   const [statusFilter,setStatusFilter]=useState(()=>route.params?.status==='not_verified'?'not_verified':route.params?.status==='verified'?'verified':'all');
+  const REPORT_KINDS=['daily','weekly','monthly'];
+  const allowedKinds=REPORT_KINDS.filter(k=>hasPerm(user,'view_reports_'+k));
+  const canView=allowedKinds.length>0;
   const load=()=>api('snapshots?reports=list').then(r=>setReports(r.reports||[])).catch(()=>setReports([]));
-  useEffect(()=>{ if(hasPerm(user,'view_reports')) load(); },[]);
-  if(!hasPerm(user,'view_reports')) return <Denied/>;
+  useEffect(()=>{ if(canView) load(); },[]);
+  if(!canView) return <Denied/>;
   async function generate(){ setBusy(true); try{ await api('snapshots',{method:'POST',body:{action:'generateReport'}}); toast.success(t('reports.generatedArchived')); load(); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
   async function download(rep){ setDl(rep.id); try{ const r=await api('snapshots?report='+rep.id); downloadBlob(b64ToBlob(r.pdfBase64), r.filename||('lno-report-'+rep.periodLabel+'.pdf')); toast.success(t('reports.downloaded')); }catch(e){ toast.error(e.message); } finally{ setDl(null); } }
   async function verify(rep){ setVerifying(rep.id); try{ await api('snapshots',{method:'POST',body:{action:'verifyReport',id:rep.id}}); toast.success(t('reports.verified')); load(); }catch(e){ toast.error(e.message); } finally{ setVerifying(null); } }
-  const filtered=(reports||[]).filter(r=>(kindFilter==='all'||r.kind===kindFilter)&&(statusFilter==='all'||r.status===statusFilter));
+  const visible=(reports||[]).filter(r=>allowedKinds.includes(r.kind));
+  const filtered=visible.filter(r=>(kindFilter==='all'||r.kind===kindFilter)&&(statusFilter==='all'||r.status===statusFilter));
   return <div>
     <PageHead title={t('reports.title')} subtitle={isAdmin?t('reports.subtitleAdmin'):t('reports.subtitleOther')}
       actions={isAdmin&&<Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?t('reports.generating'):t('reports.generateNow')}</Btn>}/>
-    {reports&&reports.length>0&&<div className="flex items-center gap-2 mb-3">
-      <Select value={kindFilter} onChange={setKindFilter} className="w-36" options={[{value:'all',label:t('reports.allKinds')},{value:'daily',label:t('reports.kindDaily')},{value:'monthly',label:t('reports.kindMonthly')}]}/>
+    {visible.length>0&&<div className="flex items-center gap-2 mb-3">
+      <Select value={kindFilter} onChange={setKindFilter} className="w-36" options={[{value:'all',label:t('reports.allKinds')},...allowedKinds.map(k=>({value:k,label:t('reports.kind'+k.charAt(0).toUpperCase()+k.slice(1))}))]}/>
       <Select value={statusFilter} onChange={setStatusFilter} className="w-40" options={[{value:'all',label:t('reports.allStatuses')},{value:'verified',label:t('reports.statusVerified')},{value:'not_verified',label:t('reports.statusNotVerified')}]}/>
     </div>}
     {reports==null? <Card className="p-10 text-center text-slate-400 text-sm"><Loader/></Card>
-    : reports.length===0? <Card className="p-10 text-center text-slate-400 text-sm"><Icon name="filetext" className="w-10 h-10 mx-auto text-slate-200 mb-2"/>{isAdmin?t('reports.noReportsAdmin'):t('reports.noReportsOther')}</Card>
+    : visible.length===0? <Card className="p-10 text-center text-slate-400 text-sm"><Icon name="filetext" className="w-10 h-10 mx-auto text-slate-200 mb-2"/>{isAdmin?t('reports.noReportsAdmin'):t('reports.noReportsOther')}</Card>
     : filtered.length===0? <Card className="p-10 text-center text-slate-400 text-sm">{t('reports.noReportsMatch')}</Card>
     : <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
         <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">

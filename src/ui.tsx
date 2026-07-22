@@ -22,7 +22,9 @@ const PERMISSIONS = [
   ['view_realtime','View Real-Time'],
   ['view_trades','View Trades'],
   ['view_logs','View Logs'],
-  ['view_reports','View reports'],
+  ['view_reports_daily','View daily reports'],
+  ['view_reports_weekly','View weekly reports'],
+  ['view_reports_monthly','View monthly reports'],
   ['view_exchanges','View exchanges'],
   ['export_data','Export data'],
   ['manage_users','Manage users'],
@@ -36,8 +38,9 @@ const ROLE_PERMS = {
   operator: ['view_activity','view_realtime','view_trades','view_logs','export_data'],
   viewer: ['view_activity','view_realtime','view_trades','view_logs'],
   // shareholder default: Exchanges (wallets only, no keys), Funds (read-only), Live, System
-  // Status + dashboard, and read-only reports
-  shareholder: ['view_activity','view_realtime','view_trades','view_reports','view_exchanges'],
+  // Status + dashboard, and monthly reports only — the only kind ever sent to shareholders
+  // (see SHAREHOLDER_KINDS in api/snapshots.js); daily/weekly are internal-only by default.
+  shareholder: ['view_activity','view_realtime','view_trades','view_reports_monthly','view_exchanges'],
 };
 const ROLE_OPTIONS = [
   {value:'admin',label:'Admin'},
@@ -561,7 +564,7 @@ function Donut({segments,size=120,thickness=14,center,arc=360,startAngle=-90,tra
 const App = createContext<AppContextValue | null>(null);
 const useApp = (): AppContextValue => useContext(App) as AppContextValue;
 
-function hasPerm(user: any, perm: string){ if(!user)return false; if(user.role==='admin')return true; return (user.permissions||[]).includes(perm); }
+function hasPerm(user: any, perm: string|string[]){ if(!user)return false; if(user.role==='admin')return true; const perms=user.permissions||[]; return Array.isArray(perm)? perm.some(p=>perms.includes(p)) : perms.includes(perm); }
 
 // helper: the fund a bot is assigned to (or undefined). Bots carry fundId; funds carry id+color.
 function fundOf(funds,bot){ return bot&&bot.fundId? funds.find(f=>f.id===bot.fundId) : undefined; }
@@ -912,11 +915,11 @@ const MAIN_NAV=[
   ['briefcase','nav.positions','/trades','nav.positions','view_trades'],
   ['trendup','nav.prices','/prices','nav.prices','view_activity'],
 ];
-const TOOLS_NAV=[
+const TOOLS_NAV: Array<[string,string,string,string,string|string[]]>=[
   ['layers','nav.funds','/funds','nav.funds','view_trades'],
   ['link','nav.exchanges','/admin/exchanges','nav.exchanges','view_exchanges'],
   ['database','nav.status','/status','nav.status.short','view_activity'],
-  ['filetext','nav.reports','/admin/reports','nav.reports','view_reports'],
+  ['filetext','nav.reports','/admin/reports','nav.reports',['view_reports_daily','view_reports_weekly','view_reports_monthly']],
 ];
 const ADMIN_NAV=[
   ['list','nav.bots','/admin/bots'],

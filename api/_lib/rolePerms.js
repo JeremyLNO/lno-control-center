@@ -30,6 +30,10 @@ export async function getRolePerms() {
   return out;
 }
 
+// Bust the cache after a write that bypasses setRolePerms() — e.g. schema.js's one-time
+// migrate() backfill, which writes app_config.rolePerms directly with a raw query().
+export function invalidateRolePermsCache() { _cache = null; }
+
 export async function setRolePerms(next) {
   const clean = {};
   for (const role of EDITABLE_ROLES) {

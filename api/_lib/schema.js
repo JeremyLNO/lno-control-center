@@ -2,6 +2,7 @@
 import { query } from './db.js';
 import { hashPassword } from './auth.js';
 import { ROLE_PERMS, DEFAULT_USERS, DEFAULT_OPENWA } from './constants.js';
+import { invalidateRolePermsCache } from './rolePerms.js';
 
 // migrate() can be called from several concurrent requests (e.g. My Equity fires two API
 // calls in parallel, each of which self-heals the schema). On a real multi-connection
@@ -263,6 +264,32 @@ export async function migrate() {
   // (auth_provider='password'); they now sign in with an emailed code instead. Re-point
   // any account still on the old provider — idempotent, becomes a no-op after the first run.
   await ddl(`UPDATE users SET auth_provider='otp' WHERE role='shareholder' AND auth_provider='password'`);
+  // One-time backfill: the single 'view_reports' permission was split into
+  // view_reports_daily/weekly/monthly (Reports page rights are now per-periodicity). Any role
+  // whose ADMIN-EDITED rolePerms (Rules page) still carries the old key gets the equivalent
+  // daily+monthly access it had before (the two kinds actually archived) — otherwise their
+  // customization would just silently vanish once rolePerms.js stops recognizing 'view_reports'
+  // as a valid permission. Idempotent: a no-op once no role's saved perms mention the old key.
+  try {
+    const { rows } = await query(`SELECT value FROM app_config WHERE key='rolePerms'`);
+    const stored = rows[0]?.value;
+    if (stored && typeof stored === 'object') {
+      let changed = false;
+      const next = {};
+      for (const [role, perms] of Object.entries(stored)) {
+        if (Array.isArray(perms) && perms.includes('view_reports')) {
+          changed = true;
+          next[role] = [...new Set([...perms.filter(p => p !== 'view_reports'), 'view_reports_daily', 'view_reports_monthly'])];
+        } else {
+          next[role] = perms;
+        }
+      }
+      if (changed) {
+        await query(`UPDATE app_config SET value=$1::jsonb WHERE key='rolePerms'`, [JSON.stringify(next)]);
+        invalidateRolePermsCache();
+      }
+    }
+  } catch (e) { /* app_config/rolePerms not present yet on a fresh install — nothing to migrate */ }
 }
 
 export async function seedIfEmpty() {
