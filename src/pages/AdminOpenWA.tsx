@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   WA_MSG_TYPES, WA_ROLE_COLS, fmtDT, api, toast, Icon, Card, SectionTitle, Btn, Toggle, Select, Field,
-  Input, useApp, Login, PageHead, Denied
+  Input, useApp, Login, PageHead, Denied, Loader
 } from '../ui'
 
 /* ============================================================
@@ -112,7 +112,7 @@ function AdminOpenWA(){
         <div className="relative flex-1 min-w-[200px]"><Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={logQ} onChange={e=>setLogQ(e.target.value)} placeholder={t('wa.filterPlaceholder')} className="w-full bg-slate-100 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"/></div>
         <Select value={logStatus} onChange={setLogStatus} className="w-32" options={[{value:'all',label:t('wa.statusAll')},{value:'ok',label:t('wa.statusSent')},{value:'fail',label:t('wa.statusFailed')}]}/>
       </div>
-      {log===null? <div className="text-sm text-slate-400">{t('common.loading')}</div>
+      {log===null? <div className="text-sm text-slate-400"><Loader/></div>
         : filteredLog.length===0? <div className="text-sm text-slate-400 py-3">{log.length===0?t('wa.noMessagesSent'):t('wa.noMessagesMatch')}</div>
         : <div className="overflow-x-auto"><table className="w-full text-sm">
             <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500 text-left">

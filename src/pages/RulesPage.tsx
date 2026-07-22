@@ -1,6 +1,6 @@
 import React from 'react'
 const { useState, useEffect } = React;
-import { PERMISSIONS, api, toast, Icon, Card, Btn, useApp, PageHead, Denied } from '../ui'
+import { PERMISSIONS, api, toast, Icon, Card, Btn, useApp, PageHead, Denied, Loader } from '../ui'
 
 /* ============================================================
    ADMIN — RULES (role -> permission mapping)
@@ -16,7 +16,7 @@ function RulesPage(){
   const [dirty,setDirty]=useState(false);
   useEffect(()=>{ if(user.role!=='admin') return; api('users?rules=1').then(r=>setRolePerms(r.rolePerms)).catch(()=>{}); },[user.role]);
   if(user.role!=='admin') return <Denied/>;
-  if(!rolePerms) return <div className="text-sm text-slate-400 py-10 text-center">{t('common.loading')}</div>;
+  if(!rolePerms) return <div className="text-sm text-slate-400 py-10 text-center"><Loader/></div>;
   function toggle(role,perm){
     setRolePerms(rp=>{ const cur=rp[role]||[]; const next=cur.includes(perm)?cur.filter(p=>p!==perm):[...cur,perm]; return {...rp,[role]:next}; });
     setDirty(true);

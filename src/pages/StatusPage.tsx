@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtPctPlain, fmtSigned, fmtAgo, fmtDur, api, toast, Icon, Card, SectionTitle, Btn, Confirm, useApp, hasPerm,
-  dormantInfo, LiveBadge, PageHead, Denied
+  dormantInfo, LiveBadge, PageHead, Denied, Loader
 } from '../ui'
 
 function StatusPage(){
@@ -78,7 +78,7 @@ function StatusPage(){
       <Card className="p-5">
         <SectionTitle right={<span className="text-[11px] text-slate-400">{live&&live.syncedAt?t('live.syncedAgo',{ago:fmtAgo(live.syncedAt)}):t('sysstatus.neverSynced')}</span>}>{t('sysstatus.exchangeConnections')}</SectionTitle>
         {user.role!=='admin'? <div className="text-sm text-slate-400">{connected>0?t(connected===1?'sysstatus.connectedCountDotOne':'sysstatus.connectedCountDotMany',{n:connected}):t('sysstatus.noExchangeConnectedDot')}</div>
-        : exchanges==null? <div className="text-sm text-slate-400">{t('common.loading')}</div>
+        : exchanges==null? <div className="text-sm text-slate-400"><Loader/></div>
         : exchanges.length===0? <div className="text-sm text-slate-400">{t('sysstatus.noExchangeConnectionsYet')}</div>
         : <div className="space-y-2">
           {exchanges.map(e=><div key={e.id} className="flex items-center justify-between text-sm">

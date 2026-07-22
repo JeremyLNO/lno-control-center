@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, fmtPct, fmtDate, fmtSeniority, clsPnl, initialsOf, api, toast, Icon, Card, SectionTitle,
-  StatusPill, KpiCard, Select, Btn, useApp, PageHead, Denied, AreaChart, SortHeader, sortRows
+  StatusPill, KpiCard, Select, Btn, useApp, PageHead, Denied, AreaChart, SortHeader, sortRows, Loader
 } from '../ui'
 
 const EMP_GETTERS = {
@@ -67,7 +67,7 @@ function MyEquityPage(){
     <PageHead title={t('equity.title')} subtitle={t('equity.subtitle')}/>
 
     {dataErr? <Card className="p-8 text-center text-danger text-sm">{t('equity.loadErr',{err:dataErr})}</Card>
-    : data===null? <Card className="p-8 text-center text-slate-400">{t('common.loading')}</Card>
+    : data===null? <Card className="p-8 text-center text-slate-400"><Loader/></Card>
     : !mine? <Card className="p-8 text-center text-slate-400">{t('equity.notSetUp')}</Card>
     : <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -107,7 +107,7 @@ function MyEquityPage(){
         {summary&&<div className="relative w-56"><Icon name="search" className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/><input value={empQ} onChange={e=>setEmpQ(e.target.value)} placeholder={t('equity.searchEmployee')} className="w-full bg-slate-100 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"/></div>}
       </div>
       {summaryErr? <div className="text-sm text-danger">{t('equity.summaryLoadErr',{err:summaryErr})}</div>
-      : summary===null? <div className="text-sm text-slate-400">{t('common.loading')}</div>
+      : summary===null? <div className="text-sm text-slate-400"><Loader/></div>
       : <>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <div className="bg-slate-50 rounded-lg p-3"><div className="text-[11px] text-slate-500">{t('equity.totalValue')}</div><div className="text-lg font-bold text-navy mt-0.5">{fmtUSD(summary.value)}</div></div>

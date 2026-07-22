@@ -647,6 +647,11 @@ function LoadingScreen(){
     </div>
   </div>;
 }
+// Shared inline loader — every page/card in the app uses this same spinner (instead of a mix
+// of plain "Loading…" text) so a loading state always reads the same way anywhere in the app.
+function Loader({size='26',className='py-6'}: any){
+  return <div className={`flex items-center justify-center ${className}`}><Quantum size={size} speed="1.9" color="#C9A24D"/></div>;
+}
 
 /* ============================================================
    LOGIN
@@ -1103,5 +1108,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };

@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, fmtNum, fmtPctPlain, clsPnl, fmtAgo, api, toast, Icon, Card, SectionTitle, Btn, StatusPill,
-  Select, Confirm, useApp, fundOf, attrStats, PageHead, Denied, EmptyState, SideTag
+  Select, Confirm, useApp, fundOf, attrStats, PageHead, Denied, EmptyState, SideTag, Loader
 } from '../ui'
 
 /* ============================================================
@@ -73,7 +73,7 @@ function BotsPage(){
         trades; a currently-open position's unrealized PnL isn't a win or loss yet) */}
     <Card className="overflow-hidden mt-5">
       <div className="p-5 pb-0"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('bots.fromRealizedPnl')}</span>}>{t('bots.perfByFund')}</SectionTitle></div>
-      {attr===null? <div className="p-5 text-sm text-slate-400">{t('common.loading')}</div>
+      {attr===null? <div className="p-5 text-sm text-slate-400"><Loader/></div>
       : attr.perFund.length===0? <div className="p-5 text-sm text-slate-400">{t('bots.noClosedTrades')}</div>
       : <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
@@ -95,7 +95,7 @@ function BotsPage(){
 
     <Card className="overflow-hidden mt-5">
       <div className="p-5 pb-0"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('bots.fromRealizedPnl')}</span>}>{t('bots.perfByBot')}</SectionTitle></div>
-      {attr===null? <div className="p-5 text-sm text-slate-400">{t('common.loading')}</div>
+      {attr===null? <div className="p-5 text-sm text-slate-400"><Loader/></div>
       : attr.perSymbol.length===0? <div className="p-5 text-sm text-slate-400">{t('bots.noClosedTrades')}</div>
       : <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
@@ -125,7 +125,7 @@ function BotsPage(){
         Shows the "cost" side that a profitable-looking strategy can still bleed through. */}
     <Card className="overflow-hidden mt-5">
       <div className="p-5 pb-0"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('bots.fundingCommissions')}</span>}>{t('bots.fundingFeeDragByFund')}</SectionTitle></div>
-      {costs===null? <div className="p-5 text-sm text-slate-400">{t('common.loading')}</div>
+      {costs===null? <div className="p-5 text-sm text-slate-400"><Loader/></div>
       : costs.perFund.length===0? <div className="p-5 text-sm text-slate-400">{t('bots.noFundingHistory')}</div>
       : <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
@@ -145,7 +145,7 @@ function BotsPage(){
 
     <Card className="overflow-hidden mt-5">
       <div className="p-5 pb-0"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('bots.fundingCommissions')}</span>}>{t('bots.fundingFeeDragByBot')}</SectionTitle></div>
-      {costs===null? <div className="p-5 text-sm text-slate-400">{t('common.loading')}</div>
+      {costs===null? <div className="p-5 text-sm text-slate-400"><Loader/></div>
       : costs.perSymbol.length===0? <div className="p-5 text-sm text-slate-400">{t('bots.noFundingHistory')}</div>
       : <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">

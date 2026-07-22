@@ -1,10 +1,8 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtPrice, fmtAgo, baseOf, PREF, Card, SectionTitle, KpiCard, Donut, useApp, hasPerm, PageHead, Denied
+  fmtPrice, fmtAgo, baseOf, PREF, Card, SectionTitle, KpiCard, Donut, useApp, hasPerm, PageHead, Denied, Loader
 } from '../ui'
-import { Quantum } from 'ldrs/react'
-import 'ldrs/react/Quantum.css'
 
 /* ============================================================
    SYSTEM STATUS
@@ -117,10 +115,7 @@ function PricesPage(){
       {order.length>0&&<button onClick={()=>{setOrder([]);PREF.set('prices_order',[]);}} className="text-xs text-slate-400 hover:text-navy">{t('prices.resetOrder')}</button>}
       {ts&&<span className="text-xs text-slate-400">{t('prices.updatedAgo',{ago:fmtAgo(ts)})}</span>}
     </div>}/>
-    {rows==null? <Card className="p-10 text-center text-slate-400 text-sm">
-        <div className="flex justify-center mb-2"><Quantum size="45" speed="1.9" color="#C9A24D"/></div>
-        {t('prices.loading')}
-      </Card>
+    {rows==null? <Card className="p-10"><Loader/></Card>
      : err&&!rows.length? <Card className="p-10 text-center text-slate-400 text-sm">{t('prices.couldNotLoad')}</Card>
      : <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
@@ -136,7 +131,7 @@ function PricesPage(){
             <Donut size={100} thickness={11} segments={[{value:fg.value,color:fgColor(fg.value)},{value:100-fg.value,color:'#EEF0F3'}]}
               center={<div className="text-lg font-bold text-navy tnum">{fg.value}</div>}/>
             <div><div className="text-xs text-slate-400">{t('prices.fearGreed')}</div><div className="text-base font-semibold" style={{color:fgColor(fg.value)}}>{fg.label}</div></div>
-          </div> : <div className="text-sm text-slate-400 w-[220px]">{t('common.loading')}</div>}
+          </div> : <div className="text-sm text-slate-400 w-[220px]"><Loader/></div>}
           <div className="flex gap-8">
             <div><div className="text-xs text-slate-400">{t('prices.btcDominance')}</div><div className="text-2xl font-bold text-navy tnum">{dom?dom.btc.toFixed(1)+'%':'—'}</div></div>
             <div><div className="text-xs text-slate-400">{t('prices.ethDominance')}</div><div className="text-2xl font-bold text-navy tnum">{dom?dom.eth.toFixed(1)+'%':'—'}</div></div>

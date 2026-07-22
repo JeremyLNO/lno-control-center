@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, clsPnl, fmtDT, downloadBlob, b64ToBlob, api, toast, Icon, Card, Btn, useApp,
-  hasPerm, PageHead, Denied
+  hasPerm, PageHead, Denied, Loader
 } from '../ui'
 
 /* ============================================================
@@ -20,7 +20,7 @@ function AdminReports(){
   return <div>
     <PageHead title={t('reports.title')} subtitle={isAdmin?t('reports.subtitleAdmin'):t('reports.subtitleOther')}
       actions={isAdmin&&<Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?t('reports.generating'):t('reports.generateNow')}</Btn>}/>
-    {reports==null? <Card className="p-10 text-center text-slate-400 text-sm">{t('common.loading')}</Card>
+    {reports==null? <Card className="p-10 text-center text-slate-400 text-sm"><Loader/></Card>
     : reports.length===0? <Card className="p-10 text-center text-slate-400 text-sm"><Icon name="filetext" className="w-10 h-10 mx-auto text-slate-200 mb-2"/>{isAdmin?t('reports.noReportsAdmin'):t('reports.noReportsOther')}</Card>
     : <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
         <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">

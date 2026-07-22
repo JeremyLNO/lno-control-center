@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, fmtNum, fmtPctPlain, clsPnl, fmtPrice, fmtAgo, fmtTime, api, Icon, Card, SectionTitle, Badge, Select, CandleChart, Donut, useApp,
-  hasPerm, fundOf, liqInfo, dormantInfo, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag
+  hasPerm, fundOf, liqInfo, dormantInfo, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag, Loader
 } from '../ui'
 
 const CHART_INTERVALS=['1m','5m','15m','1h','4h','1d'];
@@ -53,7 +53,7 @@ function LiveChart({symbol,interval}: any){
     return ()=>{ stopped=true; if(ws){ try{ ws.close(); }catch(e){} } if(reconnectTimer) clearTimeout(reconnectTimer); if(restIv) clearInterval(restIv); if(watchdog) clearTimeout(watchdog); };
   },[symbol,interval]);
 
-  if(candles==null) return <div className="h-[320px] grid place-items-center text-sm text-slate-400">{t('common.loading')}</div>;
+  if(candles==null) return <div className="h-[320px] grid place-items-center text-sm text-slate-400"><Loader/></div>;
   if(err&&!candles.length) return <div className="h-[320px] grid place-items-center text-sm text-slate-400">{t('prices.couldNotLoad')}</div>;
   const last=candles[candles.length-1], first=candles[0];
   const chgPct=first&&first.o? (last.c-first.o)/first.o*100 : 0;
@@ -147,7 +147,7 @@ function RealtimePage(){
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
       <Card className="p-5">
         <SectionTitle>{t('live.recentFills')}</SectionTitle>
-        {fills==null? <div className="text-sm text-slate-400 py-4 text-center">{t('common.loading')}</div>
+        {fills==null? <div className="text-sm text-slate-400 py-4 text-center"><Loader/></div>
         : fills.length===0? <div className="text-sm text-slate-400 py-4 text-center">{t('live.noFills')}</div>
         : <div className="space-y-2 max-h-72 overflow-y-auto">
           {fills.slice(0,15).map((f,i)=><div key={i} className="flex items-center justify-between text-xs">
@@ -161,7 +161,7 @@ function RealtimePage(){
       </Card>
       <Card className="p-5">
         <SectionTitle right={fills&&fills.length>0&&<span className="flex items-center gap-1.5 text-xs text-success"><span className="w-1.5 h-1.5 rounded-full bg-success pulse-dot"/>{t('live.streaming')}</span>}>{t('live.tradeStream')}</SectionTitle>
-        {fills==null? <div className="text-sm text-slate-400 py-4 text-center">{t('common.loading')}</div>
+        {fills==null? <div className="text-sm text-slate-400 py-4 text-center"><Loader/></div>
         : fills.length===0? <div className="text-sm text-slate-400 py-4 text-center">{t('live.noFills')}</div>
         : <div className="space-y-1.5 max-h-72 overflow-y-auto font-mono text-xs">
           {fills.slice(0,20).map((f,i)=><div key={i} className={`flex items-center justify-between px-2 py-1 rounded ${f.side==='BUY'?'bg-success/5':'bg-danger/5'}`}>
@@ -175,7 +175,7 @@ function RealtimePage(){
       <Card className="p-5">
         <SectionTitle>{t('live.orderFlow')}</SectionTitle>
         {(()=>{
-          if(fills==null) return <div className="text-sm text-slate-400 py-4 text-center">{t('common.loading')}</div>;
+          if(fills==null) return <div className="text-sm text-slate-400 py-4 text-center"><Loader/></div>;
           const buyQty=fills.filter(f=>f.side==='BUY').reduce((s,f)=>s+f.qty,0);
           const sellQty=fills.filter(f=>f.side==='SELL').reduce((s,f)=>s+f.qty,0);
           const total=buyQty+sellQty;
@@ -258,7 +258,7 @@ function RealtimePage(){
       </Card>
       <Card className="p-5">
         <SectionTitle right={<span className="text-[11px] text-slate-400">{t('live.latestAlerts')}</span>}>{t('live.recentIncidents')}</SectionTitle>
-        {incidents===null? <div className="text-sm text-slate-400">{t('common.loading')}</div>
+        {incidents===null? <div className="text-sm text-slate-400"><Loader/></div>
          : incidents.length===0? <div className="text-sm text-slate-400 py-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-success"/>{t('live.noIncidents')}</div>
          : <div className="space-y-2.5">
             {incidents.map(a=><div key={a.id} className="flex items-start gap-2.5 text-sm">
@@ -272,7 +272,7 @@ function RealtimePage(){
 
     {user.role==='admin'&&<Card className="p-5 mt-5">
       <SectionTitle>{t('live.exchangeConnectivity')}</SectionTitle>
-      {exchanges==null? <div className="text-sm text-slate-400">{t('common.loading')}</div>
+      {exchanges==null? <div className="text-sm text-slate-400"><Loader/></div>
       : exchanges.length===0? <div className="text-sm text-slate-400">{t('sysstatus.noExchangeConnectionsYet')}</div>
       : <div className="space-y-2.5">
         {exchanges.map(e=><div key={e.id} className="flex items-center justify-between text-sm">

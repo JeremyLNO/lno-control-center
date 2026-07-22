@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
 import {
   ROLE_OPTIONS, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge,
   StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, useApp, PageHead, Denied, PW_RULES,
-  passwordOk
+  passwordOk, Loader
 } from '../ui'
 
 /* ============================================================
@@ -14,7 +14,7 @@ function UserLoginHistory({userId}: any){
   const {t}=useApp();
   const [rows,setRows]=useState(null);
   useEffect(()=>{ let alive=true; api('users?logins='+encodeURIComponent(userId)).then(r=>{ if(alive)setRows(r.logins||[]); }).catch(()=>{ if(alive)setRows([]); }); return ()=>{alive=false;}; },[userId]);
-  if(rows===null) return <div className="text-xs text-slate-400">{t('common.loading')}</div>;
+  if(rows===null) return <div className="text-xs text-slate-400"><Loader/></div>;
   if(!rows.length) return <div className="text-xs text-slate-400">{t('users.noSignIns')}</div>;
   return <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
     {rows.map((l,i)=><div key={i} className="flex items-center justify-between gap-3 text-xs">
