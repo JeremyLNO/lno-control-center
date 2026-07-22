@@ -101,7 +101,12 @@ export default async function handler(req, res) {
       const pctOver = (d) => { const base = eqv[Math.max(0, eqv.length - 1 - d)] || 0; return base ? (pnlOver(d) / base) * 100 : 0; };
 
       if ((cfg.dailyReport ?? true) && cfg.enabled) {
-        sent.push({ type: 'report', ...(await notify((lang) => reportText(lang, 'daily', port, { pnl: port.pnlDay, pct: port.pnlPct, labelKey: 'periodDay' }), { type: 'daily' })) });
+        // pnlOver(1)/pctOver(1), NOT port.pnlDay/pnlPct: the latter compares against
+        // whatever equity_snapshots row is "most recent," but that row gets continuously
+        // overwritten intraday by the every-5-minute alerts-only cron — so port.pnlDay can
+        // end up reflecting the last few minutes rather than a full day. pnlOver(1) always
+        // diffs against yesterday's distinct snapshot row, a true ~24h-ago comparison.
+        sent.push({ type: 'report', ...(await notify((lang) => reportText(lang, 'daily', port, { pnl: pnlOver(1), pct: pctOver(1), labelKey: 'periodDay' }), { type: 'daily' })) });
       }
       const force = req.query?.force;
       const dt = new Date();
