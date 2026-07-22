@@ -49,6 +49,28 @@ function drawFundBars(page, { x, yTop, width, funds, font, slate, green, red, ro
   return y;
 }
 
+// Horizontal BOT bars — one row per individual open position (not merged by fund), width
+// proportional to notional, coloured by its own PnL sign. Same visual language as
+// drawFundBars, one level more granular — this is now the primary breakdown; drawFundBars
+// is the supplementary roll-up drawn further down the page.
+function drawBotBars(page, { x, yTop, width, positions, font, slate, green, red, rowH = 15 }) {
+  const rows = positions || [];
+  if (!rows.length) { page.drawText('No open positions', { x, y: yTop - 12, size: 10, font, color: slate }); return yTop - rowH; }
+  const maxAbs = Math.max(...rows.map((p) => Math.abs(p.notional || 0)), 1);
+  const labelW = 90, barX = x + labelW, barW = width - labelW - 90;
+  let y = yTop;
+  rows.slice(0, 12).forEach((p) => {
+    const w = Math.max(2, (Math.abs(p.notional || 0) / maxAbs) * barW);
+    const color = (p.unrealizedPnl || 0) >= 0 ? green : red;
+    page.drawText(p.symbol, { x, y: y - 9, size: 9, font, color: slate });
+    page.drawRectangle({ x: barX, y: y - 11, width: barW, height: 5, color: rgb(0.93, 0.94, 0.95) });
+    page.drawRectangle({ x: barX, y: y - 11, width: w, height: 5, color, opacity: 0.55 });
+    page.drawText(fmt(p.unrealizedPnl || 0), { x: barX + barW + 8, y: y - 9, size: 9, font, color });
+    y -= rowH;
+  });
+  return y;
+}
+
 export async function buildMonthlyPdf(d) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]); // A4
@@ -75,14 +97,17 @@ export async function buildMonthlyPdf(d) {
   y -= 30; at('Equity — 30 days', 40, 11, bold, navy);
   y -= 10; y = drawEquityChart(page, { x: 40, yTop: y, width: 515, height: 85, series: d.series, gold, gridColor: rgb(0.91, 0.91, 0.93) });
 
-  y -= 26; at('Funds', 40, 13, bold, navy);
+  y -= 26; at('By Bot', 40, 13, bold, navy);
+  y -= 6; y = drawBotBars(page, { x: 40, yTop: y, width: 515, positions: d.positions, font, slate, green, red });
+
+  y -= 18; at('Funds', 40, 13, bold, navy);
   y -= 6; y = drawFundBars(page, { x: 40, yTop: y, width: 515, funds: d.funds, font, slate, green, red });
 
   page.drawText('LNO Trading Systems — Internal Use Only', { x: 40, y: 40, size: 9, font, color: slate });
   return Buffer.from(await doc.save()).toString('base64');
 }
 
-// d: { equity, pnl7, openPnl, exposure, funds, dateLabel, series }
+// d: { equity, pnl7, openPnl, exposure, funds, positions, dateLabel, series }
 export async function buildWeeklyPdf(d) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]); // A4
@@ -107,7 +132,10 @@ export async function buildWeeklyPdf(d) {
   y -= 30; at('Equity — 7 days', 40, 11, bold, navy);
   y -= 10; y = drawEquityChart(page, { x: 40, yTop: y, width: 515, height: 85, series: d.series, gold, gridColor: rgb(0.91, 0.91, 0.93) });
 
-  y -= 26; at('Funds', 40, 13, bold, navy);
+  y -= 26; at('By Bot', 40, 13, bold, navy);
+  y -= 6; y = drawBotBars(page, { x: 40, yTop: y, width: 515, positions: d.positions, font, slate, green, red });
+
+  y -= 18; at('Funds', 40, 13, bold, navy);
   y -= 6; y = drawFundBars(page, { x: 40, yTop: y, width: 515, funds: d.funds, font, slate, green, red });
 
   page.drawText('LNO Trading Systems — Internal Use Only', { x: 40, y: 40, size: 9, font, color: slate });
@@ -140,19 +168,11 @@ export async function buildDailyPdf(d) {
   y -= 30; at('Equity — recent', 40, 11, bold, navy);
   y -= 10; y = drawEquityChart(page, { x: 40, yTop: y, width: 515, height: 75, series: d.series, gold, gridColor: rgb(0.91, 0.91, 0.93) });
 
-  y -= 24; at('Funds', 40, 13, bold, navy);
-  y -= 6; y = drawFundBars(page, { x: 40, yTop: y, width: 515, funds: d.funds, font, slate, green, red, rowH: 15 });
+  y -= 24; at('By Bot', 40, 13, bold, navy);
+  y -= 6; y = drawBotBars(page, { x: 40, yTop: y, width: 515, positions: d.positions, font, slate, green, red, rowH: 15 });
 
-  y -= 18; at('Open positions', 40, 13, bold, navy);
-  const positions = d.positions || [];
-  if (!positions.length) { y -= 20; at('No open positions', 40, 11, font, slate); }
-  positions.slice(0, 25).forEach(p => {
-    y -= 18;
-    if (y < 60) return; // one page is enough for this summary — Reports keeps the full detail in-app
-    at(`${p.symbol}  ${p.side}`, 40, 10, font, slate);
-    at(fmt(p.unrealizedPnl || 0), 300, 10, font, (p.unrealizedPnl || 0) >= 0 ? green : red);
-    at(fUSD(Math.abs(p.notional || 0)), 420, 10, font, slate);
-  });
+  y -= 18; at('Funds', 40, 13, bold, navy);
+  y -= 6; y = drawFundBars(page, { x: 40, yTop: y, width: 515, funds: d.funds, font, slate, green, red, rowH: 15 });
 
   page.drawText('LNO Trading Systems — Internal Use Only', { x: 40, y: 40, size: 9, font, color: slate });
   return Buffer.from(await doc.save()).toString('base64');

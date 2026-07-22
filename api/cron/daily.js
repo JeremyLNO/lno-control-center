@@ -169,7 +169,8 @@ export default async function handler(req, res) {
         const pnl30 = pnlOver(30);
         if (cfg.enabled) sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
         try {
-          const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, dateLabel: today, series: eqv.slice(-60) });
+          const monthPositions = port.bots.filter(b => b.status === 'open').map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
+          const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, positions: monthPositions, dateLabel: today, series: eqv.slice(-60) });
           // status stays the column default ('not_verified') — monthly is the shareholder-
           // facing kind, so an admin must verify it (see api/snapshots.js) before shareholders
           // are notified; that's what used to happen automatically right here.

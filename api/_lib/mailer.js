@@ -103,6 +103,27 @@ function sparklineSvg(series, positive) {
     <circle cx="${x(n - 1).toFixed(1)}" cy="${y(series[n - 1]).toFixed(1)}" r="4" fill="${color}"/>
   </svg>`;
 }
+// Horizontal BOT bars — one row per individual open position, same visual language as
+// fundBarsHtml() below, one level more granular. This is the primary breakdown now; Funds
+// (below it) is the supplementary roll-up.
+function botBarsHtml(positions) {
+  const rows = positions || [];
+  if (!rows.length) return `<div style="padding:8px 0;color:#94a3b8;font-size:13px">No open positions</div>`;
+  const maxAbs = Math.max(...rows.map(p => Math.abs(p.notional || 0)), 1);
+  return rows.slice(0, 12).map(p => {
+    const pct = Math.max(2, Math.round((Math.abs(p.notional || 0) / maxAbs) * 100));
+    const color = (p.unrealizedPnl || 0) >= 0 ? '#059669' : '#DC2626';
+    return `<div style="margin:10px 0">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px">
+        <span style="color:#334155;font-weight:500;font-family:monospace">${escapeHtml(p.symbol)} <span style="color:${p.side === 'LONG' ? '#059669' : '#DC2626'};font-family:inherit;font-weight:600">${p.side || ''}</span></span>
+        <span style="font-family:monospace;color:${color};font-weight:600">${fSigned(p.unrealizedPnl || 0)}</span>
+      </div>
+      <div style="height:6px;background:#F1F3F6;border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${color};border-radius:3px"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
 // Horizontal fund bars — width proportional to notional, same visual language as the PDF's
 // drawFundBars() and the Activity Dashboard's fund allocation view.
 function fundBarsHtml(funds) {
@@ -128,13 +149,6 @@ function fundBarsHtml(funds) {
 // about this; the PDF still gets archived separately in Reports, see report.js).
 export async function sendDailyReportEmail(to, d) {
   const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
-  const positions = d.positions || [];
-  const posRows = positions.length ? positions.slice(0, 30).map(p => `
-    <tr><td style="padding:6px 0;font-family:monospace;font-size:12px;color:#0B1F3A">${escapeHtml(p.symbol)}</td>
-      <td style="padding:6px 0;font-size:12px;color:${p.side === 'LONG' ? '#059669' : '#DC2626'}">${p.side}</td>
-      <td style="padding:6px 0;text-align:right;color:${pnlColor(p.unrealizedPnl || 0)};font-size:12px">${fSigned(p.unrealizedPnl || 0)}</td>
-      <td style="padding:6px 0;text-align:right;color:#94a3b8;font-size:12px">${fUSD(Math.abs(p.notional || 0))}</td></tr>`).join('')
-    : `<tr><td colspan="4" style="padding:6px 0;color:#94a3b8;font-size:13px">No open positions</td></tr>`;
   const incidentBanner = d.incidentCount
     ? `<div style="margin-top:16px;padding:10px 14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:#DC2626;font-size:13px;font-weight:600">⚠️ ${d.incidentCount} incident${d.incidentCount === 1 ? '' : 's'} in the last 24h</div>`
     : `<div style="margin-top:16px;padding:10px 14px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;color:#059669;font-size:13px;font-weight:600">✓ No incidents in the last 24h</div>`;
@@ -157,8 +171,8 @@ export async function sendDailyReportEmail(to, d) {
         <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Exposure</td><td style="padding:6px 0;text-align:right;font-weight:700;color:${NAVY};font-size:14px">${fUSD(d.exposure || 0)}</td></tr>
       </table>
       ${incidentBanner}
-      <div style="margin-top:24px;font-size:13px;font-weight:700;color:${NAVY};text-transform:uppercase;letter-spacing:0.03em">Open Positions</div>
-      <table style="width:100%;margin-top:6px;border-collapse:collapse">${posRows}</table>
+      <div style="margin-top:24px;font-size:13px;font-weight:700;color:${NAVY};text-transform:uppercase;letter-spacing:0.03em">By Bot</div>
+      ${botBarsHtml(d.positions)}
       <div style="margin-top:24px;font-size:13px;font-weight:700;color:${NAVY};text-transform:uppercase;letter-spacing:0.03em">Funds</div>
       ${fundBarsHtml(d.funds)}
       <div style="margin-top:24px;font-size:11px;color:#94a3b8">Full detail, including the archived PDF: Control Center ▸ Reports</div>

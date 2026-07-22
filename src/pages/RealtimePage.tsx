@@ -63,8 +63,8 @@ function RealtimePage(){
 
     <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
       <KpiCard label={t('activity.equity')} value={fmtUSD(data.equity)} icon="dollar" accent="#C9A24D"/>
-      <KpiCard label={t('activity.openPnl')} value={<span className={clsPnl(livePnl)}>{fmtSigned(livePnl)}</span>}/>
       <button onClick={()=>navigate('/trades')} className="text-left"><KpiCard label={t('live.openPositions')} value={open.length} icon="briefcase" accent="#3B82F6"/></button>
+      <KpiCard label={t('activity.openPnl')} value={<span className={clsPnl(livePnl)}>{fmtSigned(livePnl)}</span>}/>
       <KpiCard label={t('activity.exposure')} value={fmtUSD(exposure)} icon="layers" accent="#10B981"/>
       <button onClick={()=>serviceHealthRef.current?.scrollIntoView({behavior:'smooth',block:'center'})} className="text-left">
         <KpiCard label={t('live.incidentStatus')}

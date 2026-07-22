@@ -70,11 +70,11 @@ export default async function handler(req, res) {
         if (kind === 'daily') {
           b64 = await buildDailyPdf({ equity: data.equity, pnlDay: data.pnl, pctDay: data.pct, openPnl: data.openPnl, exposure: data.exposure, funds: data.funds, positions: data.positions, incidentCount: data.incidentCount, dateLabel: label, series: data.series });
         } else if (kind === 'weekly') {
-          b64 = await buildWeeklyPdf({ equity: data.equity, pnl7: data.pnl, openPnl: data.openPnl, exposure: data.exposure, funds: data.funds, dateLabel: label, series: data.series });
+          b64 = await buildWeeklyPdf({ equity: data.equity, pnl7: data.pnl, openPnl: data.openPnl, exposure: data.exposure, funds: data.funds, positions: data.positions, dateLabel: label, series: data.series });
         } else {
           const snaps = (await query('SELECT equity FROM equity_snapshots ORDER BY day ASC')).rows;
           const m = riskMetrics(snaps.map(r => ({ equity: Number(r.equity) })));
-          b64 = await buildMonthlyPdf({ equity: data.equity, pnl30: data.pnl, openPnl: data.openPnl, exposure: data.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: data.funds, dateLabel: label, series: data.series });
+          b64 = await buildMonthlyPdf({ equity: data.equity, pnl30: data.pnl, openPnl: data.openPnl, exposure: data.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: data.funds, positions: data.positions, dateLabel: label, series: data.series });
         }
         let rows;
         if (kind === 'monthly') {

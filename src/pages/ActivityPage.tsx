@@ -53,7 +53,7 @@ function ActivityPage(){
         <KpiCard label={t('activity.openFunds')} value={`${openBots.length} / ${fundsWithExposure.length||funds.length}`} icon="layers" accent="#10B981"/>
       </div>
 
-      {/* Equity curve + fund allocation */}
+      {/* Equity curve + bot allocation (per individual open position, not merged by fund) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
         <Card className="p-5 lg:col-span-2">
           <SectionTitle right={hasHistory&&<span className={`text-sm font-semibold ${clsPnl(periodPnl)}`}>{fmtSigned(periodPnl)} <span className="tnum">({fmtPct(periodPnlPct)})</span> {t('activity.thisPeriod')}</span>}>{t('activity.equityCurve')}</SectionTitle>
@@ -63,23 +63,61 @@ function ActivityPage(){
           </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noHistory')}</div>}
         </Card>
         <Card className="p-5">
-          <SectionTitle>{t('activity.fundAllocation')}</SectionTitle>
-          {allocFunds.length===0? <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noExposure')}</div>
+          <SectionTitle>{t('activity.botAllocation')}</SectionTitle>
+          {openBots.length===0? <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noExposure')}</div>
           : <div className="flex flex-col items-center gap-4">
             <Donut size={140} thickness={16}
-              segments={allocFunds.map((f,i)=>({value:f.notional,color:f.id!=null?(f.color||FUND_PALETTE[i%FUND_PALETTE.length]):'#94A3B8'}))}
-              center={<div><div className="text-base font-bold text-navy tnum">{fmtUSD(allocTotal)}</div><div className="text-[10px] text-slate-400">{t('activity.exposure')}</div></div>}/>
+              segments={openBots.map((b,i)=>({value:Math.abs(b.notional||0),color:FUND_PALETTE[i%FUND_PALETTE.length]}))}
+              center={<div><div className="text-base font-bold text-navy tnum">{fmtUSD(exposure)}</div><div className="text-[10px] text-slate-400">{t('activity.exposure')}</div></div>}/>
             <div className="w-full space-y-1.5">
-              {allocFunds.map((f,i)=><div key={f.id||'unassigned'} className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-1.5 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:f.id!=null?(f.color||FUND_PALETTE[i%FUND_PALETTE.length]):'#94A3B8'}}/><span className="truncate text-slate-600">{f.name}</span></span>
-                <span className="font-medium text-navy tnum shrink-0">{(f.notional/allocTotal*100).toFixed(1)}%</span>
+              {openBots.map((b,i)=><div key={b.id} className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:FUND_PALETTE[i%FUND_PALETTE.length]}}/><span className="truncate text-slate-600 font-mono">{b.symbol}</span></span>
+                <span className="font-medium text-navy tnum shrink-0">{exposure?(Math.abs(b.notional||0)/exposure*100).toFixed(1):'0.0'}%</span>
               </div>)}
             </div>
           </div>}
         </Card>
       </div>
 
-      {/* By-fund breakdown + PnL calendar side by side */}
+      {/* By-bot breakdown + PnL calendar side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+        <Card className="overflow-hidden lg:col-span-2">
+          <div className="p-5 pb-3"><SectionTitle>{t('activity.byBot')}</SectionTitle></div>
+          {openBots.length===0? <div className="px-5 pb-5 text-sm text-slate-400">{t('activity.noOpenPositions')}</div>
+          : <div className="overflow-x-auto"><table className="w-full text-sm">
+            <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+              <th className="px-3 py-2.5 text-left font-medium">{t('activity.symbol')}</th><th className="px-3 py-2.5 text-left font-medium">{t('activity.side')}</th>
+              <th className="px-3 py-2.5 text-left font-medium">{t('activity.fund')}</th>
+              <th className="px-3 py-2.5 text-right font-medium">{t('activity.openPnl')}</th><th className="px-3 py-2.5 text-right font-medium hidden sm:table-cell">{t('activity.notional')}</th>
+              <th className="px-3 py-2.5 text-right font-medium hidden md:table-cell">{t('activity.lev')}</th>
+            </tr></thead>
+            <tbody>
+              {openBots.slice(0,10).map(b=>{ const f=fundOf(funds,b); return <tr key={b.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+                <td className="px-3 py-2.5 font-mono text-xs text-navy">{b.symbol}</td>
+                <td className="px-3 py-2.5"><SideTag side={b.side}/></td>
+                <td className="px-3 py-2.5"><FundTag fund={f}/></td>
+                <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(b.unrealizedPnl)}`}>{fmtSigned(b.unrealizedPnl)}</td>
+                <td className="px-3 py-2.5 text-right tnum text-slate-500 hidden sm:table-cell">{fmtUSD(Math.abs(b.notional))}</td>
+                <td className="px-3 py-2.5 text-right tnum text-slate-500 hidden md:table-cell">{b.leverage?b.leverage+'×':'—'}</td>
+              </tr>; })}
+            </tbody>
+          </table></div>}
+        </Card>
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.daily')}</span>}>{t('activity.pnlCalendar')}</SectionTitle><PnlCalendar series={view}/></Card>
+      </div>
+
+      {/* Drawdown + closed-positions heatmap side by side — same GitHub-style grid as the
+          calendar above, but each cell is a closed position */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.underwater')}</span>}>{t('activity.drawdown')}</SectionTitle><Underwater series={view}/></Card>
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.realizedPct')}</span>}>{t('activity.positionsHeatmap')}</SectionTitle><PositionsHeatmap bots={bots}/></Card>
+      </div>
+
+      {/* Risk & exposure (only meaningful with history/exposure) */}
+      {(hasHistory||openBots.length>0)&&<div className="mb-5"><RiskPanel series={view.length?view:series} openBots={openBots} byFund={byFund}/></div>}
+
+      {/* Fund allocation + by-fund breakdown — moved to the bottom; bot-level detail above is
+          the primary view now, fund grouping is the supplementary roll-up */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
         <Card className="overflow-hidden lg:col-span-2">
           <div className="p-5 pb-3"><SectionTitle>{t('activity.byFund')}</SectionTitle></div>
@@ -101,42 +139,22 @@ function ActivityPage(){
             </tbody>
           </table></div>}
         </Card>
-        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.daily')}</span>}>{t('activity.pnlCalendar')}</SectionTitle><PnlCalendar series={view}/></Card>
+        <Card className="p-5">
+          <SectionTitle>{t('activity.fundAllocation')}</SectionTitle>
+          {allocFunds.length===0? <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('activity.noExposure')}</div>
+          : <div className="flex flex-col items-center gap-4">
+            <Donut size={140} thickness={16}
+              segments={allocFunds.map((f,i)=>({value:f.notional,color:f.id!=null?(f.color||FUND_PALETTE[i%FUND_PALETTE.length]):'#94A3B8'}))}
+              center={<div><div className="text-base font-bold text-navy tnum">{fmtUSD(allocTotal)}</div><div className="text-[10px] text-slate-400">{t('activity.exposure')}</div></div>}/>
+            <div className="w-full space-y-1.5">
+              {allocFunds.map((f,i)=><div key={f.id||'unassigned'} className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:f.id!=null?(f.color||FUND_PALETTE[i%FUND_PALETTE.length]):'#94A3B8'}}/><span className="truncate text-slate-600">{f.name}</span></span>
+                <span className="font-medium text-navy tnum shrink-0">{(f.notional/allocTotal*100).toFixed(1)}%</span>
+              </div>)}
+            </div>
+          </div>}
+        </Card>
       </div>
-
-      {/* Risk & exposure (only meaningful with history/exposure) */}
-      {(hasHistory||openBots.length>0)&&<div className="mb-5"><RiskPanel series={view.length?view:series} openBots={openBots} byFund={byFund}/></div>}
-
-      {/* Drawdown + closed-positions heatmap side by side — same GitHub-style grid as the
-          calendar above, but each cell is a closed position */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.underwater')}</span>}>{t('activity.drawdown')}</SectionTitle><Underwater series={view}/></Card>
-        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.realizedPct')}</span>}>{t('activity.positionsHeatmap')}</SectionTitle><PositionsHeatmap bots={bots}/></Card>
-      </div>
-
-      {/* Open positions snapshot */}
-      <Card className="overflow-hidden">
-        <div className="p-5 pb-0"><SectionTitle right={<button onClick={()=>navigate(hasPerm(user,'view_realtime')?'/realtime':'/trades')} className="text-xs text-gold hover:underline">{t('common.viewAll')}</button>}>{t('activity.openPositions')}</SectionTitle></div>
-        {openBots.length===0? <div className="p-8 text-center text-slate-400 text-sm">{t('activity.noOpenPositions')}</div>
-        : <div className="overflow-x-auto"><table className="w-full text-sm">
-          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-            <th className="px-3 py-2.5 text-left font-medium">{t('activity.symbol')}</th><th className="px-3 py-2.5 text-left font-medium">{t('activity.side')}</th>
-            <th className="px-3 py-2.5 text-left font-medium">{t('activity.fund')}</th>
-            <th className="px-3 py-2.5 text-right font-medium">{t('activity.openPnl')}</th><th className="px-3 py-2.5 text-right font-medium hidden sm:table-cell">{t('activity.notional')}</th>
-            <th className="px-3 py-2.5 text-right font-medium hidden md:table-cell">{t('activity.lev')}</th>
-          </tr></thead>
-          <tbody>
-            {openBots.slice(0,10).map(b=>{ const f=fundOf(funds,b); return <tr key={b.id} className="border-b border-slate-50 hover:bg-slate-50/60">
-              <td className="px-3 py-2.5 font-mono text-xs text-navy">{b.symbol}</td>
-              <td className="px-3 py-2.5"><SideTag side={b.side}/></td>
-              <td className="px-3 py-2.5"><FundTag fund={f}/></td>
-              <td className={`px-3 py-2.5 text-right font-medium tnum ${clsPnl(b.unrealizedPnl)}`}>{fmtSigned(b.unrealizedPnl)}</td>
-              <td className="px-3 py-2.5 text-right tnum text-slate-500 hidden sm:table-cell">{fmtUSD(Math.abs(b.notional))}</td>
-              <td className="px-3 py-2.5 text-right tnum text-slate-500 hidden md:table-cell">{b.leverage?b.leverage+'×':'—'}</td>
-            </tr>; })}
-          </tbody>
-        </table></div>}
-      </Card>
     </>}
   </div>;
 }
