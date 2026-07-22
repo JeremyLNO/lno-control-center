@@ -82,12 +82,14 @@ const pnlColor = (n) => (n >= 0 ? '#059669' : '#DC2626');
 // about this; the PDF still gets archived separately in Reports, see report.js).
 export async function sendDailyReportEmail(to, d) {
   const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
+  // Funds get their own equity line (notional committed + its unrealized PnL) rather than
+  // a per-fund breakdown of the same positions already listed individually below — showing
+  // both was pure duplication of the same numbers grouped two different ways.
   const funds = (d.funds || []).filter(f => (f.bots || []).length || f.uPnl || f.notional);
   const fundRows = funds.length ? funds.map(f => `
-    <tr><td style="padding:8px 0;color:#334155;font-size:13px">${escapeHtml(f.name)} <span style="color:#94a3b8">(${(f.bots || []).length})</span></td>
-      <td style="padding:8px 0;text-align:right;color:${pnlColor(f.uPnl || 0)};font-size:13px;font-weight:600">${fSigned(f.uPnl || 0)}</td>
-      <td style="padding:8px 0;text-align:right;color:#94a3b8;font-size:13px">${fUSD(f.notional || 0)}</td></tr>`).join('')
-    : `<tr><td colspan="3" style="padding:8px 0;color:#94a3b8;font-size:13px">No open positions</td></tr>`;
+    <tr><td style="padding:8px 0;color:#334155;font-size:13px">${escapeHtml(f.name)}</td>
+      <td style="padding:8px 0;text-align:right;color:${NAVY};font-size:13px;font-weight:600">${fUSD((f.notional || 0) + (f.uPnl || 0))}</td></tr>`).join('')
+    : `<tr><td colspan="2" style="padding:8px 0;color:#94a3b8;font-size:13px">No open positions</td></tr>`;
   const positions = d.positions || [];
   const posRows = positions.length ? positions.slice(0, 30).map(p => `
     <tr><td style="padding:6px 0;font-family:monospace;font-size:12px;color:#0B1F3A">${escapeHtml(p.symbol)}</td>
@@ -109,10 +111,10 @@ export async function sendDailyReportEmail(to, d) {
         <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Exposure</td><td style="padding:6px 0;text-align:right;font-weight:700;color:${NAVY};font-size:14px">${fUSD(d.exposure || 0)}</td></tr>
       </table>
       ${incidentBanner}
-      <div style="margin-top:24px;font-size:13px;font-weight:700;color:${NAVY};text-transform:uppercase;letter-spacing:0.03em">Funds</div>
-      <table style="width:100%;margin-top:6px;border-collapse:collapse">${fundRows}</table>
       <div style="margin-top:24px;font-size:13px;font-weight:700;color:${NAVY};text-transform:uppercase;letter-spacing:0.03em">Open Positions</div>
       <table style="width:100%;margin-top:6px;border-collapse:collapse">${posRows}</table>
+      <div style="margin-top:24px;font-size:13px;font-weight:700;color:${NAVY};text-transform:uppercase;letter-spacing:0.03em">Funds</div>
+      <table style="width:100%;margin-top:6px;border-collapse:collapse">${fundRows}</table>
       <div style="margin-top:24px;font-size:11px;color:#94a3b8">Full detail, including the archived PDF: Control Center ▸ Reports</div>
     </div>
   </div>`;
