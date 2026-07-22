@@ -454,6 +454,10 @@ r = await call(users, { method: 'GET', headers: authH });
 const adminRow = r.body.users.find(u => u.email === 'admin@lno.company');
 r = await call(users, { method: 'GET', headers: authH, query: { logins: adminRow.id } });
 ok('per-user sign-in history lists the recorded IP + method', r.status === 200 && r.body.logins.some(l => l.ip === '203.0.113.7' && l.method === 'password'), r.body.logins);
+r = await call(users, { method: 'GET', headers: authH, query: { allLogins: '1' } });
+ok('admin-only all-sign-ins table lists events across users, with role attached', r.status === 200 && r.body.logins.some(l => l.email === 'admin@lno.company' && l.role === 'admin' && l.ip === '203.0.113.7'), r.body.logins && r.body.logins.slice(0, 3));
+r = await call(users, { method: 'GET', headers: opH, query: { allLogins: '1' } });
+ok('non-admin cannot view the all-sign-ins table -> 403', r.status === 403, r.status);
 
 // Sign in with Google — verification stubbed (real flow verifies the Google JWKS signature).
 globalThis.__GOOGLE_VERIFY__ = async (cred) => JSON.parse(Buffer.from(cred, 'base64').toString());

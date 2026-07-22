@@ -34,6 +34,23 @@ export default async function handler(req, res) {
         try { rows = (await query('SELECT username,ip,method,created_at FROM login_events WHERE user_id=$1 ORDER BY created_at DESC LIMIT 12', [req.query.logins])).rows; } catch (e) {}
         return res.status(200).json({ logins: rows.map(r => ({ ip: r.ip, method: r.method, createdAt: r.created_at })) });
       }
+      // Every user's sign-ins, most recent first (the Users page's admin-only history
+      // table) — joined against the CURRENT role/name, not the role at the time of sign-in.
+      if (req.query?.allLogins) {
+        let rows = [];
+        try {
+          rows = (await query(`
+            SELECT le.user_id, le.username, le.ip, le.method, le.created_at,
+                   u.first_name, u.last_name, u.role
+            FROM login_events le
+            LEFT JOIN users u ON u.id = le.user_id
+            ORDER BY le.created_at DESC LIMIT 500`)).rows;
+        } catch (e) {}
+        return res.status(200).json({ logins: rows.map(r => ({
+          userId: r.user_id, email: r.username, firstName: r.first_name || '', lastName: r.last_name || '',
+          role: r.role || null, ip: r.ip, method: r.method, createdAt: r.created_at,
+        })) });
+      }
       const { rows } = await query('SELECT * FROM users ORDER BY created_at ASC');
       return res.status(200).json({ users: await Promise.all(rows.map(sanitizeUserWithPerms)) });
     }

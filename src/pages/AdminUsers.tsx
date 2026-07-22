@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  ROLE_OPTIONS, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge,
+  ROLE_OPTIONS, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge, SectionTitle,
   StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, useApp, PageHead, Denied, PW_RULES,
   passwordOk, Loader
 } from '../ui'
@@ -23,6 +23,53 @@ function UserLoginHistory({userId}: any){
       <span className="font-mono text-slate-400 truncate">{l.ip||'—'}</span>
     </div>)}
   </div>;
+}
+// All users' sign-ins, most recent first — admin-only, filterable by user/role/method.
+function LoginHistoryTable(){
+  const {t}=useApp();
+  const roleOpts=ROLE_OPTIONS.map(o=>({...o,label:t('role.'+o.value)}));
+  const [rows,setRows]=useState(null);
+  const [q,setQ]=useState(''); const [roleF,setRoleF]=useState('all'); const [methodF,setMethodF]=useState('all');
+  useEffect(()=>{ api('users?allLogins=1').then(r=>setRows(r.logins||[])).catch(()=>setRows([])); },[]);
+  const methods=useMemo(()=>rows?[...new Set(rows.map(r=>r.method))]:[],[rows]);
+  const filtered=useMemo(()=>{
+    if(!rows) return [];
+    const needle=q.trim().toLowerCase();
+    return rows.filter(r=>{
+      if(roleF!=='all'&&r.role!==roleF) return false;
+      if(methodF!=='all'&&r.method!==methodF) return false;
+      if(needle&&!(`${r.email} ${r.firstName} ${r.lastName}`.toLowerCase().includes(needle))) return false;
+      return true;
+    });
+  },[rows,q,roleF,methodF]);
+  return <Card className="p-5 mt-4">
+    <SectionTitle>{t('users.allSignIns')}</SectionTitle>
+    {rows===null? <Loader/> : <>
+      <div className="flex flex-wrap gap-2 mb-3">
+        <Input value={q} onChange={e=>setQ(e.target.value)} placeholder={t('users.filterByUser')} className="w-48"/>
+        <Select value={roleF} onChange={setRoleF} className="w-36" options={[{value:'all',label:t('users.allRoles')},...roleOpts]}/>
+        <Select value={methodF} onChange={setMethodF} className="w-32" options={[{value:'all',label:t('users.allMethods')},...methods.map(m=>({value:m,label:m}))]}/>
+      </div>
+      {filtered.length===0
+        ? <div className="text-sm text-slate-400 py-6 text-center">{t('users.noMatchFilter')}</div>
+        : <div className="overflow-x-auto"><table className="w-full text-sm">
+            <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500 text-left">
+              <th className="px-3 py-2 font-medium">{t('login.email')}</th>
+              <th className="px-3 py-2 font-medium">{t('users.role')}</th>
+              <th className="px-3 py-2 font-medium">{t('users.method')}</th>
+              <th className="px-3 py-2 font-medium">IP</th>
+              <th className="px-3 py-2 font-medium">{t('users.signInDate')}</th>
+            </tr></thead>
+            <tbody>{filtered.map((r,i)=><tr key={i} className="border-b border-slate-50">
+              <td className="px-3 py-2 truncate max-w-[220px]">{(r.firstName||r.lastName)?`${r.firstName} ${r.lastName}`.trim():r.email}</td>
+              <td className="px-3 py-2">{r.role?t('role.'+r.role):'—'}</td>
+              <td className="px-3 py-2 text-[10px] uppercase tracking-wide text-slate-400">{r.method}</td>
+              <td className="px-3 py-2 font-mono text-xs text-slate-400">{r.ip||'—'}</td>
+              <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{fmtDT(r.createdAt)}</td>
+            </tr>)}</tbody>
+          </table></div>}
+    </>}
+  </Card>;
 }
 function AdminUsers(){
   const {user,t}=useApp();
@@ -126,6 +173,7 @@ function AdminUsers(){
         </div>}
       </Card>)}
     </div>
+    <LoginHistoryTable/>
     <AddUserModal open={add} onClose={()=>setAdd(false)} onCreated={u=>{setUsers(us=>[...us,u]);setAdd(false);}}/>
     <Confirm open={!!del} title={t('users.deleteUser')} message={t('users.deleteUserConfirm',{email:del?.email})} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('users',{method:'DELETE',body:{id:del.id}});setUsers(us=>us.filter(u=>u.id!==del.id));toast.success(t('users.userDeleted'));}catch(e){toast.error(e.message);}setDel(null);setExp(null);}}/>
     <Confirm open={bulkDel} title={t('users.deleteSelectedTitle')} message={t('users.deleteSelectedConfirm',{n:ids.filter(id=>id!==user.id).length})} confirmLabel={t('users.deleteAll')} onCancel={()=>setBulkDel(false)} onConfirm={bulkDelete}/>
