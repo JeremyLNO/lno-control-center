@@ -81,6 +81,16 @@ export async function getRecipientsForType(cfg, type) {
   return out;
 }
 
+// Active users' emails for a set of roles — used for operational alert emails (API errors,
+// new sign-ups), which have no per-user opt-in the way WhatsApp does (every internal user
+// already gets transactional emails like OTP codes without an opt-out).
+export async function getUsersByRole(roles) {
+  if (!roles || !roles.length) return [];
+  const ph = roles.map((_, i) => `$${i + 1}`).join(',');
+  const { rows } = await query(`SELECT email, first_name, last_name, language FROM users WHERE active=true AND role IN (${ph})`, roles);
+  return rows.map(r => ({ email: r.email, firstName: r.first_name || '', lastName: r.last_name || '', language: r.language || 'en' }));
+}
+
 // Send a message of `type` to every role enabled for it in the matrix. Never throws.
 // `messageOrFn` is either a plain string (sent as-is to everyone) or a function of
 // (language) => string, called once per recipient so each gets it in their own

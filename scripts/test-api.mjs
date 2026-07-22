@@ -257,12 +257,20 @@ ok('non-admin cannot trigger a sync', [401, 403].includes((await call(bots, { me
 r = await call(bots, { method: 'DELETE', headers: authH, body: { id: 'binance:XRPUSDT' } });
 ok('admin can delete a bot', r.status === 200 && (await call(bots, { method: 'GET', headers: authH })).body.bots.every(b => b.symbol !== 'XRPUSDT'), r.body);
 
-// a failed sync surfaces + stores the exchange error message
+// a failed sync surfaces + stores the exchange error message, and immediately alerts
+// admins/operators by WhatsApp + email — but only on the transition INTO error, not on
+// every retry while the outage continues (the alerts-only cron hits this every ~5 min)
+sentMessages.length = 0; sentEmails.length = 0;
 binanceFail = true;
 r = await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } });
 ok('a failed sync returns the error message', r.body.errors >= 1 && /Invalid API-key, IP, or permissions/.test((r.body.errorMsgs || []).join(' ')), r.body);
 const exErr = (await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId);
 ok('the sync error is stored on the exchange (status=error + lastError)', !!exErr && exErr.status === 'error' && /-2015|permissions/.test(exErr.lastError || ''), exErr);
+ok('a fresh API failure sends a WhatsApp alert immediately', sentMessages.some(m => /API ERROR/i.test(m.text)), sentMessages.map(m => m.text.slice(0, 40)));
+ok('a fresh API failure emails admins/operators immediately', sentEmails.some(e => /exchange API error/i.test(e.subject)), sentEmails.map(e => e.subject));
+sentMessages.length = 0; sentEmails.length = 0;
+await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } }); // still failing — retry
+ok('a repeated failure (still in error) does not re-alert', !sentMessages.some(m => /API ERROR/i.test(m.text)) && sentEmails.length === 0, { sentMessages, sentEmails });
 binanceFail = false;
 await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } }); // restore good state (clears lastError)
 ok('a successful re-sync clears the stored error', ((await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId) || {}).lastError == null);

@@ -6,6 +6,9 @@ import { decrypt } from './crypto.js';
 import { getPositions, getAccountEquity, getIncome, getUserTrades } from './binance.js';
 import { migrate } from './schema.js';
 import { detectFundContributions } from './employeeFund.js';
+import { notify, getUsersByRole, rolesForType, getOpenWAConfig } from './notify.js';
+import { apiErrorText } from './notifyText.js';
+import { sendApiErrorEmail } from './mailer.js';
 
 const INCOME_TYPES = new Set(['REALIZED_PNL', 'FUNDING_FEE', 'COMMISSION']);
 
@@ -23,10 +26,24 @@ export async function syncExchanges() {
   const seen = [];
   let connected = 0, created = 0, updated = 0, positions = 0, totalEquity = 0, totalWallet = 0, errors = 0, deltaIncome = 0;
   const errorMsgs = [];
-  // record the failure on the exchange (status + message) and collect it for the caller
+  // record the failure on the exchange (status + message) and collect it for the caller —
+  // and, on a FRESH failure only (was not already status='error'), alert admins/operators
+  // immediately by email + WhatsApp. Gated on the transition so an ongoing outage doesn't
+  // re-alert every ~5 minutes for as long as it lasts (the alerts-only cron runs that often).
   const fail = async (ex, msg) => {
     errors++; errorMsgs.push(`${ex.label || ex.name}: ${msg}`);
+    const wasAlreadyError = ex.status === 'error';
     await query('UPDATE exchanges SET status=$2, last_error=$3 WHERE id=$1', [ex.id, 'error', String(msg).slice(0, 400)]);
+    if (!wasAlreadyError) {
+      const label = ex.label || ex.name;
+      try { await notify((lang) => apiErrorText(lang, label, msg), { type: 'api_error' }); } catch (e) {}
+      try {
+        const cfg = await getOpenWAConfig();
+        const roles = await rolesForType(cfg, 'api_error');
+        const recipients = await getUsersByRole(roles);
+        for (const r of recipients) await sendApiErrorEmail(r.email, label, msg).catch(() => {});
+      } catch (e) {}
+    }
   };
 
   for (const ex of exs) {

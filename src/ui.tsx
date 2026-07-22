@@ -48,6 +48,8 @@ const WA_MSG_TYPES = [
   {key:'weekly',label:'Weekly report'},
   {key:'monthly',label:'Monthly report'},
   {key:'new_report',label:'New report available'},
+  {key:'api_error',label:'API/exchange error'},
+  {key:'new_signup',label:'New sign-up'},
 ];
 const WA_ROLE_COLS = [['admin','Admin'],['operator','Operator'],['viewer','Viewer'],['shareholder','Shareholder']];
 

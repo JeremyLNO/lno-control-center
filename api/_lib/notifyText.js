@@ -26,6 +26,8 @@ const STR = {
     staleHeader: '🕒 LNO DORMANT BOT ALERT', staleLine: '{symbol}{side} — no activity in {hours}h',
     staleFooterOne: 'Check whether the strategy behind this position is still running.',
     staleFooterMany: 'Check whether the strategy behind these positions is still running.',
+    apiErrorHeader: '🔴 LNO API ERROR', apiErrorLine: '{exchange} failed to sync: {message}',
+    newSignupHeader: '👋 LNO NEW SIGN-UP', newSignupLine: '{name} ({email}) just signed up via Google — created as Viewer.',
   },
   fr: {
     welcome: '🎉 Bienvenue dans les alertes LNO Control Center ! Votre WhatsApp est configuré — vous recevrez vos alertes ici.',
@@ -41,6 +43,8 @@ const STR = {
     staleHeader: '🕒 ALERTE BOT DORMANT LNO', staleLine: '{symbol}{side} — aucune activité depuis {hours}h',
     staleFooterOne: 'Vérifiez que la stratégie derrière cette position fonctionne toujours.',
     staleFooterMany: 'Vérifiez que la stratégie derrière ces positions fonctionne toujours.',
+    apiErrorHeader: '🔴 ERREUR API LNO', apiErrorLine: '{exchange} : échec de synchronisation : {message}',
+    newSignupHeader: '👋 NOUVELLE INSCRIPTION LNO', newSignupLine: '{name} ({email}) vient de s\'inscrire via Google — créé en tant que Viewer.',
   },
   de: {
     welcome: '🎉 Willkommen bei den LNO Control Center-Benachrichtigungen! Ihr WhatsApp ist eingerichtet — Sie erhalten Ihre Alarme hier.',
@@ -56,6 +60,8 @@ const STR = {
     staleHeader: '🕒 LNO-ALARM: INAKTIVER BOT', staleLine: '{symbol}{side} — seit {hours}h keine Aktivität',
     staleFooterOne: 'Prüfen Sie, ob die Strategie hinter dieser Position noch läuft.',
     staleFooterMany: 'Prüfen Sie, ob die Strategie hinter diesen Positionen noch läuft.',
+    apiErrorHeader: '🔴 LNO API-FEHLER', apiErrorLine: '{exchange}: Synchronisierung fehlgeschlagen: {message}',
+    newSignupHeader: '👋 LNO NEUE REGISTRIERUNG', newSignupLine: '{name} ({email}) hat sich gerade über Google registriert — als Viewer angelegt.',
   },
   es: {
     welcome: '🎉 ¡Bienvenido a las alertas de LNO Control Center! Tu WhatsApp está configurado — recibirás tus alertas aquí.',
@@ -71,6 +77,8 @@ const STR = {
     staleHeader: '🕒 ALERTA DE BOT INACTIVO LNO', staleLine: '{symbol}{side} — sin actividad en {hours}h',
     staleFooterOne: 'Comprueba si la estrategia detrás de esta posición sigue en marcha.',
     staleFooterMany: 'Comprueba si la estrategia detrás de estas posiciones sigue en marcha.',
+    apiErrorHeader: '🔴 ERROR DE API LNO', apiErrorLine: '{exchange}: fallo al sincronizar: {message}',
+    newSignupHeader: '👋 NUEVO REGISTRO LNO', newSignupLine: '{name} ({email}) se acaba de registrar con Google — creado como Viewer.',
   },
 };
 
@@ -83,6 +91,8 @@ function t(lang, key, vars) {
 export function welcomeText(lang) { return t(lang, 'welcome'); }
 export function reportAvailableText(lang) { return t(lang, 'reportAvailable'); }
 export function loginFailureText(lang, email) { return t(lang, 'loginFailure', { email }); }
+export function apiErrorText(lang, exchangeLabel, message) { return `${t(lang, 'apiErrorHeader')}\n${t(lang, 'apiErrorLine', { exchange: exchangeLabel, message })}`; }
+export function newSignupText(lang, name, email) { return `${t(lang, 'newSignupHeader')}\n${t(lang, 'newSignupLine', { name: name || email, email })}`; }
 
 // kind: 'daily' | 'weekly' | 'monthly'; period: { pnl, pct, labelKey: 'periodDay'|'period7d'|'period30d' }
 export function reportText(lang, kind, port, period) {
