@@ -344,6 +344,9 @@ ok('shareholder created with external email, no password (auth_provider=otp)',
   r.status === 201 && r.body.user.authProvider === 'otp' && r.body.user.email === 'investor@example.com', r.body.user);
 ok('shareholder role grants Exchanges/Funds/Live/Status/Reports by default',
   r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_exchanges', 'view_realtime', 'view_reports', 'view_trades']), r.body.user && r.body.user.permissions);
+ok('an admin-created account with no photo gets a random style-2 preset avatar', /^\/avatars\/style2\/s2-\d{2}\.jpg$/.test(r.body.user.avatar || ''), r.body.user.avatar);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: r.body.user.id, avatar: '/avatars/style1/s1-05.jpg' } });
+ok('admin can set a user\'s avatar to a specific preset', r.status === 200 && r.body.user.avatar === '/avatars/style1/s1-05.jpg', r.body.user);
 
 // ── Rules (role -> permission mapping) — permissions are per-role, not per-user ──
 r = await call(users, { method: 'GET', headers: authH, query: { rules: '1' } });

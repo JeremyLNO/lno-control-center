@@ -11,6 +11,12 @@ const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext,
    DESIGN TOKENS & CONSTANTS
    ============================================================ */
 const FUND_PALETTE = ['#C9A24D','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444','#EC4899','#6366F1'];
+// Preset avatar gallery (public/avatars/style{1,2}/), grouped by style — mirrors
+// api/_lib/constants.js's AVATAR_STYLES/avatarUrl. Static assets, no API round-trip needed.
+const AVATAR_STYLES=[
+  {key:'style1',n:1,items:Array.from({length:30},(_,i)=>`/avatars/style1/s1-${String(i+1).padStart(2,'0')}.jpg`)},
+  {key:'style2',n:2,items:Array.from({length:30},(_,i)=>`/avatars/style2/s2-${String(i+1).padStart(2,'0')}.jpg`)},
+];
 const PERMISSIONS = [
   ['view_activity','View Activity'],
   ['view_realtime','View Real-Time'],
@@ -1138,5 +1144,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };

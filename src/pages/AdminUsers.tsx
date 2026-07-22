@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  ROLE_OPTIONS, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge, SectionTitle,
+  ROLE_OPTIONS, AVATAR_STYLES, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge, SectionTitle,
   StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, useApp, PageHead, Denied, PW_RULES,
   passwordOk, Loader
 } from '../ui'
@@ -79,6 +79,7 @@ function AdminUsers(){
   const [sel,setSel]=useState(()=>new Set()); const [bulkDel,setBulkDel]=useState(false);
   const [roleFilter,setRoleFilter]=useState('all');
   const [loading,setLoading]=useState(false);
+  const [avatarPickFor,setAvatarPickFor]=useState(null);
   // loads once on mount — no auto-polling, refresh is manual (the online lights/last-seen
   // are a snapshot as of the last load, not a live feed)
   const load=useCallback(()=>{ if(user.role!=='admin') return; setLoading(true); api('users').then(r=>setUsers(r.users||[])).catch(()=>{}).finally(()=>setLoading(false)); },[user.role]);
@@ -148,7 +149,11 @@ function AdminUsers(){
         </button>
         </div>
         {exp===u.id&&<div className="border-t border-slate-100 p-4 space-y-4 fadein">
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-4 items-start">
+            <Field label={t('users.avatar')}><div className="flex items-center gap-2 pt-1">
+              {u.avatar?<img src={u.avatar} className="w-10 h-10 rounded-full object-cover"/>:<span className="w-10 h-10 rounded-full bg-navy text-white grid place-items-center text-xs font-semibold shrink-0">{initialsOf(u)}</span>}
+              <Btn size="sm" variant="outline" onClick={()=>setAvatarPickFor(u.id)}>{t('users.change')}</Btn>
+            </div></Field>
             <div><Field label={t('login.email')}><div className="pt-1.5 text-sm font-mono text-slate-500">{u.email}</div></Field></div>
             <div className="w-44"><Field label={t('users.role')}><Select value={u.role} onChange={v=>up(u.id,{role:v})} options={roleOpts}/></Field></div>
             <div><Field label={t('users.active')}><div className="pt-1.5"><Toggle on={u.active} onChange={v=>up(u.id,{active:v})}/></div></Field></div>
@@ -174,6 +179,7 @@ function AdminUsers(){
       </Card>)}
     </div>
     <LoginHistoryTable/>
+    <AvatarPickerModal userId={avatarPickFor} onClose={()=>setAvatarPickFor(null)} onPick={async(avatar)=>{ await up(avatarPickFor,{avatar}); setAvatarPickFor(null); }}/>
     <AddUserModal open={add} onClose={()=>setAdd(false)} onCreated={u=>{setUsers(us=>[...us,u]);setAdd(false);}}/>
     <Confirm open={!!del} title={t('users.deleteUser')} message={t('users.deleteUserConfirm',{email:del?.email})} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('users',{method:'DELETE',body:{id:del.id}});setUsers(us=>us.filter(u=>u.id!==del.id));toast.success(t('users.userDeleted'));}catch(e){toast.error(e.message);}setDel(null);setExp(null);}}/>
     <Confirm open={bulkDel} title={t('users.deleteSelectedTitle')} message={t('users.deleteSelectedConfirm',{n:ids.filter(id=>id!==user.id).length})} confirmLabel={t('users.deleteAll')} onCancel={()=>setBulkDel(false)} onConfirm={bulkDelete}/>
@@ -215,6 +221,33 @@ function genPassword(){
   while(arr.length<16) arr.push(pick(all));
   for(let i=arr.length-1;i>0;i--){ const j=rnd(i+1); [arr[i],arr[j]]=[arr[j],arr[i]]; }
   return arr.join('');
+}
+// Admin avatar picker — preset gallery grouped by style (tabs), or upload a new photo.
+function AvatarPickerModal({userId,onClose,onPick}: any){
+  const {t}=useApp();
+  const [style,setStyle]=useState('style1');
+  const fileRef=useRef<any>(null);
+  const active=AVATAR_STYLES.find(s=>s.key===style)||AVATAR_STYLES[0];
+  function upload(e){
+    const file=e.target.files[0]; if(!file) return;
+    if(!['image/png','image/jpeg'].includes(file.type)) return toast.error(t('profile.acceptedFormats'));
+    if(file.size>5*1024*1024) return toast.error(t('profile.maxFileSize'));
+    const r=new FileReader(); r.onload=()=>onPick(r.result); r.readAsDataURL(file);
+  }
+  return <Modal open={!!userId} onClose={onClose} title={t('users.chooseAvatar')} wide>
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        {AVATAR_STYLES.map(s=><button key={s.key} onClick={()=>setStyle(s.key)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${style===s.key?'bg-navy text-white':'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{t('users.avatarStyle',{n:s.n})}</button>)}
+        <Btn size="sm" variant="outline" className="ml-auto" onClick={()=>fileRef.current?.click()}><Icon name="camera" className="w-3.5 h-3.5"/>{t('users.uploadPhoto')}</Btn>
+        <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={upload}/>
+      </div>
+      <div className="grid grid-cols-6 sm:grid-cols-8 gap-2 max-h-80 overflow-y-auto pr-1">
+        {active.items.map(url=><button key={url} onClick={()=>onPick(url)} className="aspect-square rounded-full overflow-hidden ring-2 ring-transparent hover:ring-gold transition">
+          <img src={url} className="w-full h-full object-cover"/>
+        </button>)}
+      </div>
+    </div>
+  </Modal>;
 }
 function AddUserModal({open,onClose,onCreated}: any){
   const {t}=useApp();

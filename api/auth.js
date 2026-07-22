@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { query } from './_lib/db.js';
 import { verifyPassword, signToken, hashPassword, hashOtpCode, requireAuth, passwordIssues, clientIp } from './_lib/auth.js';
 import { verifyGoogleToken, ALLOWED_DOMAIN } from './_lib/google.js';
-import { ROLE_PERMS } from './_lib/constants.js';
+import { ROLE_PERMS, randomStyle2Avatar } from './_lib/constants.js';
 import { sanitizeUserWithPerms } from './_lib/rolePerms.js';
 import { notify, getUsersByRole, rolesForType, getOpenWAConfig } from './_lib/notify.js';
 import { loginFailureText, newSignupText } from './_lib/notifyText.js';
@@ -144,9 +144,9 @@ export default async function handler(req, res) {
         if (!u) {
           const id = 'g_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
           const unusable = await hashPassword('google:' + id + ':' + Math.random());
-          // Google's own profile photo, when present — a random preset (Avatars CC, style 2)
-          // is assigned instead when there isn't one (see api/users.js/POST for that path).
-          const avatar = payload.picture || null;
+          // Google's own profile photo, when present — otherwise a random preset avatar
+          // (Avatars CC, style 2 only; see api/users.js/POST for the admin-created path).
+          const avatar = payload.picture || randomStyle2Avatar();
           await query(
             `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,phone,notify,password_hash,auth_provider,avatar)
              VALUES ($1,$2,$3,$4,$5,'viewer',true,$6::jsonb,'',false,$7,'google',$8)`,

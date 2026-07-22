@@ -4,7 +4,7 @@
 import { query } from './_lib/db.js';
 import { requireAdmin, hashPassword, passwordIssues } from './_lib/auth.js';
 import { sanitizeUserWithPerms, getRolePerms, setRolePerms } from './_lib/rolePerms.js';
-import { PERMISSIONS } from './_lib/constants.js';
+import { PERMISSIONS, randomStyle2Avatar } from './_lib/constants.js';
 import { audit, recentAudit } from './_lib/audit.js';
 
 // There must always be at least one active admin — used to block the last one from being
@@ -84,10 +84,13 @@ export default async function handler(req, res) {
       // stored per-user (see api/_lib/rolePerms.js) — no permissions column to set here.
       const provider = isShareholder ? 'otp' : 'google';
       const hash = await hashPassword(provider + ':' + id + ':' + Math.random());
+      // no photo of their own yet — a random preset (Avatars CC, style 2 only) until they
+      // (or an admin) set a real one
+      const avatar = randomStyle2Avatar();
       await query(
-        `INSERT INTO users (id,username,email,first_name,last_name,role,active,password_hash,auth_provider)
-         VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8)`,
-        [id, email, email, firstName, lastName, role, hash, provider]
+        `INSERT INTO users (id,username,email,first_name,last_name,role,active,password_hash,auth_provider,avatar)
+         VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8,$9)`,
+        [id, email, email, firstName, lastName, role, hash, provider, avatar]
       );
       await audit(req, a, 'user.create', email, { role, provider });
       // Employee Fund shares are no longer auto-granted on hire — an admin assigns a real
@@ -105,7 +108,7 @@ export default async function handler(req, res) {
       }
       // permissions are role-based, not per-user (see api/_lib/rolePerms.js + api/rules.js) —
       // there is nothing to reset/patch here beyond the role itself.
-      const map = { firstName: 'first_name', lastName: 'last_name', active: 'active', role: 'role' };
+      const map = { firstName: 'first_name', lastName: 'last_name', active: 'active', role: 'role', avatar: 'avatar' };
       const sets = [], vals = []; let i = 1;
       for (const k of Object.keys(patch)) {
         if (!(k in map)) continue;

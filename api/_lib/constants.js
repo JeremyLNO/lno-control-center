@@ -13,6 +13,13 @@ export const ROLE_PERMS = {
   shareholder: ['view_activity','view_realtime','view_trades','view_reports','view_exchanges'],
 };
 export const FUND_PALETTE = ['#C9A24D','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444','#EC4899','#6366F1'];
+// Preset avatar gallery (public/avatars/style{1,2}/s{1,2}-01..30.jpg), grouped by style —
+// the Users page's avatar picker (admin) shows both styles; new accounts with no photo of
+// their own default to a random one from style 2 only.
+export const AVATAR_STYLES = ['style1', 'style2'];
+export const AVATAR_COUNT_PER_STYLE = 30;
+export function avatarUrl(style, n) { return `/avatars/${style}/s${style.slice(-1)}-${String(n).padStart(2, '0')}.jpg`; }
+export function randomStyle2Avatar() { return avatarUrl('style2', 1 + Math.floor(Math.random() * AVATAR_COUNT_PER_STYLE)); }
 // Supported UI / notification languages. Mirrored in src/i18n.ts (SUPPORTED_LANGS).
 export const SUPPORTED_LANGS = ['en', 'fr', 'de', 'es'];
 
