@@ -1,8 +1,13 @@
-// Exchange connections (admin only). API secrets are AES-GCM encrypted at rest and
-// NEVER returned to the client — only a masked preview + hasSecret flag.
+// Exchange connections. Mutations (POST/PATCH/DELETE) are admin only. GET is also open to
+// any role granted the 'view_exchanges' permission (shareholders, by default — see
+// api/_lib/rolePerms.js) but those callers only ever get the stripped wallet-only view below:
+// API keys/secrets are never sent to a non-admin under any permission configuration.
+// Secrets are AES-GCM encrypted at rest and NEVER returned to the client — only a masked
+// preview + hasSecret flag, and only to admins.
 import { query } from './_lib/db.js';
-import { requireAdmin } from './_lib/auth.js';
+import { requireAdmin, requireAuth } from './_lib/auth.js';
 import { encrypt, decrypt, mask } from './_lib/crypto.js';
+import { permsForRole } from './_lib/rolePerms.js';
 import { audit } from './_lib/audit.js';
 
 function pub(r) {
@@ -15,6 +20,10 @@ function pub(r) {
     wallets: Array.isArray(r.wallets) ? r.wallets : [],
   };
 }
+// Read-only, non-admin view: label + public wallet addresses only — no keys, no status.
+function pubReadOnly(r) {
+  return { id: r.id, name: r.name, label: r.label, wallets: Array.isArray(r.wallets) ? r.wallets : [] };
+}
 // Public deposit addresses (not secret) — keep only {network,address} pairs, drop empty rows.
 function cleanWallets(list) {
   if (!Array.isArray(list)) return [];
@@ -24,12 +33,19 @@ function cleanWallets(list) {
 }
 
 export default async function handler(req, res) {
+  if (req.method === 'GET') {
+    const a = requireAuth(req, res); if (!a) return;
+    const isAdmin = a.role === 'admin';
+    if (!isAdmin && !(await permsForRole(a.role)).includes('view_exchanges')) return res.status(403).json({ error: 'forbidden' });
+    try {
+      const { rows } = await query('SELECT * FROM exchanges ORDER BY id ASC');
+      return res.status(200).json({ exchanges: rows.map(isAdmin ? pub : pubReadOnly) });
+    } catch (e) {
+      return res.status(500).json({ error: String(e.message || e) });
+    }
+  }
   const a = requireAdmin(req, res); if (!a) return;
   try {
-    if (req.method === 'GET') {
-      const { rows } = await query('SELECT * FROM exchanges ORDER BY id ASC');
-      return res.status(200).json({ exchanges: rows.map(pub) });
-    }
     const body = req.body || {};
 
     if (req.method === 'POST') {

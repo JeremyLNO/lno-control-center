@@ -17,6 +17,7 @@ const PERMISSIONS = [
   ['view_trades','View Trades'],
   ['view_logs','View Logs'],
   ['view_reports','View reports'],
+  ['view_exchanges','View exchanges'],
   ['export_data','Export data'],
   ['manage_users','Manage users'],
   ['manage_exchanges','Manage exchanges'],
@@ -28,8 +29,9 @@ const ROLE_PERMS = {
   admin: ALL_PERMS.slice(),
   operator: ['view_activity','view_realtime','view_trades','view_logs','export_data'],
   viewer: ['view_activity','view_realtime','view_trades','view_logs'],
-  // shareholder: dashboard + prices + system status (via view_activity) and read-only reports
-  shareholder: ['view_activity','view_reports'],
+  // shareholder default: Exchanges (wallets only, no keys), Funds (read-only), Live, System
+  // Status + dashboard, and read-only reports
+  shareholder: ['view_activity','view_realtime','view_trades','view_reports','view_exchanges'],
 };
 const ROLE_OPTIONS = [
   {value:'admin',label:'Admin'},
@@ -804,6 +806,7 @@ const MAIN_NAV=[
 ];
 const TOOLS_NAV=[
   ['layers','nav.funds','/funds','nav.funds','view_trades'],
+  ['link','nav.exchanges','/admin/exchanges','nav.exchanges','view_exchanges'],
   ['database','nav.status','/status','nav.status.short','view_activity'],
   ['filetext','nav.reports','/admin/reports','nav.reports','view_reports'],
 ];
@@ -811,7 +814,6 @@ const ADMIN_NAV=[
   ['list','nav.bots','/admin/bots'],
   ['users','nav.users','/admin/users'],
   ['shield','nav.rules','/admin/rules'],
-  ['link','nav.exchanges','/admin/exchanges'],
   ['msg','nav.whatsapp','/admin/openwa'],
 ];
 const ACCT_NAV=[

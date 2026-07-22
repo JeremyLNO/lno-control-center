@@ -1,14 +1,16 @@
 // Shared backend constants (mirror of the frontend's defaults, server-authoritative)
 export const PERMISSIONS = [
-  'view_activity','view_realtime','view_trades','view_logs','view_reports','export_data',
+  'view_activity','view_realtime','view_trades','view_logs','view_reports','view_exchanges','export_data',
   'manage_users','manage_exchanges','manage_whatsapp','manage_funds',
 ];
 export const ROLE_PERMS = {
   admin: PERMISSIONS.slice(),
   operator: ['view_activity','view_realtime','view_trades','view_logs','export_data'],
   viewer: ['view_activity','view_realtime','view_trades','view_logs'],
-  // shareholder: dashboard + prices + system status (via view_activity) and read-only reports
-  shareholder: ['view_activity','view_reports'],
+  // shareholder default: Exchanges (view_exchanges — wallets only, no keys), Funds
+  // (view_trades — read-only), Live (view_realtime), System Status + dashboard (view_activity),
+  // plus read-only reports
+  shareholder: ['view_activity','view_realtime','view_trades','view_reports','view_exchanges'],
 };
 export const FUND_PALETTE = ['#C9A24D','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444','#EC4899','#6366F1'];
 // Supported UI / notification languages. Mirrored in src/i18n.ts (SUPPORTED_LANGS).

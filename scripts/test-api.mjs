@@ -334,8 +334,8 @@ ok('report groups bots under their fund with a colour emoji', /🟢 \*Greens\*/.
 r = await call(users, { method: 'POST', headers: authH, body: { email: 'investor@example.com', role: 'shareholder' } });
 ok('shareholder created with external email, no password (auth_provider=otp)',
   r.status === 201 && r.body.user.authProvider === 'otp' && r.body.user.email === 'investor@example.com', r.body.user);
-ok('shareholder role grants exactly [view_activity, view_reports]',
-  r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_reports']), r.body.user && r.body.user.permissions);
+ok('shareholder role grants Exchanges/Funds/Live/Status/Reports by default',
+  r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_exchanges', 'view_realtime', 'view_reports', 'view_trades']), r.body.user && r.body.user.permissions);
 
 // ── Rules (role -> permission mapping) — permissions are per-role, not per-user ──
 r = await call(users, { method: 'GET', headers: authH, query: { rules: '1' } });
@@ -356,7 +356,7 @@ r = await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'rule
 ok('a role permission change takes effect immediately for existing users of that role (no per-user storage)',
   r.status === 200 && JSON.stringify(r.body.user.permissions) === JSON.stringify(['view_activity']), r.body.user && r.body.user.permissions);
 // restore defaults so later tests (and the reset section) aren't affected by this probe
-r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_logs', 'export_data'], viewer: ['view_activity', 'view_realtime', 'view_trades', 'view_logs'], shareholder: ['view_activity', 'view_reports'] } } });
+r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_logs', 'export_data'], viewer: ['view_activity', 'view_realtime', 'view_trades', 'view_logs'], shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports', 'view_exchanges'] } } });
 ok('restore default role permissions', r.status === 200, r.body);
 
 // the shareholder signs in via an emailed 6-digit code: request -> extract from the mocked
@@ -372,6 +372,14 @@ ok('shareholder signs in with the emailed code', r.status === 200 && !!r.body.to
 const shH = { authorization: 'Bearer ' + r.body.token };
 r = await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'investor@example.com', code: otpCode1 } });
 ok('a consumed code cannot be reused', r.status === 401, r.body);
+
+// ── Exchanges: shareholders (view_exchanges by default) see wallets only, never API keys ──
+r = await call(exchanges, { method: 'GET', headers: shH });
+ok('shareholder can list exchanges -> 200', r.status === 200, r.status);
+const shExRow = (r.body.exchanges || []).find(e => e.id === exId) || {};
+ok('shareholder view has wallets but never apiKey/secret/status fields', 'wallets' in shExRow && !('apiKey' in shExRow) && !('secretMasked' in shExRow) && !('status' in shExRow), shExRow);
+r = await call(exchanges, { method: 'POST', headers: shH, body: { name: 'binance', label: 'nope' } });
+ok('shareholder cannot create an exchange -> 403', r.status === 403, r.status);
 
 // requestOtp never reveals whether an account exists/qualifies (email enumeration)
 sentEmails.length = 0;
@@ -433,6 +441,8 @@ r = await call(snapshots, { method: 'POST', headers: opH, body: { action: 'gener
 ok('non-admin cannot generate a report -> 403', r.status === 403, r.status);
 r = await call(snapshots, { method: 'GET', headers: opH, query: { reports: 'list' } });
 ok('any authenticated user can list the report archive', r.status === 200 && Array.isArray(r.body.reports), r.status);
+r = await call(exchanges, { method: 'GET', headers: opH });
+ok('operator has no view_exchanges by default -> 403', r.status === 403, r.status);
 
 // login audit: IP + last-login recorded, heartbeat updates last-seen, history endpoint
 r = await call(auth, { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }, body: { action: 'login', email: 'admin@lno.company', password: 'admin' } });

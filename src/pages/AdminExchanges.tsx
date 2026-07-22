@@ -2,14 +2,15 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtDT, api, toast, Icon, Card, Btn, StatusPill, Select, Field, Input, Modal, Confirm,
-  useApp, PageHead, Denied
+  useApp, PageHead, Denied, hasPerm
 } from '../ui'
 
 /* ============================================================
-   ADMIN — EXCHANGES
+   ADMIN — EXCHANGES (full CRUD) / shareholder — read-only wallet list
    ============================================================ */
 function AdminExchanges(){
   const {user,t}=useApp();
+  const isAdmin=user.role==='admin';
   const [exchanges,setExchanges]=useState([]);
   const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
   const [tick,setTick]=useState(0);
@@ -17,7 +18,7 @@ function AdminExchanges(){
   const [syncing,setSyncing]=useState(false);
   async function runSync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); await reload(); if(r.errors){ toast.error((r.errorMsgs&&r.errorMsgs[0])||t(r.errors===1?'bots.syncFailedOne':'bots.syncFailedMany',{n:r.errors})); } else { const exch=t((r.connected||0)===1?'exchanges.exchangeCountOne':'exchanges.exchangeCountMany',{n:r.connected||0}); const pos=t((r.positions||0)===1?'exchanges.positionCountOne':'exchanges.positionCountMany',{n:r.positions||0}); toast.success(t('exchanges.syncedResult',{exch,pos})); } }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
   useEffect(()=>{
-    if(user.role!=='admin') return;
+    if(!hasPerm(user,'view_exchanges')) return;
     reload();
     // the shared data layer (useData in main.tsx) already re-syncs from the exchange every
     // 30s for an admin session — just re-read this table on the same cadence so connection
@@ -25,10 +26,10 @@ function AdminExchanges(){
     const iv=setInterval(reload,30000);
     return ()=>clearInterval(iv);
   },[]);
-  if(user.role!=='admin') return <Denied/>;
+  if(!hasPerm(user,'view_exchanges')) return <Denied/>;
   const mask=(s)=> s? s.slice(0,6)+'••••••••'+s.slice(-4) : '';
   return <div>
-    <PageHead title={t('exchanges.title')} subtitle={t('exchanges.subtitle')} refresh={{ms:30000,tick}} actions={<div className="flex items-center gap-2">
+    <PageHead title={t('exchanges.title')} subtitle={isAdmin?t('exchanges.subtitle'):t('exchanges.subtitleReadOnly')} refresh={isAdmin?{ms:30000,tick}:undefined} actions={isAdmin&&<div className="flex items-center gap-2">
       <Btn variant="outline" onClick={runSync} disabled={syncing}><Icon name="refresh" className="w-4 h-4"/>{syncing?t('bots.syncing'):t('bots.syncNow')}</Btn>
       <Btn onClick={()=>setModal({mode:'add',data:{name:'binance',label:'',apiKey:'',secret:'',note:'',wallets:[]}})}><Icon name="plus" className="w-4 h-4"/>{t('exchanges.addExchange')}</Btn>
     </div>}/>
@@ -36,9 +37,9 @@ function AdminExchanges(){
       {exchanges.map(e=><Card key={e.id} className="p-5">
         <div className="flex items-start justify-between">
           <div><div className="font-semibold text-navy">{e.label}</div><div className="text-xs text-slate-400 font-mono">{e.name}</div></div>
-          <StatusPill status={e.status}/>
+          {isAdmin&&<StatusPill status={e.status}/>}
         </div>
-        <div className="mt-4 space-y-2 text-sm">
+        {isAdmin&&<div className="mt-4 space-y-2 text-sm">
           <div className="flex justify-between"><span className="text-slate-400">{t('exchanges.apiKey')}</span><span className="font-mono text-xs">{mask(e.apiKey)}</span></div>
           <div className="flex justify-between items-center"><span className="text-slate-400">{t('exchanges.apiSecret')}</span>
             <span className="flex items-center gap-1.5 font-mono text-xs">{e.hasSecret? e.secretMasked : <span className="text-slate-300">{t('exchanges.none')}</span>}<Icon name="shield" className="w-3.5 h-3.5 text-success" data-tip={t('exchanges.encryptedAtRest')}/></span>
@@ -46,8 +47,8 @@ function AdminExchanges(){
           <div className="flex justify-between"><span className="text-slate-400">{t('exchanges.lastSync')}</span><span className="text-xs">{e.lastSync?fmtDT(e.lastSync):'—'}</span></div>
           {e.note&&<div className="text-xs text-slate-400 pt-1">{e.note}</div>}
           {e.status==='error'&&e.lastError&&<div className="text-xs text-danger bg-danger/5 border border-danger/20 rounded-lg p-2 mt-1 break-words"><span className="font-medium">{t('exchanges.syncError')}</span> {e.lastError}</div>}
-        </div>
-        <div className="mt-4 pt-4 border-t border-slate-100">
+        </div>}
+        <div className={isAdmin?"mt-4 pt-4 border-t border-slate-100":"mt-3"}>
           <div className="text-xs text-slate-400 mb-2">{t('exchanges.wallets')}</div>
           {(!e.wallets||e.wallets.length===0)
             ? <div className="text-xs text-slate-300">{t('exchanges.noWalletAddresses')}</div>
@@ -56,10 +57,10 @@ function AdminExchanges(){
                 <span className="font-mono text-navy truncate" title={w.address}>{w.address}</span>
               </div>)}</div>}
         </div>
-        <div className="flex gap-2 mt-4">
+        {isAdmin&&<div className="flex gap-2 mt-4">
           <Btn variant="outline" size="sm" onClick={()=>setModal({mode:'edit',data:{...e,secret:''}})}><Icon name="pencil" className="w-3.5 h-3.5"/>{t('common.edit')}</Btn>
           <Btn variant="ghost" size="sm" className="text-danger" onClick={()=>setDel(e)}><Icon name="trash" className="w-3.5 h-3.5"/>{t('common.delete')}</Btn>
-        </div>
+        </div>}
       </Card>)}
     </div>
     <ExchangeModal modal={modal} onClose={()=>setModal(null)} onSave={async(d)=>{
