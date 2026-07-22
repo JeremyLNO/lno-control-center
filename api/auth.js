@@ -5,9 +5,9 @@ import { verifyPassword, signToken, hashPassword, hashOtpCode, requireAuth, pass
 import { verifyGoogleToken, ALLOWED_DOMAIN } from './_lib/google.js';
 import { ROLE_PERMS } from './_lib/constants.js';
 import { sanitizeUserWithPerms } from './_lib/rolePerms.js';
-import { notify } from './_lib/notify.js';
-import { loginFailureText } from './_lib/notifyText.js';
-import { sendOtpEmail } from './_lib/mailer.js';
+import { notify, getUsersByRole, rolesForType, getOpenWAConfig } from './_lib/notify.js';
+import { loginFailureText, newSignupText } from './_lib/notifyText.js';
+import { sendOtpEmail, sendNewSignupEmail } from './_lib/mailer.js';
 
 const MAX_ATTEMPTS = 5, LOCK_MINUTES = 15;
 
@@ -144,12 +144,23 @@ export default async function handler(req, res) {
         if (!u) {
           const id = 'g_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
           const unusable = await hashPassword('google:' + id + ':' + Math.random());
+          // Google's own profile photo, when present — a random preset (Avatars CC, style 2)
+          // is assigned instead when there isn't one (see api/users.js/POST for that path).
+          const avatar = payload.picture || null;
           await query(
-            `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,phone,notify,password_hash,auth_provider)
-             VALUES ($1,$2,$3,$4,$5,'viewer',true,$6::jsonb,'',false,$7,'google')`,
-            [id, username, email, firstName, lastName, JSON.stringify(ROLE_PERMS.viewer), unusable]
+            `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,phone,notify,password_hash,auth_provider,avatar)
+             VALUES ($1,$2,$3,$4,$5,'viewer',true,$6::jsonb,'',false,$7,'google',$8)`,
+            [id, username, email, firstName, lastName, JSON.stringify(ROLE_PERMS.viewer), unusable, avatar]
           );
           u = (await query('SELECT * FROM users WHERE id=$1', [id])).rows[0];
+          // New sign-up alert — best-effort, both channels, never blocks the sign-in itself.
+          const displayName = (firstName || lastName) ? `${firstName} ${lastName}`.trim() : email;
+          try { await notify((lang) => newSignupText(lang, displayName, email), { type: 'new_signup' }); } catch (e) {}
+          try {
+            const cfg = await getOpenWAConfig();
+            const admins = await getUsersByRole(await rolesForType(cfg, 'new_signup'));
+            for (const a of admins) await sendNewSignupEmail(a.email, displayName, email).catch(() => {});
+          } catch (e) {}
         } else {
           if (!u.active) return res.status(403).json({ error: 'This account has been disabled' });
           // save the latest first/last name from Google on every sign-in

@@ -470,9 +470,14 @@ ok('non-admin cannot view the all-sign-ins table -> 403', r.status === 403, r.st
 // Sign in with Google — verification stubbed (real flow verifies the Google JWKS signature).
 globalThis.__GOOGLE_VERIFY__ = async (cred) => JSON.parse(Buffer.from(cred, 'base64').toString());
 const gcred = (o) => Buffer.from(JSON.stringify(o)).toString('base64');
-r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'alice.new@lno.company', email_verified: true, hd: 'lno.company', given_name: 'Alice', family_name: 'New' }) } });
+sentMessages.length = 0; sentEmails.length = 0;
+r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'alice.new@lno.company', email_verified: true, hd: 'lno.company', given_name: 'Alice', family_name: 'New', picture: 'https://lh3.googleusercontent.com/a/fake-alice' }) } });
 ok('Google sign-in auto-creates an @lno.company user (viewer, names saved)',
   r.status === 200 && r.body.user.email === 'alice.new@lno.company' && r.body.user.role === 'viewer' && r.body.user.firstName === 'Alice' && r.body.user.lastName === 'New' && r.body.user.authProvider === 'google' && !!r.body.token, r.body);
+ok('a new sign-up captures the Google profile picture as the avatar', r.body.user.avatar === 'https://lh3.googleusercontent.com/a/fake-alice', r.body.user.avatar);
+ok('a new sign-up alerts admins via WhatsApp immediately', sentMessages.some(m => /NEW SIGN-UP/i.test(m.text)), sentMessages.map(m => m.text.slice(0, 40)));
+ok('a new sign-up alerts admins via email immediately', sentEmails.some(e => /New Control Center sign-up/i.test(e.subject)), sentEmails.map(e => e.subject));
+sentMessages.length = 0; sentEmails.length = 0;
 r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'mallory@evil.com', email_verified: true, given_name: 'M', family_name: 'X' }) } });
 ok('Google sign-in rejects a non-@lno.company domain -> 403', r.status === 403, r.status);
 r = await call(auth, { method: 'POST', body: { action: 'google', credential: gcred({ email: 'bob@lno.company', email_verified: false, hd: 'lno.company' }) } });
