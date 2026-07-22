@@ -268,12 +268,20 @@ const exErr = (await call(exchanges, { method: 'GET', headers: authH })).body.ex
 ok('the sync error is stored on the exchange (status=error + lastError)', !!exErr && exErr.status === 'error' && /-2015|permissions/.test(exErr.lastError || ''), exErr);
 ok('a fresh API failure sends a WhatsApp alert immediately', sentMessages.some(m => /API ERROR/i.test(m.text)), sentMessages.map(m => m.text.slice(0, 40)));
 ok('a fresh API failure emails admins/operators immediately', sentEmails.some(e => /exchange API error/i.test(e.subject)), sentEmails.map(e => e.subject));
+r = await call(alerts, { method: 'GET', headers: authH, query: { limit: '300' } });
+ok('the failure is recorded in the System Status alert history (open, no end yet)', r.body.alerts.some(a => a.type === 'api_error' && a.ackedAt == null && a.durationSec == null), r.body.alerts.filter(a => a.type === 'api_error'));
 sentMessages.length = 0; sentEmails.length = 0;
 await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } }); // still failing — retry
 ok('a repeated failure (still in error) does not re-alert', !sentMessages.some(m => /API ERROR/i.test(m.text)) && sentEmails.length === 0, { sentMessages, sentEmails });
+r = await call(alerts, { method: 'GET', headers: authH, query: { limit: '300' } });
+ok('a repeated failure does not create a second alert-history row', r.body.alerts.filter(a => a.type === 'api_error').length === 1, r.body.alerts.filter(a => a.type === 'api_error'));
 binanceFail = false;
 await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } }); // restore good state (clears lastError)
 ok('a successful re-sync clears the stored error', ((await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === exId) || {}).lastError == null);
+r = await call(alerts, { method: 'GET', headers: authH, query: { limit: '300' } });
+const closedApiErr = r.body.alerts.find(a => a.type === 'api_error');
+ok('recovery auto-closes the alert history row with an end + duration', !!closedApiErr && closedApiErr.ackedAt != null && closedApiErr.ackedBy === 'system' && typeof closedApiErr.durationSec === 'number' && closedApiErr.durationSec >= 0, closedApiErr);
+ok('?limit is capped and defaults sanely (GET /api/alerts)', r.status === 200 && Array.isArray(r.body.alerts), r.status);
 
 // ── Real-time: the browser gets a scoped listenKey (never the real key/secret) to open its
 // own WebSocket for instant account/position updates, instead of waiting on the 30s poll ──

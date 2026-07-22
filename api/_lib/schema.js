@@ -196,6 +196,12 @@ export async function migrate() {
     acked_at TIMESTAMPTZ,
     acked_by TEXT
   )`);
+  // type: 'breach' | 'api_error' (System Status's alert-history table, filterable by type).
+  // exchange_id: which exchange an 'api_error' alert is about, so a later successful sync
+  // can auto-close it (acked_by='system') without a human ACK — that's how its "end" /
+  // duration gets recorded, unlike 'breach' alerts which are only ever closed by a human.
+  await ddl(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'breach'`);
+  await ddl(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS exchange_id TEXT`);
   // sign-in audit trail (one row per successful login, with IP + method)
   await ddl(`CREATE TABLE IF NOT EXISTS login_events (
     id BIGSERIAL PRIMARY KEY,

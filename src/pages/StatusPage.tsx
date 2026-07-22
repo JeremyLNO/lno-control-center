@@ -1,19 +1,22 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtPctPlain, fmtSigned, fmtAgo, fmtDur, api, toast, Icon, Card, SectionTitle, Btn, Confirm, useApp, hasPerm,
+  fmtPctPlain, fmtSigned, fmtAgo, fmtDur, fmtDT, fmtSeconds, api, toast, Icon, Card, SectionTitle, Btn, Confirm, Select, Input, SortHeader, sortRows, useApp, hasPerm,
   dormantInfo, LiveBadge, PageHead, Denied, Loader
 } from '../ui'
 
+const ALERT_TYPES=['breach','api_error'];
+const ALERT_GETTERS={ type:a=>a.type, summary:a=>a.summary, started:a=>+new Date(a.createdAt), ended:a=>a.ackedAt?+new Date(a.ackedAt):Infinity, duration:a=>a.durationSec==null?-1:a.durationSec };
 function StatusPage(){
   const {user,data,dataStatus,reloadData,refreshTick,refreshMs,t}=useApp();
   const [snaps,setSnaps]=useState(null); const [alerts,setAlerts]=useState(null); const [openwa,setOpenwa]=useState(undefined); const [dbErr,setDbErr]=useState(null);
   const [exchanges,setExchanges]=useState(null);
   const [wipe,setWipe]=useState(false); const [wiping,setWiping]=useState(false);
+  const [histType,setHistType]=useState('all'); const [histDate,setHistDate]=useState(''); const [histSort,setHistSort]=useState({col:'started',dir:'desc'});
   async function doReset(){ setWiping(true); try{ await api('init',{method:'POST',body:{action:'reset'}}); toast.success(t('sysstatus.resetSuccess')); reloadData&&reloadData(); }catch(e){ toast.error(e.message); } finally{ setWiping(false); setWipe(false); } }
   useEffect(()=>{
     api('snapshots?limit=3').then(r=>setSnaps(r.snapshots||[])).catch(e=>{ setSnaps([]); setDbErr(e.message); });
-    api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>setAlerts([]));
+    api('alerts?limit=300').then(r=>setAlerts(r.alerts||[])).catch(()=>setAlerts([]));
     if(user.role==='admin'){ api('openwa').then(r=>setOpenwa(r.config)).catch(()=>setOpenwa(null)); api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>setExchanges([])); }
   },[]);
   // exchange connection status/last-sync change as a side effect of the same live re-sync the
@@ -35,6 +38,11 @@ function StatusPage(){
   const mttaMin=acked.length? acked.reduce((s,a)=>s+(+new Date(a.ackedAt)-+new Date(a.createdAt)),0)/acked.length/60000 : null;
   const ackRate=(alerts&&alerts.length)? acked.length/alerts.length*100 : null;
   const dormantCount=data.openBots.filter(b=>dormantInfo(b).dormant).length;
+
+  let histRows=alerts||[];
+  if(histType!=='all') histRows=histRows.filter(a=>a.type===histType);
+  if(histDate) histRows=histRows.filter(a=>new Date(a.createdAt).toISOString().slice(0,10)===histDate);
+  histRows=sortRows(histRows,histSort,ALERT_GETTERS);
 
   // Reconciliation: equity should equal walletBalance + sum(open bots' unrealized PnL) —
   // both recorded from the same sync pass. A gap beyond a small tolerance means the stored
@@ -101,6 +109,34 @@ function StatusPage(){
         <div className="text-[11px] text-slate-400 mt-3">{lastSnap?t('sysstatus.lastRecordedSnapshot',{day:lastSnap.day,ago:fmtAgo(lastSnap.day)}):t('sysstatus.noSnapshotsYet')}</div>
       </Card>
     </div>
+    <Card className="p-5 mt-5">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+        <SectionTitle>{t('sysstatus.alertHistory')}</SectionTitle>
+        <div className="flex items-center gap-2">
+          <Select value={histType} onChange={setHistType} className="w-36" options={[{value:'all',label:t('sysstatus.allTypes')},...ALERT_TYPES.map(ty=>({value:ty,label:t('sysstatus.alertType.'+ty)}))]}/>
+          <Input type="date" value={histDate} onChange={e=>setHistDate(e.target.value)} className="w-40"/>
+          {histDate&&<button onClick={()=>setHistDate('')} className="text-xs text-slate-400 hover:text-navy">{t('common.clear')}</button>}
+        </div>
+      </div>
+      {alerts===null? <Loader/>
+      : histRows.length===0? <div className="text-sm text-slate-400 py-6 text-center">{t('sysstatus.noAlertsMatch')}</div>
+      : <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500 text-left">
+            <SortHeader label={t('sysstatus.alertTypeCol')} col="type" sort={histSort} setSort={setHistSort}/>
+            <th className="px-3 py-2 font-medium">{t('sysstatus.summary')}</th>
+            <SortHeader label={t('sysstatus.started')} col="started" sort={histSort} setSort={setHistSort}/>
+            <SortHeader label={t('sysstatus.ended')} col="ended" sort={histSort} setSort={setHistSort}/>
+            <SortHeader label={t('sysstatus.duration')} col="duration" sort={histSort} setSort={setHistSort} align="right"/>
+          </tr></thead>
+          <tbody>{histRows.map(a=><tr key={a.id} className="border-b border-slate-50">
+            <td className="px-3 py-2"><span className={`text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded ${a.type==='api_error'?'bg-danger/10 text-danger':'bg-amber-500/10 text-amber-600'}`}>{t('sysstatus.alertType.'+a.type)}</span></td>
+            <td className="px-3 py-2 text-slate-600 max-w-xs truncate" title={a.summary}>{a.summary}</td>
+            <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{fmtDT(a.createdAt)}</td>
+            <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{a.ackedAt?fmtDT(a.ackedAt):<span className="text-danger font-medium">{t('sysstatus.ongoing')}</span>}</td>
+            <td className="px-3 py-2 text-right tnum text-slate-500">{a.durationSec==null?'—':fmtSeconds(a.durationSec)}</td>
+          </tr>)}</tbody>
+        </table></div>}
+    </Card>
     {user.role==='admin'&&<Card className="p-5 mt-5">
       <SectionTitle>{t('sysstatus.maintenance')}</SectionTitle>
       <div className="flex items-start justify-between gap-4 flex-wrap">

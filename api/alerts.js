@@ -6,10 +6,14 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const a = requireAuth(req, res); if (!a) return;
-      const { rows } = await query('SELECT id,code,summary,created_at,acked_at,acked_by FROM alerts ORDER BY created_at DESC LIMIT 30');
+      // limit=30 (default) for the Live/Activity "recent incidents" widgets; the System
+      // Status page's full history table asks for more via ?limit=300.
+      const limit = Math.min(Math.max(Number(req.query?.limit) || 30, 1), 500);
+      const { rows } = await query('SELECT id,type,code,summary,created_at,acked_at,acked_by FROM alerts ORDER BY created_at DESC LIMIT $1', [limit]);
       return res.status(200).json({ alerts: rows.map(r => ({
-        id: Number(r.id), code: r.code, summary: r.summary,
+        id: Number(r.id), type: r.type || 'breach', code: r.code, summary: r.summary,
         createdAt: r.created_at, ackedAt: r.acked_at, ackedBy: r.acked_by || null,
+        durationSec: r.acked_at ? Math.round((new Date(r.acked_at).getTime() - new Date(r.created_at).getTime()) / 1000) : null,
       })) });
     }
     if (req.method === 'POST') {

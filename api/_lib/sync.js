@@ -36,6 +36,12 @@ export async function syncExchanges() {
     await query('UPDATE exchanges SET status=$2, last_error=$3 WHERE id=$1', [ex.id, 'error', String(msg).slice(0, 400)]);
     if (!wasAlreadyError) {
       const label = ex.label || ex.name;
+      // System Status's alert-history table (start/end/duration) — closed automatically on
+      // the next successful sync (see below), no human ACK needed for this type.
+      try {
+        const code = Math.random().toString(36).slice(2, 6).toUpperCase();
+        await query("INSERT INTO alerts (type,code,summary,exchange_id) VALUES ('api_error',$1,$2,$3)", [code, `${label}: ${msg}`.slice(0, 400), ex.id]);
+      } catch (e) {}
       try { await notify((lang) => apiErrorText(lang, label, msg), { type: 'api_error' }); } catch (e) {}
       try {
         const cfg = await getOpenWAConfig();
@@ -55,6 +61,11 @@ export async function syncExchanges() {
 
     connected++; totalEquity += acct.equity; totalWallet += acct.walletBalance; positions += pos.length;
     await query('UPDATE exchanges SET status=$2, last_sync=$3, last_error=NULL, latency_ms=$4 WHERE id=$1', [ex.id, 'connected', Date.now(), latencyMs]);
+    // recovery — close out any still-open api_error alert for this exchange so its "end"
+    // and duration are recorded in the System Status alert history
+    if (ex.status === 'error') {
+      try { await query("UPDATE alerts SET acked_at=now(), acked_by='system' WHERE type='api_error' AND exchange_id=$1 AND acked_at IS NULL", [ex.id]); } catch (e) {}
+    }
 
     for (const p of pos) {
       const id = `binance:${p.symbol}`; seen.push(id);

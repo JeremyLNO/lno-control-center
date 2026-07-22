@@ -81,7 +81,7 @@ export default async function handler(req, res) {
     const sent = [];
     if (breaches.length && cfg.enabled) {
       const code = Math.random().toString(36).slice(2, 6).toUpperCase();
-      await query('INSERT INTO alerts (code,summary) VALUES ($1,$2)', [code, breachSummaries.join(' · ')]);
+      await query("INSERT INTO alerts (type,code,summary) VALUES ('breach',$1,$2)", [code, breachSummaries.join(' · ')]);
       sent.push({ type: 'alert', code, ...(await notify((lang) => breachAlertText(lang, breaches, port, code), { type: 'breach' })) });
     }
 
