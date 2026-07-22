@@ -1,4 +1,9 @@
 // Recent critical alerts + ack status. GET (any auth) lists; POST (admin) acks one.
+//   ?type=<breach|api_error> -> filter to one alert type. 'breach' = a portfolio performance
+//   threshold crossed (drawdown/daily PnL) — not a service problem. 'api_error' = an exchange
+//   API/data-feed failure — a real service-health incident. System Status' full history table
+//   asks for everything; the Live page's "incident" status/list asks for api_error only, since
+//   an incident there means "is the service healthy", not "is the portfolio down".
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
 
@@ -9,7 +14,10 @@ export default async function handler(req, res) {
       // limit=30 (default) for the Live/Activity "recent incidents" widgets; the System
       // Status page's full history table asks for more via ?limit=300.
       const limit = Math.min(Math.max(Number(req.query?.limit) || 30, 1), 500);
-      const { rows } = await query('SELECT id,type,code,summary,created_at,acked_at,acked_by FROM alerts ORDER BY created_at DESC LIMIT $1', [limit]);
+      const type = ['breach', 'api_error'].includes(req.query?.type) ? req.query.type : null;
+      const { rows } = type
+        ? (await query('SELECT id,type,code,summary,created_at,acked_at,acked_by FROM alerts WHERE type=$1 ORDER BY created_at DESC LIMIT $2', [type, limit]))
+        : (await query('SELECT id,type,code,summary,created_at,acked_at,acked_by FROM alerts ORDER BY created_at DESC LIMIT $1', [limit]));
       return res.status(200).json({ alerts: rows.map(r => ({
         id: Number(r.id), type: r.type || 'breach', code: r.code, summary: r.summary,
         createdAt: r.created_at, ackedAt: r.acked_at, ackedBy: r.acked_by || null,

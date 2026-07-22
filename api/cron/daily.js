@@ -138,7 +138,9 @@ export default async function handler(req, res) {
         // diffs against yesterday's distinct snapshot row, a true ~24h-ago comparison.
         const pnlDay24 = pnlOver(1), pctDay24 = pctOver(1);
         const openPositions = port.bots.filter(b => b.status === 'open').map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
-        const { rows: incidentRows } = await query("SELECT count(*)::int AS n FROM alerts WHERE created_at > now() - interval '24 hours'");
+        // "Incidents" = service-health problems (exchange API/data feed), not portfolio
+        // performance threshold breaches (drawdown/PnL) — those are a different alert type.
+        const { rows: incidentRows } = await query("SELECT count(*)::int AS n FROM alerts WHERE type='api_error' AND created_at > now() - interval '24 hours'");
         const incidentCount = incidentRows[0]?.n || 0;
 
         // Daily report: PDF archived (auto-verified — internal-only, no shareholder ever

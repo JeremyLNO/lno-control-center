@@ -18,7 +18,10 @@ function RealtimePage(){
   const [fills,setFills]=useState(null);
   const [detailBot,setDetailBot]=useState(null);
   const serviceHealthRef=useRef<any>(null);
-  useEffect(()=>{ if(!hasPerm(user,'view_realtime'))return; api('alerts').then(r=>setIncidents((r.alerts||[]).slice().sort((a,b)=>+new Date(b.createdAt)-+new Date(a.createdAt)).slice(0,6))).catch(()=>setIncidents([])); },[]);
+  // "Incident" here means service health (exchange API / data feed) — NOT a portfolio
+  // performance threshold crossed (drawdown, daily PnL), which is a different alert type
+  // ('breach', see api/_lib/sync.js) shown elsewhere (System Status' full alert history).
+  useEffect(()=>{ if(!hasPerm(user,'view_realtime'))return; api('alerts?type=api_error').then(r=>setIncidents((r.alerts||[]).slice().sort((a,b)=>+new Date(b.createdAt)-+new Date(a.createdAt)).slice(0,6))).catch(()=>setIncidents([])); },[]);
   // Recent Fills / Trade Stream / Order Flow — real account executions (not a public market
   // trade tape), synced incrementally per symbol alongside positions (see api/_lib/sync.js).
   // A plain 30s poll is enough — fills only change as often as the underlying sync does.

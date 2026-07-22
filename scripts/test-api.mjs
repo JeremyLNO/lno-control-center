@@ -22,6 +22,7 @@ const alerts = (await import('../api/alerts.js')).default;
 const exchanges = (await import('../api/exchanges.js')).default;
 const funds = (await import('../api/funds.js')).default;
 const bots = (await import('../api/bots.js')).default;
+const { buildReportData } = await import('../api/_lib/portfolio.js');
 
 function mockRes() {
   const r = { _status: 200, _json: null };
@@ -363,6 +364,16 @@ r = await call(alerts, { method: 'GET', headers: authH, query: { limit: '300' } 
 const closedApiErr = r.body.alerts.find(a => a.type === 'api_error');
 ok('recovery auto-closes the alert history row with an end + duration', !!closedApiErr && closedApiErr.ackedAt != null && closedApiErr.ackedBy === 'system' && typeof closedApiErr.durationSec === 'number' && closedApiErr.durationSec >= 0, closedApiErr);
 ok('?limit is capped and defaults sanely (GET /api/alerts)', r.status === 200 && Array.isArray(r.body.alerts), r.status);
+r = await call(alerts, { method: 'GET', headers: authH, query: { type: 'api_error' } });
+ok('?type=api_error excludes breach-type alerts', r.status === 200 && r.body.alerts.length > 0 && r.body.alerts.every(a => a.type === 'api_error'), r.body.alerts.map(a => a.type));
+r = await call(alerts, { method: 'GET', headers: authH, query: { type: 'breach' } });
+ok('?type=breach excludes api_error-type alerts', r.status === 200 && r.body.alerts.length > 0 && r.body.alerts.every(a => a.type === 'breach'), r.body.alerts.map(a => a.type));
+r = await call(alerts, { method: 'GET', headers: authH });
+ok('no ?type filter still returns both alert types (System Status full history)', r.status === 200 && r.body.alerts.some(a => a.type === 'breach') && r.body.alerts.some(a => a.type === 'api_error'), r.body.alerts.map(a => a.type));
+{
+  const rd = await buildReportData(1);
+  ok('incidentCount only counts service-health (api_error) alerts, not portfolio breaches', rd.incidentCount >= 1, rd.incidentCount);
+}
 
 // ── Real-time: the browser gets a scoped listenKey (never the real key/secret) to open its
 // own WebSocket for instant account/position updates, instead of waiting on the 30s poll ──

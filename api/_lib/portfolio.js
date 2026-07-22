@@ -48,7 +48,9 @@ export async function buildReportData(days = 1) {
   const pnlOver = (d) => eqv.length ? eqv[eqv.length - 1] - eqv[Math.max(0, eqv.length - 1 - d)] : 0;
   const pctOver = (d) => { const base = eqv[Math.max(0, eqv.length - 1 - d)] || 0; return base ? (pnlOver(d) / base) * 100 : 0; };
   const positions = port.bots.map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
-  const { rows: incidentRows } = await query("SELECT count(*)::int AS n FROM alerts WHERE created_at > now() - interval '24 hours'");
+  // "Incidents" = service-health problems (exchange API/data feed), not portfolio
+  // performance threshold breaches (drawdown/PnL) — those are a different alert type.
+  const { rows: incidentRows } = await query("SELECT count(*)::int AS n FROM alerts WHERE type='api_error' AND created_at > now() - interval '24 hours'");
   // Equity trend for the report's chart — a wider trailing window than `days` itself so even
   // a daily report's chart has enough points to read as a trend, not two dots (14d floor,
   // capped to however much history actually exists).
