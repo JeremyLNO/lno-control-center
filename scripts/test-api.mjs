@@ -202,7 +202,10 @@ sentMessages.length = 0;
 r = await call(cronDaily, { method: 'POST', headers: authH, query: { mode: 'alerts', force: 'all' } });
 ok('?mode=alerts still detects the same breach', r.body.alertsOnly === true && r.body.breaches.some(b => b.kind === 'pnlDay'), r.body.breaches);
 ok('?mode=alerts never sends daily/weekly/monthly reports, even with force=all', !r.body.sent.some(s => ['report', 'weekly', 'monthly', 'monthly-pdf'].includes(s.type)), r.body.sent.map(s => s.type));
-ok('?mode=alerts still sends the breach alert itself', r.body.sent.some(s => s.type === 'alert'), r.body.sent.map(s => s.type));
+// dedup (this was the actual bug report): the SAME breach was already alerted on the
+// previous call above and is still active — a poll ~10 minutes later (the alerts-only
+// cron's real cadence) must NOT resend the identical WhatsApp/email again.
+ok('a still-active breach does NOT resend on the next poll (dedup)', !r.body.sent.some(s => s.type === 'alert'), r.body.sent.map(s => s.type));
 
 // acknowledgement: cron created an alert (breach) with a code -> webhook acks it -> /api/alerts shows acked
 r = await call(alerts, { method: 'GET', headers: authH });
@@ -212,6 +215,19 @@ r = await call(webhook, { method: 'POST', query: {}, body: { event: 'message.rec
 ok('WhatsApp "ACK <code>" reply acknowledges via webhook', r.body.acked === pending.code, r.body);
 r = await call(alerts, { method: 'GET', headers: authH });
 ok('alert now shows acknowledged', !!r.body.alerts.find(al => al.code === pending.code && al.ackedAt), r.body.alerts.find(al=>al.code===pending.code));
+
+// breach recovers (threshold relaxed back to normal) -> tracked state clears -> a LATER
+// re-breach is treated as fresh and alerts again (edge-triggered, not "alert once forever")
+await call(openwa, { method: 'PUT', headers: authH, body: { pnlDayThreshold: -99999999 } });
+sentMessages.length = 0;
+r = await call(cronDaily, { method: 'POST', headers: authH, query: { mode: 'alerts' } });
+ok('breach clears once the metric is back under the threshold', !r.body.breaches.some(b => b.kind === 'pnlDay'), r.body.breaches);
+ok('no alert sent while recovered', !r.body.sent.some(s => s.type === 'alert'), r.body.sent.map(s => s.type));
+await call(openwa, { method: 'PUT', headers: authH, body: { pnlDayThreshold: 99999999 } });
+sentMessages.length = 0;
+r = await call(cronDaily, { method: 'POST', headers: authH, query: { mode: 'alerts' } });
+ok('a fresh re-breach after recovery alerts again', r.body.sent.some(s => s.type === 'alert'), r.body.sent.map(s => s.type));
+
 
 // the cron records a daily equity snapshot
 r = await call(snapshots, { method: 'GET', headers: authH });
@@ -299,6 +315,27 @@ r = await call(bots, { method: 'GET', headers: authH, query: { listenKey: '1' } 
 ok('admin gets a real listenKey + wss:// URL, never the underlying API key/secret', r.status === 200 && r.body.listenKey === 'fake-listen-key-123' && r.body.wsUrl === 'wss://fstream.binance.com/ws/fake-listen-key-123', r.body);
 r = await call(bots, { method: 'POST', headers: authH, body: { action: 'listenKeyKeepAlive' } });
 ok('admin can keep the listenKey alive', r.status === 200 && r.body.ok === true, r.body);
+
+// dormant bots: same dedup story as the breach alerts above — an open position stuck
+// unchanged for >48h should alert once, not on every ~10-minute poll while it stays stuck
+// (the mock exchange position for ADAUSDT is unchanged from here on, so re-syncing via
+// cronDaily below never bumps last_changed on its own — see sync.js's CASE WHEN).
+await db.query("UPDATE bots SET last_changed = now() - interval '50 hours' WHERE id='binance:ADAUSDT'");
+sentMessages.length = 0;
+r = await call(cronDaily, { method: 'POST', headers: authH, query: { mode: 'alerts' } });
+ok('a newly-dormant bot triggers a stale alert', r.body.sent.some(s => s.type === 'stale'), r.body.sent.map(s => s.type));
+sentMessages.length = 0;
+r = await call(cronDaily, { method: 'POST', headers: authH, query: { mode: 'alerts' } });
+ok('the same still-dormant bot does NOT resend on the next poll (dedup)', !r.body.sent.some(s => s.type === 'stale'), r.body.sent.map(s => s.type));
+// the bot changes (no longer dormant) -> tracked state clears for it -> going dormant again
+// later is treated as fresh, not "alert once forever"
+await db.query("UPDATE bots SET last_changed = now() WHERE id='binance:ADAUSDT'");
+await call(cronDaily, { method: 'POST', headers: authH, query: { mode: 'alerts' } });
+await db.query("UPDATE bots SET last_changed = now() - interval '50 hours' WHERE id='binance:ADAUSDT'");
+sentMessages.length = 0;
+r = await call(cronDaily, { method: 'POST', headers: authH, query: { mode: 'alerts' } });
+ok('a bot going dormant again after recovering alerts again', r.body.sent.some(s => s.type === 'stale'), r.body.sent.map(s => s.type));
+await db.query("UPDATE bots SET last_changed = now() WHERE id='binance:ADAUSDT'"); // leave clean for later tests
 
 // ── Employee Fund: contributions are detected live from the synced wallet balance, never
 // auto-granted on hire, and only become a share once an admin assigns them to someone ──

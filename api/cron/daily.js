@@ -82,17 +82,44 @@ export default async function handler(req, res) {
     }
 
     const sent = [];
-    if (breaches.length && cfg.enabled) {
-      const code = Math.random().toString(36).slice(2, 6).toUpperCase();
-      await query("INSERT INTO alerts (type,code,summary) VALUES ('breach',$1,$2)", [code, breachSummaries.join(' · ')]);
-      sent.push({ type: 'alert', code, ...(await notify((lang) => breachAlertText(lang, breaches, port, code), { type: 'breach' })) });
+    // Edge-triggered dedup: the alerts-only cron fires every ~10 minutes (see
+    // .github/workflows/alert-check.yml), so without this both breach and dormant-bot
+    // alerts would re-send the exact same WhatsApp/email every single run for as long as
+    // the condition persists — sometimes for hours. Instead we only notify the FIRST time
+    // a given breach kind (or a given bot's dormancy) is seen, tracked in app_config, and
+    // clear the tracked state the moment the condition resolves so a future recurrence can
+    // alert again. Same philosophy as the api_error "fresh failure only" gate in sync.js.
+    const currentBreachKinds = breaches.map(b => b.kind);
+    {
+      const prevRow = (await query("SELECT value FROM app_config WHERE key='breachActiveKinds'")).rows[0];
+      const prevKinds = Array.isArray(prevRow?.value) ? prevRow.value : [];
+      const newKinds = currentBreachKinds.filter(k => !prevKinds.includes(k));
+      if (newKinds.length && cfg.enabled) {
+        const code = Math.random().toString(36).slice(2, 6).toUpperCase();
+        await query("INSERT INTO alerts (type,code,summary) VALUES ('breach',$1,$2)", [code, breachSummaries.join(' · ')]);
+        sent.push({ type: 'alert', code, newKinds, ...(await notify((lang) => breachAlertText(lang, breaches, port, code), { type: 'breach' })) });
+      }
+      await query(`INSERT INTO app_config (key,value) VALUES ('breachActiveKinds',$1::jsonb)
+         ON CONFLICT (key) DO UPDATE SET value=$1::jsonb`, [JSON.stringify(currentBreachKinds)]);
     }
 
     // 3b) dormant bots: an open position whose side/qty/entry hasn't changed in DORMANT_HOURS
     const dormant = port.bots.filter(b => b.last_changed && (Date.now() - new Date(b.last_changed).getTime()) / 3600000 >= DORMANT_HOURS);
-    if (dormant.length && cfg.enabled) {
-      const dormantData = dormant.map(b => ({ symbol: b.symbol, side: b.side, hours: Math.round((Date.now() - new Date(b.last_changed).getTime()) / 3600000) }));
-      sent.push({ type: 'stale', ...(await notify((lang) => dormantAlertText(lang, dormantData), { type: 'stale' })) });
+    {
+      // last_changed round-trips as a JS Date from the driver but as a plain ISO string once
+      // stored in the JSONB config — normalize both sides to ISO before comparing, otherwise
+      // Date !== string is always true and every poll looks "newly" dormant.
+      const isoOf = (v) => new Date(v).toISOString();
+      const prevRow = (await query("SELECT value FROM app_config WHERE key='dormantAlerted'")).rows[0];
+      const prevMap = (prevRow?.value && typeof prevRow.value === 'object') ? prevRow.value : {};
+      const newlyDormant = dormant.filter(b => prevMap[b.id] !== isoOf(b.last_changed));
+      if (newlyDormant.length && cfg.enabled) {
+        const dormantData = newlyDormant.map(b => ({ symbol: b.symbol, side: b.side, hours: Math.round((Date.now() - new Date(b.last_changed).getTime()) / 3600000) }));
+        sent.push({ type: 'stale', ...(await notify((lang) => dormantAlertText(lang, dormantData), { type: 'stale' })) });
+      }
+      const nextMap = Object.fromEntries(dormant.map(b => [b.id, isoOf(b.last_changed)]));
+      await query(`INSERT INTO app_config (key,value) VALUES ('dormantAlerted',$1::jsonb)
+         ON CONFLICT (key) DO UPDATE SET value=$1::jsonb`, [JSON.stringify(nextMap)]);
     }
 
     // 4) reports — global + per-fund, grouped by fund. Skipped entirely in ?mode=alerts so a
