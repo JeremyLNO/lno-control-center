@@ -35,16 +35,20 @@ function RulesPage(){
         <div>{t('rules.adminHint')}</div>
       </div>
     </Card>
-    <div className="space-y-4">
-      {EDITABLE_ROLES.map(role=><Card key={role} className="p-5">
-        <div className="font-semibold text-navy mb-3">{t('role.'+role)}</div>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-          {PERMISSIONS.map(([p])=><label key={p} className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={(rolePerms[role]||[]).includes(p)} onChange={()=>toggle(role,p)} className="accent-navy w-4 h-4"/>{t('perm.'+p)}
-          </label>)}
-        </div>
-      </Card>)}
-    </div>
+    <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
+      <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+        <th className="px-4 py-2.5 text-left font-medium">{t('rules.permission')}</th>
+        {EDITABLE_ROLES.map(role=><th key={role} className="px-4 py-2.5 text-center font-medium">{t('role.'+role)}</th>)}
+      </tr></thead>
+      <tbody>
+        {PERMISSIONS.map(([p])=><tr key={p} className="border-b border-slate-50 hover:bg-slate-50/60">
+          <td className="px-4 py-2.5 text-navy">{t('perm.'+p)}</td>
+          {EDITABLE_ROLES.map(role=><td key={role} className="px-4 py-2.5 text-center">
+            <input type="checkbox" checked={(rolePerms[role]||[]).includes(p)} onChange={()=>toggle(role,p)} className="accent-navy w-4 h-4"/>
+          </td>)}
+        </tr>)}
+      </tbody>
+    </table></div></Card>
   </div>;
 }
 export { RulesPage };
