@@ -12,6 +12,7 @@ function AdminReports(){
   const {user,route,t}=useApp();
   const isAdmin=user.role==='admin';
   const [reports,setReports]=useState(null); const [busy,setBusy]=useState(false); const [dl,setDl]=useState(null); const [verifying,setVerifying]=useState(null);
+  const [testingEmail,setTestingEmail]=useState(false); const [testingWa,setTestingWa]=useState(false);
   const [kindFilter,setKindFilter]=useState('all');
   const [statusFilter,setStatusFilter]=useState(()=>route.params?.status==='not_verified'?'not_verified':route.params?.status==='verified'?'verified':'all');
   const REPORT_KINDS=['daily','weekly','monthly'];
@@ -23,11 +24,17 @@ function AdminReports(){
   async function generate(){ setBusy(true); try{ await api('snapshots',{method:'POST',body:{action:'generateReport'}}); toast.success(t('reports.generatedArchived')); load(); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
   async function download(rep){ setDl(rep.id); try{ const r=await api('snapshots?report='+rep.id); downloadBlob(b64ToBlob(r.pdfBase64), r.filename||('lno-report-'+rep.periodLabel+'.pdf')); toast.success(t('reports.downloaded')); }catch(e){ toast.error(e.message); } finally{ setDl(null); } }
   async function verify(rep){ setVerifying(rep.id); try{ await api('snapshots',{method:'POST',body:{action:'verifyReport',id:rep.id}}); toast.success(t('reports.verified')); load(); }catch(e){ toast.error(e.message); } finally{ setVerifying(null); } }
+  async function testEmail(){ setTestingEmail(true); try{ const r=await api('snapshots',{method:'POST',body:{action:'testEmail'}}); toast.success(t('reports.testEmailSent',{email:r.email})); }catch(e){ toast.error(e.message); } finally{ setTestingEmail(false); } }
+  async function testWhatsApp(){ setTestingWa(true); try{ const r=await api('snapshots',{method:'POST',body:{action:'testWhatsApp'}}); toast.success(t('reports.testWhatsAppSent',{phone:r.phone})); }catch(e){ toast.error(e.message); } finally{ setTestingWa(false); } }
   const visible=(reports||[]).filter(r=>allowedKinds.includes(r.kind));
   const filtered=visible.filter(r=>(kindFilter==='all'||r.kind===kindFilter)&&(statusFilter==='all'||r.status===statusFilter));
   return <div>
     <PageHead title={t('reports.title')} subtitle={isAdmin?t('reports.subtitleAdmin'):t('reports.subtitleOther')}
-      actions={isAdmin&&<Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?t('reports.generating'):t('reports.generateNow')}</Btn>}/>
+      actions={isAdmin&&<>
+        <Btn variant="outline" onClick={testEmail} disabled={testingEmail}><Icon name="mail" className="w-4 h-4"/>{testingEmail?t('reports.testing'):t('reports.testEmail')}</Btn>
+        <Btn variant="outline" onClick={testWhatsApp} disabled={testingWa}><Icon name="msg" className="w-4 h-4"/>{testingWa?t('reports.testing'):t('reports.testWhatsApp')}</Btn>
+        <Btn onClick={generate} disabled={busy}><Icon name="filetext" className="w-4 h-4"/>{busy?t('reports.generating'):t('reports.generateNow')}</Btn>
+      </>}/>
     {visible.length>0&&<div className="flex items-center gap-2 mb-3">
       <Select value={kindFilter} onChange={setKindFilter} className="w-36" options={[{value:'all',label:t('reports.allKinds')},...allowedKinds.map(k=>({value:k,label:t('reports.kind'+k.charAt(0).toUpperCase()+k.slice(1))}))]}/>
       <Select value={statusFilter} onChange={setStatusFilter} className="w-40" options={[{value:'all',label:t('reports.allStatuses')},{value:'verified',label:t('reports.statusVerified')},{value:'not_verified',label:t('reports.statusNotVerified')}]}/>

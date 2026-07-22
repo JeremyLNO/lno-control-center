@@ -108,7 +108,7 @@ globalThis.fetch = async (url, opts) => {
     }
     return { ok: true, status: 200, json: async () => ({}) };
   }
-  if (u.includes('textmebot.com')) { sentMessages.push({ text: new URL(u).searchParams.get('text') || '' }); return { ok: true, status: 200, text: async () => 'Success! Message Sent.' }; }
+  if (u.includes('textmebot.com')) { const uu = new URL(u); sentMessages.push({ text: uu.searchParams.get('text') || '', to: uu.searchParams.get('recipient') || '' }); return { ok: true, status: 200, text: async () => 'Success! Message Sent.' }; }
   if (u.includes('api.resend.com')) {
     const payload = JSON.parse(opts.body);
     const code = (payload.subject.match(/^(\d{6})/) || [])[1] || null;
@@ -243,6 +243,24 @@ r = await call(snapshots, { method: 'GET', headers: authH, query: { report: Stri
 ok('archived report downloads as a valid %PDF', r.status === 200 && Buffer.from(r.body.pdfBase64, 'base64').slice(0, 5).toString() === '%PDF-', r.body && r.body.filename);
 r = await call(snapshots, { method: 'GET', query: { reports: 'list' } });
 ok('report archive requires auth -> 401', r.status === 401, r.status);
+
+// Reports page "send test" buttons — sent ONLY to the requesting admin, not the real
+// recipient list (admin's phone was set to +33611111111 / notify email above)
+sentEmails.length = 0;
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'testEmail' } });
+ok('admin can send a test daily-report email to themselves', r.status === 200 && r.body.email === 'admin@lno.company', r.body);
+ok('the test email actually went out with the daily report subject', sentEmails.some(e => e.to === 'admin@lno.company' && /LNO Daily Report/i.test(e.subject)), sentEmails.map(e => ({ to: e.to, subject: e.subject })));
+ok('a test email send does NOT also email other admin/operator/viewer accounts', sentEmails.filter(e => /LNO Daily Report/i.test(e.subject)).length === 1, sentEmails.map(e => e.to));
+r = await call(snapshots, { method: 'POST', body: { action: 'testEmail' } });
+ok('non-admin cannot trigger a test email -> 401/403', [401, 403].includes(r.status), r.status);
+
+sentMessages.length = 0;
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'testWhatsApp' } });
+ok('admin can send a test daily-digest WhatsApp to themselves', r.status === 200 && r.body.phone === '+33611111111', r.body);
+ok('the test WhatsApp actually went out as the synthetic daily digest', sentMessages.some(m => m.to === '+33611111111' && /LNO Daily/i.test(m.text)), sentMessages.map(m => ({ to: m.to, text: (m.text || '').slice(0, 30) })));
+ok('a test WhatsApp send does NOT also message other admin/operator accounts', sentMessages.filter(m => /LNO Daily/i.test(m.text)).length === 1, sentMessages.map(m => m.to));
+r = await call(snapshots, { method: 'POST', body: { action: 'testWhatsApp' } });
+ok('non-admin cannot trigger a test WhatsApp -> 401/403', [401, 403].includes(r.status), r.status);
 
 // ── Bots: auto-detected from Binance futures positions, assigned to global funds ──
 r = await call(exchanges, { method: 'POST', headers: authH, body: { name: 'binance', label: 'Binance Futures', apiKey: 'BINKEY', apiSecret: 'BINSECRET' } });

@@ -33,3 +33,24 @@ export async function buildPortfolio() {
     bots, connected: Number(live.connected || 0), syncedAt: live.syncedAt || null,
   };
 }
+
+// Same shape/fields the real once-daily cron send builds inline (api/cron/daily.js) for the
+// PDF/email/WhatsApp digest — used here by the admin "send test" buttons on the Reports page
+// (api/snapshots.js) so a test send reflects the same numbers a real send would. pnlDay/pctDay
+// diff against yesterday's distinct equity_snapshots row (NOT port.pnlDay, which compares
+// against whatever row is "most recent" — that row gets continuously overwritten intraday by
+// the every-~10-minute alerts-only cron, so it can end up reflecting the last few minutes
+// rather than a true ~24h-ago comparison).
+export async function buildDailyReportData() {
+  const port = await buildPortfolio();
+  const { rows: snaps } = await query('SELECT equity FROM equity_snapshots ORDER BY day ASC');
+  const eqv = snaps.map(r => Number(r.equity));
+  const pnlOver = (d) => eqv.length ? eqv[eqv.length - 1] - eqv[Math.max(0, eqv.length - 1 - d)] : 0;
+  const pctOver = (d) => { const base = eqv[Math.max(0, eqv.length - 1 - d)] || 0; return base ? (pnlOver(d) / base) * 100 : 0; };
+  const positions = port.bots.map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
+  const { rows: incidentRows } = await query("SELECT count(*)::int AS n FROM alerts WHERE created_at > now() - interval '24 hours'");
+  return {
+    equity: port.equity, pnlDay: pnlOver(1), pctDay: pctOver(1), openPnl: port.openPnl, exposure: port.exposure,
+    funds: port.funds, positions, incidentCount: incidentRows[0]?.n || 0, dateLabel: new Date().toISOString().slice(0, 10),
+  };
+}

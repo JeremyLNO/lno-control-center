@@ -7,12 +7,16 @@
 //   POST {action:'generateReport'} -> build + store a monthly report now (admin), not_verified
 //   POST {action:'verifyReport', id} -> mark verified (admin); if the report's kind is
 //     shareholder-facing (monthly), THIS is what notifies shareholders — not generation.
+//   POST {action:'testEmail'|'testWhatsApp'} -> send the current daily report to the
+//     REQUESTING ADMIN ONLY (their own email/phone) — Reports page "send test" buttons.
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
 import { riskMetrics } from './_lib/metrics.js';
-import { buildPortfolio } from './_lib/portfolio.js';
+import { buildPortfolio, buildDailyReportData } from './_lib/portfolio.js';
 import { buildMonthlyPdf } from './_lib/report.js';
-import { notify, REPORT_AVAILABLE } from './_lib/notify.js';
+import { notify, REPORT_AVAILABLE, getOpenWAConfig, getApiKey, sendTextMeBot } from './_lib/notify.js';
+import { dailyDigestText } from './_lib/notifyText.js';
+import { sendDailyReportEmail } from './_lib/mailer.js';
 import { permsForRole } from './_lib/rolePerms.js';
 
 // Which report kinds are ever shown/sent to shareholders — only these need the shareholder
@@ -85,6 +89,30 @@ export default async function handler(req, res) {
           id: Number(r.id), kind: r.kind, periodLabel: r.period_label, equity: Number(r.equity), pnl: Number(r.pnl),
           createdAt: r.created_at, status: r.status, verifiedBy: r.verified_by, verifiedAt: r.verified_at,
         } });
+      }
+      if (req.body?.action === 'testEmail') {
+        const { rows } = await query('SELECT email FROM users WHERE id=$1', [a.id]);
+        const email = rows[0]?.email;
+        if (!email) return res.status(400).json({ error: 'no email on file for your account' });
+        const data = await buildDailyReportData();
+        await sendDailyReportEmail(email, data);
+        return res.status(200).json({ ok: true, email });
+      }
+      if (req.body?.action === 'testWhatsApp') {
+        const { rows } = await query('SELECT phone, language FROM users WHERE id=$1', [a.id]);
+        const phone = rows[0]?.phone;
+        if (!phone) return res.status(400).json({ error: 'no phone number on file — set one in Profile' });
+        const cfg = await getOpenWAConfig();
+        const apikey = getApiKey(cfg);
+        if (!apikey) return res.status(400).json({ error: 'WhatsApp is not configured (no API key set on the WhatsApp page)' });
+        const data = await buildDailyReportData();
+        const message = dailyDigestText(rows[0].language || 'en', {
+          equity: data.equity, pnlDay: data.pnlDay, pctDay: data.pctDay,
+          openCount: data.positions.length, incidentCount: data.incidentCount,
+        });
+        const r = await sendTextMeBot(phone, message, apikey);
+        if (!r.ok) return res.status(502).json({ error: 'WhatsApp send failed', detail: r });
+        return res.status(200).json({ ok: true, phone });
       }
       return res.status(400).json({ error: 'unknown action' });
     }
