@@ -6,6 +6,15 @@ import { requireAdmin, hashPassword, sanitizeUser, passwordIssues } from './_lib
 import { ROLE_PERMS } from './_lib/constants.js';
 import { audit, recentAudit } from './_lib/audit.js';
 
+// There must always be at least one active admin — used to block the last one from being
+// deactivated, demoted, or deleted (whether by themselves or another admin).
+async function isLastActiveAdmin(id) {
+  const target = (await query('SELECT role,active FROM users WHERE id=$1', [id])).rows[0];
+  if (!target || target.role !== 'admin' || !target.active) return false;
+  const { rows } = await query("SELECT count(*)::int AS n FROM users WHERE role='admin' AND active=true AND id<>$1", [id]);
+  return rows[0].n === 0;
+}
+
 export default async function handler(req, res) {
   const a = requireAdmin(req, res); if (!a) return;
   try {
@@ -59,6 +68,10 @@ export default async function handler(req, res) {
     if (req.method === 'PATCH') {
       const { id, password, ...patch } = body;
       if (!id) return res.status(400).json({ error: 'id required' });
+      const demotesOrDeactivates = (patch.role && patch.role !== 'admin') || patch.active === false;
+      if (demotesOrDeactivates && await isLastActiveAdmin(id)) {
+        return res.status(400).json({ error: 'At least one active admin is required — promote or activate another admin first.' });
+      }
       if (patch.role) patch.permissions = ROLE_PERMS[patch.role] || ROLE_PERMS.viewer; // role change resets perms
       const map = { firstName: 'first_name', lastName: 'last_name', active: 'active', role: 'role', permissions: 'permissions' };
       const sets = [], vals = []; let i = 1;
@@ -92,6 +105,7 @@ export default async function handler(req, res) {
       const id = body.id || req.query?.id;
       if (!id) return res.status(400).json({ error: 'id required' });
       if (id === a.id) return res.status(400).json({ error: 'cannot delete yourself' });
+      if (await isLastActiveAdmin(id)) return res.status(400).json({ error: 'At least one active admin is required — promote or activate another admin first.' });
       await query('DELETE FROM users WHERE id=$1', [id]);
       await audit(req, a, 'user.delete', id, {});
       return res.status(200).json({ ok: true });

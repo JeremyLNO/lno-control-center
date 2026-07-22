@@ -72,6 +72,11 @@ export default async function handler(req, res) {
       // that no email arrives.
       if (action === 'requestOtp') {
         const email = String(body.email || '').trim();
+        // @lno.company accounts always sign in with Google — telling them so isn't an
+        // enumeration leak (it's true of the whole domain, not any one account).
+        if (/@lno\.company$/i.test(email)) {
+          return res.status(400).json({ error: 'Use Google Sign-In for @lno.company emails.', code: 'GOOGLE_ONLY' });
+        }
         const { rows } = await query('SELECT * FROM users WHERE lower(email)=lower($1)', [email]);
         const u = rows[0];
         if (u && u.active && (u.auth_provider || 'password') === 'otp') {

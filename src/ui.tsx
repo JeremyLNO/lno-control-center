@@ -707,7 +707,7 @@ function Login(){
   async function sendCode(e){
     e?.preventDefault(); if(otpBusy||resendIn>0) return; setOtpBusy(true); setErr('');
     try{ await api('auth',{method:'POST',body:{action:'requestOtp',email:otpEmail.trim()}}); setMode('otp-code'); setOtpCode(''); setOtpStatus('idle'); setResendIn(60); }
-    catch(ex){ setErr(ex.message||t('login.otpSendFailed')); }
+    catch(ex){ setErr(ex.data?.code==='GOOGLE_ONLY'?t('login.otpGoogleOnly'):(ex.message||t('login.otpSendFailed'))); }
     finally{ setOtpBusy(false); }
   }
   async function submitCode(code){

@@ -355,8 +355,11 @@ ok('a consumed code cannot be reused', r.status === 401, r.body);
 sentEmails.length = 0;
 r = await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'no-such-account@example.com' } });
 ok('requestOtp for an unknown email still returns {ok:true} but sends nothing', r.status === 200 && r.body.ok === true && sentEmails.length === 0, r.body);
-r = await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'nina.test@lno.company' } }); // a real GOOGLE-provider account
-ok('requestOtp for a non-otp account also returns {ok:true} but sends nothing', r.status === 200 && r.body.ok === true && sentEmails.length === 0, r.body);
+// @lno.company emails always sign in with Google — requestOtp short-circuits with a
+// dedicated error instead of the usual {ok:true}, since that's a domain-wide fact, not an
+// account-existence leak (nina.test@lno.company is a real GOOGLE-provider account here).
+r = await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'nina.test@lno.company' } });
+ok('requestOtp for an @lno.company email is rejected with GOOGLE_ONLY', r.status === 400 && r.body.code === 'GOOGLE_ONLY' && sentEmails.length === 0, r.body);
 
 // resend cooldown: a second request for the same (fresh) account within 60s doesn't duplicate
 await call(users, { method: 'POST', headers: authH, body: { email: 'cooldown.test@example.com', role: 'shareholder' } });
@@ -444,6 +447,22 @@ r = await call(users, { method: 'POST', headers: authH, body: { email: 'lock.tes
 for (let i = 0; i < 5; i++) await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'lock.test@external.com', code: '000000' } });
 const lockedTry = await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'lock.test@external.com', code: '000000' } });
 ok('account locks after 5 failed OTP verifications -> 429', lockedTry.status === 429, lockedTry.body);
+
+// ── P3: the last active admin can't be deactivated, demoted, or deleted ──
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: adminRow.id, active: false } });
+ok('cannot deactivate the last active admin -> 400', r.status === 400, r.body);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: adminRow.id, role: 'operator' } });
+ok('cannot demote the last active admin -> 400', r.status === 400, r.body);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: ninaId, role: 'admin' } });
+ok('promote a second user to admin', r.status === 200 && r.body.user.role === 'admin', r.body);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: adminRow.id, active: false } });
+ok('deactivating an admin is allowed once another admin exists', r.status === 200, r.body);
+r = await call(users, { method: 'DELETE', headers: authH, body: { id: ninaId } });
+ok('cannot delete the last active admin -> 400', r.status === 400, r.body);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: adminRow.id, active: true } });
+ok('re-activate the original admin for later tests', r.status === 200, r.body);
+r = await call(users, { method: 'PATCH', headers: authH, body: { id: ninaId, role: 'operator' } });
+ok('demote nina back to operator now that another admin is active', r.status === 200, r.body);
 
 // ── P3: admin actions are recorded in the audit log ──
 const auditLog = (await call(users, { method: 'GET', headers: authH, query: { audit: '1' } })).body.audit || [];

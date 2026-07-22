@@ -31,9 +31,11 @@ function AdminUsers(){
   const [exp,setExp]=useState(null); const [add,setAdd]=useState(false); const [del,setDel]=useState(null);
   const [sel,setSel]=useState(()=>new Set()); const [bulkDel,setBulkDel]=useState(false);
   const [roleFilter,setRoleFilter]=useState('all');
-  const [tick,setTick]=useState(0);
-  // refetch periodically so the online lights + last-seen stay current
-  useEffect(()=>{ if(user.role!=='admin') return; const load=()=>{ api('users').then(r=>setUsers(r.users||[])).catch(()=>{}); setTick(x=>x+1); }; load(); const iv=setInterval(load,30000); return ()=>clearInterval(iv); },[]);
+  const [loading,setLoading]=useState(false);
+  // loads once on mount — no auto-polling, refresh is manual (the online lights/last-seen
+  // are a snapshot as of the last load, not a live feed)
+  const load=useCallback(()=>{ if(user.role!=='admin') return; setLoading(true); api('users').then(r=>setUsers(r.users||[])).catch(()=>{}).finally(()=>setLoading(false)); },[user.role]);
+  useEffect(()=>{ load(); },[load]);
   if(user.role!=='admin') return <Denied/>;
   const isOnline=(u)=> u.lastSeenAt && (Date.now()-new Date(u.lastSeenAt).getTime() < 150000); // active within 2.5 min
   const up=async(id,patch)=>{ try{ const r=await api('users',{method:'PATCH',body:{id,...patch}}); setUsers(us=>us.map(u=>u.id===id?r.user:u)); }catch(e){ toast.error(e.message); } };
@@ -53,7 +55,10 @@ function AdminUsers(){
   const filteredUsers=roleFilter==='all'?users:users.filter(u=>u.role===roleFilter);
   const allSel=filteredUsers.length>0&&filteredUsers.every(u=>sel.has(u.id));
   return <div>
-    <PageHead title={t('users.title')} subtitle={t('users.accountsCount',{n:users.length})} refresh={{ms:30000,tick}} actions={<Btn onClick={()=>setAdd(true)}><Icon name="plus" className="w-4 h-4"/>{t('users.addUser')}</Btn>}/>
+    <PageHead title={t('users.title')} subtitle={t('users.accountsCount',{n:users.length})} actions={<>
+      <Btn variant="outline" onClick={load} disabled={loading}><Icon name="refresh" className={`w-4 h-4 ${loading?'animate-spin':''}`}/>{t('common.refresh')}</Btn>
+      <Btn onClick={()=>setAdd(true)}><Icon name="plus" className="w-4 h-4"/>{t('users.addUser')}</Btn>
+    </>}/>
     <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
       <div className="flex items-center gap-3 flex-wrap">
         <label className="flex items-center gap-2 text-sm text-slate-500 cursor-pointer select-none">
