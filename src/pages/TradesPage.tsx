@@ -2,7 +2,8 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, fmtNum, fmtPctPlain, clsPnl, fmtPrice, fmtAgo, baseOf, PREF, toast, Icon, Card, SectionTitle, Btn, Badge, StatusPill,
-  Select, ExportMenu, Donut, KpiCard, FUND_PALETTE, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag
+  Select, ExportMenu, Donut, KpiCard, FUND_PALETTE, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag,
+  PositionDetailOverlay
 } from '../ui'
 
 /* ============================================================
@@ -65,7 +66,7 @@ function PresetMenu({storeKey,current,onApply}: any){
    ============================================================ */
 // Columns operate on a "bot" (one exchange/symbol futures position). `csv` returns
 // a plain value for export; `cell` renders the table cell. `fund` is attached per row.
-function buildPosCols(t: any){ return [
+function buildPosCols(t: any, onDetail: any){ return [
   {key:'symbol',label:t('activity.symbol'),cell:b=><span className="font-mono text-xs text-navy">{b.symbol}</span>,csv:b=>b.symbol,def:true},
   {key:'exchange',label:t('live.exchange'),cell:b=><span className="text-slate-500 capitalize">{b.exchange}</span>,csv:b=>b.exchange,def:true},
   {key:'fund',label:t('activity.fund'),cell:b=> b.fund? <Badge color={b.fund.color} dot>{b.fund.name}</Badge> : <span className="text-xs text-slate-400">{t('live.unassigned')}</span>,csv:b=>b.fund?.name||'',def:true},
@@ -80,6 +81,7 @@ function buildPosCols(t: any){ return [
   {key:'marginUsage',label:t('positions.marginUse'),align:'right',cell:b=>{ const p=marginUsagePct(b); return p==null? <span className="text-slate-300">—</span> : <span className={`tnum ${p>80?'text-danger':p>50?'text-amber-600':'text-slate-500'}`}>{p.toFixed(0)}%</span>; },csv:b=>{ const p=marginUsagePct(b); return p==null?'':Number(p.toFixed(1)); },def:false},
   {key:'dormant',label:t('positions.lastActivity'),cell:b=>{ const {dormant,hours}=dormantInfo(b); return hours==null? <span className="text-slate-300">—</span> : dormant? <span className="text-amber-600 font-medium flex items-center gap-1"><Icon name="clock" className="w-3.5 h-3.5"/>{t('positions.dormantAgo',{ago:b.lastChanged?fmtAgo(b.lastChanged):''})}</span> : <span className="text-slate-400">{b.lastChanged?fmtAgo(b.lastChanged):'—'}</span>; },csv:b=>{ const {hours}=dormantInfo(b); return hours==null?'':Math.round(hours)+'h'; },def:false},
   {key:'status',label:t('positions.status'),cell:b=><StatusPill status={b.status==='open'?'active':'inactive'}/>,csv:b=>b.status,def:true},
+  {key:'detail',label:t('positionDetail.viewDetails'),cell:b=>b.status==='open'&&<Btn size="sm" variant="outline" onClick={()=>onDetail(b)}><Icon name="trendup" className="w-3.5 h-3.5"/>{t('positionDetail.viewDetails')}</Btn>,csv:()=>'',def:true},
 ]; }
 const POS_GETTERS={symbol:r=>r.symbol,exchange:r=>r.exchange,fund:r=>r.fund?.name||'',side:r=>r.side,qty:r=>r.qty,entry:r=>r.entry,mark:r=>r.mark,uPnl:r=>r.unrealizedPnl,notional:r=>Math.abs(r.notional),leverage:r=>r.leverage,liqDist:r=>{const {pct}=liqInfo(r);return pct==null?Infinity:pct;},marginUsage:r=>marginUsagePct(r)??-1,dormant:r=>{const {hours}=dormantInfo(r);return hours??-1;},status:r=>r.status};
 
@@ -87,7 +89,8 @@ function TradesPage(){
   const {user,data,funds,refreshTick,refreshMs,t}=useApp();
   const [f,setF]=useState(()=>PREF.get('pos_filter',{fund:'all',side:'All',status:'open',q:''}));
   const [sort,setSort]=useState(()=>PREF.get('pos_sort',{col:'uPnl',dir:'desc'}));
-  const POS_COLS=useMemo(()=>buildPosCols(t),[t]);
+  const [detailBot,setDetailBot]=useState(null);
+  const POS_COLS=useMemo(()=>buildPosCols(t,setDetailBot),[t]);
   const [colKeys,setColKeys]=useState(()=>PREF.get('pos_cols',POS_COLS.filter(c=>c.def).map(c=>c.key)));
   useEffect(()=>{ PREF.set('pos_filter',f); },[f]);
   useEffect(()=>{ PREF.set('pos_sort',sort); },[sort]);
@@ -228,6 +231,7 @@ function TradesPage(){
       </Card>
       </div>
     </div>
+    <PositionDetailOverlay bot={detailBot} onClose={()=>setDetailBot(null)}/>
   </div>;
 }
 

@@ -330,6 +330,7 @@ function ExportMenu({getRows,headers,filename,disabled,label='Export',size='sm',
 }
 
 function Modal({open,onClose,title,children,wide}: any){
+  useEffect(()=>{ if(!open) return; const onKey=(e)=>{ if(e.key==='Escape') onClose(); }; window.addEventListener('keydown',onKey); return ()=>window.removeEventListener('keydown',onKey); },[open,onClose]);
   if(!open) return null;
   return <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
     <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm"/>
@@ -413,7 +414,10 @@ function AreaChart({data,positive,height=260,resetKey,benchmark}: any){
 // Y-domain here needs high/low across the view instead of a single `equity` field. Hover
 // crosshair reuses the same idxFromEvent trick as AreaChart; no drag-to-zoom or indicator
 // overlays for v1 (kept deliberately out of scope — see the redesign plan).
-function CandleChart({data,height=320}: any){
+// tradeFromIndex/tradeSide (both optional): shades the chart from that bar onward with a
+// light green/red band and draws dashed lines at the highest-high/lowest-low reached within
+// that shaded range — the position-detail overlay's "since trade start" frame (item 13).
+function CandleChart({data,height=320,tradeFromIndex,tradeSide}: any){
   const ref=useRef<any>(null);
   const [hover,setHover]=useState(null);
   if(!data||data.length<2) return <div style={{height}} className="grid place-items-center text-slate-300 text-sm">No data</div>;
@@ -425,10 +429,16 @@ function CandleChart({data,height=320}: any){
   const idxFromEvent=(e)=>{ const r=ref.current.getBoundingClientRect(); const f=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)); return Math.min(n-1,Math.max(0,Math.floor(f*n))); };
   const hv=hover!=null?data[hover]:null;
   const hoverPct=hover!=null?(hover/(n-1))*100:0;
+  const sinceTrade=tradeFromIndex!=null?data.slice(Math.max(0,Math.min(tradeFromIndex,n-1))):null;
+  const tradeHigh=sinceTrade&&sinceTrade.length?Math.max(...sinceTrade.map(d=>d.h)):null;
+  const tradeLow=sinceTrade&&sinceTrade.length?Math.min(...sinceTrade.map(d=>d.l)):null;
+  const bandColor=tradeSide==='SHORT'?'rgba(239,68,68,0.07)':'rgba(16,185,129,0.07)';
+  const lineColor=tradeSide==='SHORT'?'#EF4444':'#10B981';
   return <div className="relative select-none cursor-crosshair" ref={ref} style={{height}}
       onMouseMove={e=>setHover(idxFromEvent(e))} onMouseLeave={()=>setHover(null)}>
     <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full" style={{height}}>
       {[0.25,0.5,0.75].map(g=><line key={g} x1="0" x2={w} y1={h*g} y2={h*g} stroke="#eef0f3" strokeWidth="1" vectorEffect="non-scaling-stroke"/>)}
+      {tradeFromIndex!=null&&tradeFromIndex<n&&<rect x={Math.max(0,X(tradeFromIndex)-slot/2)} y="0" width={w-Math.max(0,X(tradeFromIndex)-slot/2)} height={h} fill={bandColor}/>}
       {data.map((d,i)=>{
         const up=d.c>=d.o, color=up?'#10B981':'#EF4444';
         const bodyTop=Y(Math.max(d.o,d.c)), bodyBot=Y(Math.min(d.o,d.c));
@@ -437,14 +447,68 @@ function CandleChart({data,height=320}: any){
           <rect x={X(i)-bodyW/2} y={bodyTop} width={bodyW} height={Math.max(1,bodyBot-bodyTop)} fill={color}/>
         </g>;
       })}
+      {tradeHigh!=null&&<line x1="0" x2={w} y1={Y(tradeHigh)} y2={Y(tradeHigh)} stroke={lineColor} strokeWidth="1" strokeDasharray="5 4" vectorEffect="non-scaling-stroke"/>}
+      {tradeLow!=null&&<line x1="0" x2={w} y1={Y(tradeLow)} y2={Y(tradeLow)} stroke={lineColor} strokeWidth="1" strokeDasharray="5 4" vectorEffect="non-scaling-stroke"/>}
       {hv&&<line x1={X(hover)} x2={X(hover)} y1="0" y2={h} stroke="#0B1F3A" strokeWidth="1" strokeDasharray="4 3" strokeOpacity="0.3" vectorEffect="non-scaling-stroke"/>}
     </svg>
+    {tradeHigh!=null&&<div className="absolute right-1 text-[10px] font-medium tnum px-1 rounded bg-white/70" style={{top:Math.max(0,Y(tradeHigh)-14),color:lineColor}}>{fmtPrice(tradeHigh)}</div>}
+    {tradeLow!=null&&<div className="absolute right-1 text-[10px] font-medium tnum px-1 rounded bg-white/70" style={{top:Math.min(h-14,Y(tradeLow)+2),color:lineColor}}>{fmtPrice(tradeLow)}</div>}
     {hv&&<div className="absolute -top-1 z-10 pointer-events-none" style={{left:hoverPct+'%',transform:`translateX(${hoverPct>75?'-100%':hoverPct<25?'0':'-50%'})`}}>
       <div className="bg-navy text-white rounded-md px-2 py-1 text-[11px] shadow-lg whitespace-nowrap tnum">
         O {fmtPrice(hv.o)} H {fmtPrice(hv.h)} L {fmtPrice(hv.l)} C {fmtPrice(hv.c)}
       </div>
     </div>}
   </div>;
+}
+// Open-position detail overlay (Live + Positions pages) — 1m chart starting 20 bars before
+// entry, shaded since-entry high/low band (via CandleChart's tradeFromIndex/tradeSide), and
+// the trade's vitals below it. Public Binance klines, same client pattern the old Live-page
+// price chart used before item 5 removed it (kept here, scoped to one open position).
+function PositionDetailOverlay({bot,onClose}: any){
+  const {t}=useApp();
+  const [candles,setCandles]=useState(null);
+  const [tradeFromIndex,setTradeFromIndex]=useState(null);
+  const [now,setNow]=useState(()=>Date.now());
+  useEffect(()=>{
+    if(!bot) { setCandles(null); return; }
+    let stopped=false, iv=null;
+    async function load(){
+      try{
+        const entryMs=+new Date(bot.firstSeen);
+        const startTime=entryMs-20*60000; // 20 bars (1m) before entry
+        const r=await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${bot.symbol}&interval=1m&startTime=${startTime}&limit=1500`,{cache:'no-store'});
+        if(!r.ok) throw 0; const raw=await r.json(); if(stopped) return;
+        const bars=(Array.isArray(raw)?raw:[]).map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4]}));
+        setCandles(bars);
+        const idx=bars.findIndex(b=>b.t>=entryMs);
+        setTradeFromIndex(idx>=0?idx:Math.max(0,bars.length-1));
+        setNow(Date.now());
+      }catch(e){ if(!stopped) setCandles(c=>c||[]); }
+    }
+    load(); iv=setInterval(load,15000);
+    return ()=>{ stopped=true; if(iv) clearInterval(iv); };
+  },[bot&&bot.id]);
+
+  if(!bot) return null;
+  const barsElapsed=tradeFromIndex!=null&&candles?Math.max(0,candles.length-1-tradeFromIndex):null;
+  const entryMs=+new Date(bot.firstSeen);
+  const elapsedMs=Math.max(0,now-entryMs);
+  const days=Math.floor(elapsedMs/86400000), hours=Math.floor((elapsedMs%86400000)/3600000), mins=Math.floor((elapsedMs%3600000)/60000);
+  const elapsedStr=[days&&`${days}d`,(days||hours)&&`${hours}h`,`${mins}m`].filter(Boolean).join(' ');
+  return <Modal open={!!bot} onClose={onClose} title={`${bot.symbol} — ${t('positionDetail.title')}`} wide>
+    <div>
+      {candles===null? <div className="h-[320px] grid place-items-center"><Loader/></div>
+      : candles.length<2? <div className="h-[320px] grid place-items-center text-sm text-slate-400">{t('prices.couldNotLoad')}</div>
+      : <CandleChart data={candles} height={320} tradeFromIndex={tradeFromIndex} tradeSide={bot.side}/>}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
+        <div><div className="text-[11px] text-slate-400">{t('positionDetail.direction')}</div><div className="text-sm font-semibold mt-0.5"><SideTag side={bot.side}/></div></div>
+        <div><div className="text-[11px] text-slate-400">{t('positionDetail.bars')}</div><div className="text-sm font-semibold text-navy mt-0.5 tnum">{barsElapsed==null?'—':barsElapsed}</div></div>
+        <div><div className="text-[11px] text-slate-400">{t('positionDetail.duration')}</div><div className="text-sm font-semibold text-navy mt-0.5">{elapsedStr||'0m'}</div></div>
+        <div><div className="text-[11px] text-slate-400">{t('activity.openPnl')}</div><div className={`text-sm font-semibold mt-0.5 tnum ${clsPnl(bot.unrealizedPnl)}`}>{fmtSigned(bot.unrealizedPnl)}</div></div>
+        <div><div className="text-[11px] text-slate-400">{t('activity.lev')}</div><div className="text-sm font-semibold text-navy mt-0.5">{bot.leverage?bot.leverage+'×':'—'}</div></div>
+      </div>
+    </div>
+  </Modal>;
 }
 // Small inline trend line for a KPI card corner — same index-based X/Y scale approach as
 // AreaChart but stripped of crosshair/zoom/tooltip (this is decoration, not an interactive
@@ -1147,5 +1211,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };

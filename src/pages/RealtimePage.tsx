@@ -2,7 +2,8 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   fmtUSD, fmtSigned, fmtNum, fmtPctPlain, clsPnl, fmtPrice, fmtAgo, fmtTime, api, Icon, Card, SectionTitle, Badge, Select, Donut, useApp,
-  hasPerm, fundOf, liqInfo, dormantInfo, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag, Loader
+  hasPerm, fundOf, liqInfo, dormantInfo, LiveBadge, MarketTicker, PageHead, Denied, KpiCard, SortHeader, sortRows, EmptyState, SideTag, FundTag, Loader,
+  Btn, PositionDetailOverlay
 } from '../ui'
 
 /* ============================================================
@@ -15,6 +16,7 @@ function RealtimePage(){
   const [incidents,setIncidents]=useState(null);
   const [exchanges,setExchanges]=useState(null);
   const [fills,setFills]=useState(null);
+  const [detailBot,setDetailBot]=useState(null);
   const serviceHealthRef=useRef<any>(null);
   useEffect(()=>{ if(!hasPerm(user,'view_realtime'))return; api('alerts').then(r=>setIncidents((r.alerts||[]).slice().sort((a,b)=>+new Date(b.createdAt)-+new Date(a.createdAt)).slice(0,6))).catch(()=>setIncidents([])); },[]);
   // Recent Fills / Trade Stream / Order Flow — real account executions (not a public market
@@ -139,6 +141,7 @@ function RealtimePage(){
             <th className="px-3 py-2.5 text-right font-medium">{t('live.liqDist')}</th>
             <SortHeader label={t('activity.fund')} col="fund" sort={sort} setSort={setSort}/>
             <th className="px-3 py-2.5 text-left font-medium">{t('live.exchange')}</th>
+            <th className="px-3 py-2.5"></th>
           </tr></thead>
           <tbody>
             {rows.map(r=>{ const {pct,level}=liqInfo(r); const {dormant}=dormantInfo(r); return <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/60">
@@ -153,6 +156,7 @@ function RealtimePage(){
               <td className={`px-3 py-2.5 text-right tnum font-medium ${pct==null?'text-slate-300':level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-500'}`}>{pct==null?'—':pct.toFixed(1)+'%'}</td>
               <td className="px-3 py-2.5">{r.fund? <Badge color={r.fund.color} dot onClick={()=>setFund(r.fund.id)}>{r.fund.name}</Badge> : <span className="text-xs text-slate-400">{t('live.unassigned')}</span>}</td>
               <td className="px-3 py-2.5 text-slate-500 capitalize">{r.exchange}</td>
+              <td className="px-3 py-2.5"><Btn size="sm" variant="outline" onClick={()=>setDetailBot(r)}><Icon name="trendup" className="w-3.5 h-3.5"/>{t('positionDetail.viewDetails')}</Btn></td>
             </tr>; })}
           </tbody>
         </table>
@@ -164,6 +168,7 @@ function RealtimePage(){
           <div className="flex items-center justify-between mt-2 text-xs text-slate-500"><FundTag fund={r.fund}/><span className="tnum">{fmtUSD(Math.abs(r.notional))} · {r.leverage?r.leverage+'×':'—'}</span></div>
           {pct!=null&&<div className={`mt-1.5 text-xs font-medium ${level==='danger'?'text-danger':level==='warn'?'text-amber-600':'text-slate-400'}`}>{t('live.liqDistanceMobile',{pct:pct.toFixed(1)})}</div>}
           {dormant&&<div className="mt-1 text-xs font-medium text-amber-600">{t('live.dormantTooltip')}</div>}
+          <Btn size="sm" variant="outline" className="mt-2 w-full" onClick={()=>setDetailBot(r)}><Icon name="trendup" className="w-3.5 h-3.5"/>{t('positionDetail.viewDetails')}</Btn>
         </div>; })}
       </div>
       </>}
@@ -211,6 +216,7 @@ function RealtimePage(){
         </div>)}
       </div>}
     </Card>}
+    <PositionDetailOverlay bot={detailBot} onClose={()=>setDetailBot(null)}/>
   </div>;
 }
 
