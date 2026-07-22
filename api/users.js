@@ -2,8 +2,9 @@
 // no usable password). Shareholders have EXTERNAL emails and sign in with an emailed
 // one-time code (see api/auth.js requestOtp/verifyOtp) — no password at all.
 import { query } from './_lib/db.js';
-import { requireAdmin, hashPassword, sanitizeUser, passwordIssues } from './_lib/auth.js';
-import { ROLE_PERMS } from './_lib/constants.js';
+import { requireAdmin, hashPassword, passwordIssues } from './_lib/auth.js';
+import { sanitizeUserWithPerms, getRolePerms, setRolePerms } from './_lib/rolePerms.js';
+import { PERMISSIONS } from './_lib/constants.js';
 import { audit, recentAudit } from './_lib/audit.js';
 
 // There must always be at least one active admin — used to block the last one from being
@@ -19,6 +20,11 @@ export default async function handler(req, res) {
   const a = requireAdmin(req, res); if (!a) return;
   try {
     if (req.method === 'GET') {
+      // Role -> permission rules (the "Rules" page). Permissions are granted per role, not
+      // per user — see api/_lib/rolePerms.js, which every user-sanitizing endpoint reads.
+      if (req.query?.rules) {
+        return res.status(200).json({ permissions: PERMISSIONS, rolePerms: await getRolePerms() });
+      }
       if (req.query?.audit) {
         try { return res.status(200).json({ audit: await recentAudit(req.query.limit || 100) }); }
         catch (e) { return res.status(200).json({ audit: [] }); }
@@ -29,9 +35,17 @@ export default async function handler(req, res) {
         return res.status(200).json({ logins: rows.map(r => ({ ip: r.ip, method: r.method, createdAt: r.created_at })) });
       }
       const { rows } = await query('SELECT * FROM users ORDER BY created_at ASC');
-      return res.status(200).json({ users: rows.map(sanitizeUser) });
+      return res.status(200).json({ users: await Promise.all(rows.map(sanitizeUserWithPerms)) });
     }
     const body = req.body || {};
+
+    if (req.method === 'PUT') {
+      // Update the role -> permission rules. Admin's row is never persisted here — see
+      // setRolePerms, which always keeps 'admin' at full access.
+      const rolePerms = await setRolePerms(body.rolePerms || {});
+      await audit(req, a, 'rules.update', null, { rolePerms });
+      return res.status(200).json({ permissions: PERMISSIONS, rolePerms });
+    }
 
     if (req.method === 'POST') {
       // the email IS the identity (no username concept)
@@ -48,21 +62,21 @@ export default async function handler(req, res) {
       const exists = await query('SELECT 1 FROM users WHERE lower(email)=lower($1)', [email]);
       if (exists.rows[0]) return res.status(409).json({ error: 'An account with this email already exists' });
       const id = 'u' + Date.now();
-      const perms = ROLE_PERMS[role] || ROLE_PERMS.viewer;
       // shareholders sign in with an emailed code; internal roles use Google — neither has a
-      // usable password, so both get a random unusable hash
+      // usable password, so both get a random unusable hash. Permissions are role-based, not
+      // stored per-user (see api/_lib/rolePerms.js) — no permissions column to set here.
       const provider = isShareholder ? 'otp' : 'google';
       const hash = await hashPassword(provider + ':' + id + ':' + Math.random());
       await query(
-        `INSERT INTO users (id,username,email,first_name,last_name,role,active,permissions,password_hash,auth_provider)
-         VALUES ($1,$2,$3,$4,$5,$6,true,$7::jsonb,$8,$9)`,
-        [id, email, email, firstName, lastName, role, JSON.stringify(perms), hash, provider]
+        `INSERT INTO users (id,username,email,first_name,last_name,role,active,password_hash,auth_provider)
+         VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8)`,
+        [id, email, email, firstName, lastName, role, hash, provider]
       );
       await audit(req, a, 'user.create', email, { role, provider });
       // Employee Fund shares are no longer auto-granted on hire — an admin assigns a real
       // detected contribution to this employee once one lands (see employeeFund.js).
       const { rows } = await query('SELECT * FROM users WHERE id=$1', [id]);
-      return res.status(201).json({ user: sanitizeUser(rows[0]) });
+      return res.status(201).json({ user: await sanitizeUserWithPerms(rows[0]) });
     }
 
     if (req.method === 'PATCH') {
@@ -72,13 +86,13 @@ export default async function handler(req, res) {
       if (demotesOrDeactivates && await isLastActiveAdmin(id)) {
         return res.status(400).json({ error: 'At least one active admin is required — promote or activate another admin first.' });
       }
-      if (patch.role) patch.permissions = ROLE_PERMS[patch.role] || ROLE_PERMS.viewer; // role change resets perms
-      const map = { firstName: 'first_name', lastName: 'last_name', active: 'active', role: 'role', permissions: 'permissions' };
+      // permissions are role-based, not per-user (see api/_lib/rolePerms.js + api/rules.js) —
+      // there is nothing to reset/patch here beyond the role itself.
+      const map = { firstName: 'first_name', lastName: 'last_name', active: 'active', role: 'role' };
       const sets = [], vals = []; let i = 1;
       for (const k of Object.keys(patch)) {
         if (!(k in map)) continue;
-        if (k === 'permissions') { sets.push(`permissions=$${i}::jsonb`); vals.push(JSON.stringify(patch[k])); }
-        else { sets.push(`${map[k]}=$${i}`); vals.push(patch[k]); }
+        sets.push(`${map[k]}=$${i}`); vals.push(patch[k]);
         i++;
       }
       // admin-set a new password — only accounts still on the legacy 'password' provider
@@ -98,7 +112,7 @@ export default async function handler(req, res) {
       await query(`UPDATE users SET ${sets.join(',')} WHERE id=$${i}`, vals);
       await audit(req, a, 'user.update', id, { fields: Object.keys(patch), passwordSet: typeof password === 'string' && password !== '' });
       const { rows } = await query('SELECT * FROM users WHERE id=$1', [id]);
-      return res.status(200).json({ user: sanitizeUser(rows[0]) });
+      return res.status(200).json({ user: await sanitizeUserWithPerms(rows[0]) });
     }
 
     if (req.method === 'DELETE') {

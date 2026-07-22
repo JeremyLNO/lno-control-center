@@ -337,6 +337,28 @@ ok('shareholder created with external email, no password (auth_provider=otp)',
 ok('shareholder role grants exactly [view_activity, view_reports]',
   r.status === 201 && JSON.stringify((r.body.user.permissions || []).slice().sort()) === JSON.stringify(['view_activity', 'view_reports']), r.body.user && r.body.user.permissions);
 
+// ── Rules (role -> permission mapping) — permissions are per-role, not per-user ──
+r = await call(users, { method: 'GET', headers: authH, query: { rules: '1' } });
+ok('non-admin cannot view rules -> handled by requireAdmin (sanity: admin CAN)', r.status === 200 && Array.isArray(r.body.permissions) && r.body.rolePerms.shareholder.includes('view_reports'), r.body);
+r = await call(users, { method: 'GET', query: { rules: '1' } });
+ok('unauthenticated cannot view rules -> 401', r.status === 401, r.status);
+r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { shareholder: ['view_activity'], viewer: ['view_activity', 'view_trades'], operator: ['view_activity', 'export_data', 'not_a_real_perm'] } } });
+ok('admin updates role permissions, unknown perms are dropped', r.status === 200 && JSON.stringify(r.body.rolePerms.operator.sort()) === JSON.stringify(['export_data', 'view_activity']), r.body.rolePerms);
+r = await call(users, { method: 'GET', headers: authH, query: { rules: '1' } });
+ok('updated rules persist and are re-readable', JSON.stringify(r.body.rolePerms.shareholder) === JSON.stringify(['view_activity']), r.body.rolePerms);
+// dedicated account (not investor@example.com — reused later, would trip its 60s resend
+// cooldown) to confirm a role permission change takes effect on next sign-in with zero
+// per-user migration needed
+await call(users, { method: 'POST', headers: authH, body: { email: 'rules.probe@example.com', role: 'shareholder' } });
+sentEmails.length = 0;
+await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'rules.probe@example.com' } });
+r = await call(auth, { method: 'POST', body: { action: 'verifyOtp', email: 'rules.probe@example.com', code: sentEmails[0].code } });
+ok('a role permission change takes effect immediately for existing users of that role (no per-user storage)',
+  r.status === 200 && JSON.stringify(r.body.user.permissions) === JSON.stringify(['view_activity']), r.body.user && r.body.user.permissions);
+// restore defaults so later tests (and the reset section) aren't affected by this probe
+r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_logs', 'export_data'], viewer: ['view_activity', 'view_realtime', 'view_trades', 'view_logs'], shareholder: ['view_activity', 'view_reports'] } } });
+ok('restore default role permissions', r.status === 200, r.body);
+
 // the shareholder signs in via an emailed 6-digit code: request -> extract from the mocked
 // Resend send -> verify. shH (this session) is reused below for the WhatsApp opt-in test.
 sentEmails.length = 0;

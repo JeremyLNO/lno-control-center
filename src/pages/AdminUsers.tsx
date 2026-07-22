@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge,
+  ROLE_OPTIONS, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge,
   StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, useApp, PageHead, Denied, PW_RULES,
   passwordOk
 } from '../ui'
@@ -71,11 +71,11 @@ function AdminUsers(){
         {sel.size>0&&<>
           <Btn size="sm" variant="outline" onClick={()=>bulkPatch({active:true},{verbKey:'users.verbActivated'})}><Icon name="power" className="w-3.5 h-3.5"/>{t('users.activate')}</Btn>
           <Btn size="sm" variant="outline" onClick={()=>bulkPatch({active:false},{skipSelf:true,verbKey:'users.verbDeactivated'})}>{t('users.deactivate')}</Btn>
-          <Select value="" onChange={v=>{ if(v) bulkPatch({role:v,permissions:ROLE_PERMS[v].slice()},{skipSelf:true,verbKey:'users.verbReroled'}); }} className="w-32" options={[{value:'',label:t('users.setRolePlaceholder')},...roleOpts]}/>
+          <Select value="" onChange={v=>{ if(v) bulkPatch({role:v},{skipSelf:true,verbKey:'users.verbReroled'}); }} className="w-32" options={[{value:'',label:t('users.setRolePlaceholder')},...roleOpts]}/>
           <Btn size="sm" variant="danger" onClick={()=>setBulkDel(true)}><Icon name="trash" className="w-3.5 h-3.5"/>{t('common.delete')}</Btn>
         </>}
-        <ExportMenu filename="lno_users" size="sm" variant="outline" headers={['Email','First name','Last name','Role','Active','Permissions']}
-          getRows={()=>(sel.size?filteredUsers.filter(u=>sel.has(u.id)):filteredUsers).map(u=>[u.email,u.firstName||'',u.lastName||'',u.role,u.active?'yes':'no',(u.role==='admin'?ALL_PERMS:u.permissions||[]).join(' ')])}/>
+        <ExportMenu filename="lno_users" size="sm" variant="outline" headers={['Email','First name','Last name','Role','Active']}
+          getRows={()=>(sel.size?filteredUsers.filter(u=>sel.has(u.id)):filteredUsers).map(u=>[u.email,u.firstName||'',u.lastName||'',u.role,u.active?'yes':'no'])}/>
       </div>
     </div>
     {filteredUsers.length===0 && <div className="text-sm text-slate-400 text-center py-10">{t('users.noMatchFilter')}</div>}
@@ -103,17 +103,10 @@ function AdminUsers(){
         {exp===u.id&&<div className="border-t border-slate-100 p-4 space-y-4 fadein">
           <div className="flex flex-wrap gap-4">
             <div><Field label={t('login.email')}><div className="pt-1.5 text-sm font-mono text-slate-500">{u.email}</div></Field></div>
-            <div className="w-44"><Field label={t('users.role')}><Select value={u.role} onChange={v=>up(u.id,{role:v,permissions:ROLE_PERMS[v].slice()})} options={roleOpts}/></Field></div>
+            <div className="w-44"><Field label={t('users.role')}><Select value={u.role} onChange={v=>up(u.id,{role:v})} options={roleOpts}/></Field></div>
             <div><Field label={t('users.active')}><div className="pt-1.5"><Toggle on={u.active} onChange={v=>up(u.id,{active:v})}/></div></Field></div>
           </div>
-          <div>
-            <div className="text-xs font-medium text-slate-500 mb-2">{t('users.permissions')} {u.role==='admin'&&<span className="text-slate-400">{t('users.adminAlwaysAllPerms')}</span>}</div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              {PERMISSIONS.map(([p])=><label key={p} className={`flex items-center gap-2 text-sm ${u.role==='admin'?'opacity-50':''}`}>
-                <input type="checkbox" disabled={u.role==='admin'} checked={u.role==='admin'||u.permissions.includes(p)} onChange={e=>up(u.id,{permissions:e.target.checked?[...u.permissions,p]:u.permissions.filter(x=>x!==p)})} className="accent-navy w-4 h-4"/>{t('perm.'+p)}
-              </label>)}
-            </div>
-          </div>
+          <div className="text-[11px] text-slate-400">{t('users.permissionsByRoleHint')}</div>
           <div>
             <div className="text-xs font-medium text-slate-500 mb-2">{t('users.signInPassword')}</div>
             {u.authProvider==='google'

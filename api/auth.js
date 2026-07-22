@@ -1,9 +1,10 @@
 // Auth: GET = current user (me); POST {action:login|google|otp|logout|changePassword}.
 import crypto from 'crypto';
 import { query } from './_lib/db.js';
-import { verifyPassword, signToken, hashPassword, hashOtpCode, requireAuth, sanitizeUser, passwordIssues, clientIp } from './_lib/auth.js';
+import { verifyPassword, signToken, hashPassword, hashOtpCode, requireAuth, passwordIssues, clientIp } from './_lib/auth.js';
 import { verifyGoogleToken, ALLOWED_DOMAIN } from './_lib/google.js';
 import { ROLE_PERMS } from './_lib/constants.js';
+import { sanitizeUserWithPerms } from './_lib/rolePerms.js';
 import { notify } from './_lib/notify.js';
 import { loginFailureText } from './_lib/notifyText.js';
 import { sendOtpEmail } from './_lib/mailer.js';
@@ -39,7 +40,7 @@ export default async function handler(req, res) {
       const { rows } = await query('SELECT * FROM users WHERE id=$1', [a.id]);
       if (!rows[0] || !rows[0].active) return res.status(401).json({ error: 'unauthorized' });
       try { await query('UPDATE users SET last_seen_at=now(), last_ip=COALESCE($2, last_ip) WHERE id=$1', [a.id, clientIp(req)]); } catch (e) {}
-      return res.status(200).json({ user: sanitizeUser(rows[0]) });
+      return res.status(200).json({ user: await sanitizeUserWithPerms(rows[0]) });
     }
     if (req.method === 'POST') {
       const body = req.body || {};
@@ -63,7 +64,7 @@ export default async function handler(req, res) {
           return res.status(401).json({ error: 'Invalid email or password' });
         }
         const fresh = await recordLogin(u, req, 'password');
-        return res.status(200).json({ token: signToken(fresh), user: sanitizeUser(fresh) });
+        return res.status(200).json({ token: signToken(fresh), user: await sanitizeUserWithPerms(fresh) });
       }
 
       // Shareholder sign-in, step 1: email -> emailed 6-digit code. Always returns {ok:true}
@@ -121,7 +122,7 @@ export default async function handler(req, res) {
           return res.status(401).json({ error: 'Invalid or expired code' });
         }
         const fresh = await recordLogin(u, req, 'otp');
-        return res.status(200).json({ token: signToken(fresh), user: sanitizeUser(fresh) });
+        return res.status(200).json({ token: signToken(fresh), user: await sanitizeUserWithPerms(fresh) });
       }
 
       if (action === 'google') {
@@ -157,7 +158,7 @@ export default async function handler(req, res) {
           u = (await query('SELECT * FROM users WHERE id=$1', [u.id])).rows[0];
         }
         const fresh = await recordLogin(u, req, 'google');
-        return res.status(200).json({ token: signToken(fresh), user: sanitizeUser(fresh) });
+        return res.status(200).json({ token: signToken(fresh), user: await sanitizeUserWithPerms(fresh) });
       }
 
       if (action === 'heartbeat') {

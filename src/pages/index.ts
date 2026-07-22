@@ -3,6 +3,7 @@ export { ActivityPage } from './ActivityPage';
 export { RealtimePage } from './RealtimePage';
 export { TradesPage } from './TradesPage';
 export { AdminUsers } from './AdminUsers';
+export { RulesPage } from './RulesPage';
 export { AdminExchanges } from './AdminExchanges';
 export { AdminOpenWA } from './AdminOpenWA';
 export { FundsPage } from './FundsPage';

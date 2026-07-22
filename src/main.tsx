@@ -5,10 +5,10 @@ import type { DataStatus, Lang } from './types'
 import { SUPPORTED_LANGS, detectBrowserLang, translate } from './i18n'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  FUND_PALETTE, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard
+  FUND_PALETTE, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, LiveBadge, MarketTicker, LoadingScreen, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard
 } from './ui'
 import {
-  ActivityPage, RealtimePage, TradesPage, AdminUsers, AdminExchanges, AdminOpenWA,
+  ActivityPage, RealtimePage, TradesPage, AdminUsers, RulesPage, AdminExchanges, AdminOpenWA,
   FundsPage, BotsPage, ProfilePage, MyEquityPage, SupportPage, PricesPage, StatusPage, AdminReports
 } from './pages/index'
 
@@ -204,6 +204,7 @@ function Shell(){
   else if(a==='status') page=<StatusPage/>;
   else if(a==='admin'&&b==='bots') page=<BotsPage/>;
   else if(a==='admin'&&b==='users') page=<AdminUsers/>;
+  else if(a==='admin'&&b==='rules') page=<RulesPage/>;
   else if(a==='admin'&&b==='exchanges') page=<AdminExchanges/>;
   else if(a==='admin'&&(b==='openwa'||b==='whatsapp')) page=<AdminOpenWA/>;
   else if(a==='admin'&&b==='funds') page=<FundsPage/>;

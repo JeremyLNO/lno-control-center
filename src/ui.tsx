@@ -810,6 +810,7 @@ const TOOLS_NAV=[
 const ADMIN_NAV=[
   ['list','nav.bots','/admin/bots'],
   ['users','nav.users','/admin/users'],
+  ['shield','nav.rules','/admin/rules'],
   ['link','nav.exchanges','/admin/exchanges'],
   ['msg','nav.whatsapp','/admin/openwa'],
 ];
