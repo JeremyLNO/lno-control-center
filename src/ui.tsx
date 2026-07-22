@@ -1022,8 +1022,8 @@ function Denied(){ const {t}=useApp(); return <div className="grid place-items-c
 /* ============================================================
    KPI CARD + shared bits
    ============================================================ */
-function KpiCard({label,value,badge,icon,accent,spark}: any){
-  return <Card className="p-4">
+function KpiCard({label,value,badge,icon,accent,spark,className}: any){
+  return <Card className={`p-4${className?' '+className:''}`}>
     <div className="flex items-center justify-between">
       <span className="text-xs font-medium text-slate-500">{label}</span>
       {icon&&(accent? <span className="w-7 h-7 rounded-lg grid place-items-center shrink-0" style={{background:accent+'1A',color:accent}}><Icon name={icon} className="w-4 h-4"/></span>
