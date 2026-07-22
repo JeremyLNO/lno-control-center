@@ -225,6 +225,26 @@ function Shell(){
   </div>;
 }
 
+// No component in this tree ever threw during normal development, so there was never an
+// error boundary — meaning any future render-time exception unmounts straight to a blank
+// #root with nothing in the console to explain why. This surfaces it instead of hiding it.
+class ErrorBoundary extends React.Component<{children:any},{error:any}>{
+  constructor(props:any){ super(props); this.state={error:null}; }
+  static getDerivedStateFromError(error:any){ return {error}; }
+  componentDidCatch(error:any, info:any){ console.error('App crashed:', error, info && info.componentStack); }
+  render(){
+    if(this.state.error){
+      const e=this.state.error;
+      return <div style={{padding:24,fontFamily:'monospace',whiteSpace:'pre-wrap',color:'#DC2626',background:'#FEF2F2',minHeight:'100vh'}}>
+        <h2 style={{marginBottom:8}}>Something went wrong.</h2>
+        <div>{String(e&&e.message||e)}</div>
+        <div style={{marginTop:12,fontSize:12,color:'#64748B'}}>{e&&e.stack}</div>
+      </div>;
+    }
+    return this.props.children;
+  }
+}
+
 function Root(){
   const route=useHashRoute();
   const [user,setUser]=useState(null);
@@ -296,4 +316,4 @@ function Root(){
   return <App.Provider value={ctx}>{content}<Toaster/></App.Provider>;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
+ReactDOM.createRoot(document.getElementById('root')).render(<ErrorBoundary><Root/></ErrorBoundary>);
