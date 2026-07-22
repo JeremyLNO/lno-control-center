@@ -79,39 +79,40 @@ function ActivityPage(){
         </Card>
       </div>
 
-      {/* By-fund breakdown */}
-      <Card className="overflow-hidden mb-5">
-        <div className="p-5 pb-3"><SectionTitle>{t('activity.byFund')}</SectionTitle></div>
-        {byFund.length===0? <div className="px-5 pb-5 text-sm text-slate-400">{t('activity.noFunds')}</div>
-        : <div className="overflow-x-auto"><table className="w-full text-sm">
-          <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
-            <th className="px-4 py-2.5 text-left font-medium">{t('activity.fund')}</th>
-            <th className="px-4 py-2.5 text-right font-medium">{t('activity.openPnl')}</th>
-            <th className="px-4 py-2.5 text-right font-medium">{t('activity.exposure')}</th>
-            <th className="px-4 py-2.5 text-right font-medium">{t('activity.positions')}</th>
-          </tr></thead>
-          <tbody>
-            {byFund.map(f=><tr key={f.id||'unassigned'} className="border-b border-slate-50 hover:bg-slate-50/60">
-              <td className="px-4 py-2.5"><span className="flex items-center gap-2">{f.id!=null?<span className="w-2.5 h-2.5 rounded-full" style={{background:f.color}}/>:<span className="w-2.5 h-2.5 rounded-full border border-slate-300"/>}<span className={f.id!=null?'font-medium text-navy':'text-slate-500'}>{f.name}</span></span></td>
-              <td className={`px-4 py-2.5 text-right tnum ${clsPnl(f.uPnl)}`}>{fmtSigned(f.uPnl)}</td>
-              <td className="px-4 py-2.5 text-right tnum text-slate-500">{fmtUSD(f.notional)}</td>
-              <td className="px-4 py-2.5 text-right tnum">{f.bots.length}</td>
-            </tr>)}
-          </tbody>
-        </table></div>}
-      </Card>
+      {/* By-fund breakdown + PnL calendar side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+        <Card className="overflow-hidden lg:col-span-2">
+          <div className="p-5 pb-3"><SectionTitle>{t('activity.byFund')}</SectionTitle></div>
+          {byFund.length===0? <div className="px-5 pb-5 text-sm text-slate-400">{t('activity.noFunds')}</div>
+          : <div className="overflow-x-auto"><table className="w-full text-sm">
+            <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500">
+              <th className="px-4 py-2.5 text-left font-medium">{t('activity.fund')}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t('activity.openPnl')}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t('activity.exposure')}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t('activity.positions')}</th>
+            </tr></thead>
+            <tbody>
+              {byFund.map(f=><tr key={f.id||'unassigned'} className="border-b border-slate-50 hover:bg-slate-50/60">
+                <td className="px-4 py-2.5"><span className="flex items-center gap-2">{f.id!=null?<span className="w-2.5 h-2.5 rounded-full" style={{background:f.color}}/>:<span className="w-2.5 h-2.5 rounded-full border border-slate-300"/>}<span className={f.id!=null?'font-medium text-navy':'text-slate-500'}>{f.name}</span></span></td>
+                <td className={`px-4 py-2.5 text-right tnum ${clsPnl(f.uPnl)}`}>{fmtSigned(f.uPnl)}</td>
+                <td className="px-4 py-2.5 text-right tnum text-slate-500">{fmtUSD(f.notional)}</td>
+                <td className="px-4 py-2.5 text-right tnum">{f.bots.length}</td>
+              </tr>)}
+            </tbody>
+          </table></div>}
+        </Card>
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.daily')}</span>}>{t('activity.pnlCalendar')}</SectionTitle><PnlCalendar series={view}/></Card>
+      </div>
 
       {/* Risk & exposure (only meaningful with history/exposure) */}
       {(hasHistory||openBots.length>0)&&<div className="mb-5"><RiskPanel series={view.length?view:series} openBots={openBots} byFund={byFund}/></div>}
 
-      {/* Drawdown + PnL calendar (need history) */}
-      {hasHistory&&<div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+      {/* Drawdown + closed-positions heatmap side by side — same GitHub-style grid as the
+          calendar above, but each cell is a closed position */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
         <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.underwater')}</span>}>{t('activity.drawdown')}</SectionTitle><Underwater series={view}/></Card>
-        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.daily')}</span>}>{t('activity.pnlCalendar')}</SectionTitle><PnlCalendar series={view}/></Card>
-      </div>}
-
-      {/* Closed-positions heatmap — same GitHub-style grid, but each cell is a position */}
-      <Card className="p-5 mb-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.realizedPct')}</span>}>{t('activity.positionsHeatmap')}</SectionTitle><PositionsHeatmap bots={bots}/></Card>
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.realizedPct')}</span>}>{t('activity.positionsHeatmap')}</SectionTitle><PositionsHeatmap bots={bots}/></Card>
+      </div>
 
       {/* Open positions snapshot */}
       <Card className="overflow-hidden">
