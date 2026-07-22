@@ -10,6 +10,7 @@ export { FundsPage } from './FundsPage';
 export { BotsPage } from './BotsPage';
 export { ProfilePage } from './ProfilePage';
 export { MyEquityPage } from './MyEquityPage';
+export { EmployeeFundPage } from './EmployeeFundPage';
 export { SupportPage } from './SupportPage';
 export { PricesPage } from './PricesPage';
 export { StatusPage } from './StatusPage';

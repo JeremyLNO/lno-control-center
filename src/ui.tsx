@@ -819,6 +819,7 @@ const ADMIN_NAV=[
   ['list','nav.bots','/admin/bots'],
   ['users','nav.users','/admin/users'],
   ['shield','nav.rules','/admin/rules'],
+  ['dollar','nav.employeeFund','/admin/employee-fund'],
   ['msg','nav.whatsapp','/admin/openwa'],
 ];
 const ACCT_NAV=[
