@@ -1,8 +1,12 @@
 // Bots = (exchange, symbol) pairs, auto-created from detected positions. Assign to a fund.
-//   GET                          -> bots (+ a "live" equity summary)   (any auth)
-//   GET ?attribution=1           -> per-bot/per-fund trade attribution (any auth)
-//   GET ?costs=1                 -> per-bot/per-fund funding/fee drag  (any auth)
-//   GET ?fills=1                 -> most recent executed trades         (any auth)
+//   GET                          -> bots (+ a "live" equity summary), requires ANY of
+//                                    view_activity/view_realtime/view_trades — this single
+//                                    endpoint backs the shared data layer used by all three
+//                                    page families (see main.tsx's useData), so it can't
+//                                    require one specific permission
+//   GET ?attribution=1           -> per-bot/per-fund trade attribution (admin — BotsPage only)
+//   GET ?costs=1                 -> per-bot/per-fund funding/fee drag  (admin — BotsPage only)
+//   GET ?fills=1                 -> most recent executed trades         (view_realtime)
 //   GET ?listenKey=1             -> mint/reuse a Binance user-data-stream listenKey,
 //                                    for the browser to open its own real-time WebSocket (admin)
 //   POST {action:'sync'}         -> run the position sync now  (admin, or 'manage_exchanges')
@@ -39,9 +43,13 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const a = requireAuth(req, res); if (!a) return;
-      if (req.query?.attribution) return res.status(200).json(await getAttribution());
-      if (req.query?.costs) return res.status(200).json(await getCostAnalytics());
+      const isAdmin = a.role === 'admin';
+      const has = async (p) => isAdmin || (await permsForRole(a.role)).includes(p);
+
+      if (req.query?.attribution) { if (!isAdmin) return res.status(403).json({ error: 'forbidden' }); return res.status(200).json(await getAttribution()); }
+      if (req.query?.costs) { if (!isAdmin) return res.status(403).json({ error: 'forbidden' }); return res.status(200).json(await getCostAnalytics()); }
       if (req.query?.fills) {
+        if (!(await has('view_realtime'))) return res.status(403).json({ error: 'forbidden' });
         const { rows } = await query('SELECT * FROM fills ORDER BY occurred_at DESC LIMIT 50');
         return res.status(200).json({ fills: rows.map(r => ({
           symbol: r.symbol, side: r.side, qty: Number(r.qty), price: Number(r.price),
@@ -55,6 +63,7 @@ export default async function handler(req, res) {
         try { const listenKey = await createListenKey(apiKey); return res.status(200).json({ listenKey, wsUrl: `wss://fstream.binance.com/ws/${listenKey}` }); }
         catch (e) { return res.status(502).json({ error: String(e.message || e) }); }
       }
+      if (!isAdmin && !(await has('view_activity')) && !(await has('view_realtime')) && !(await has('view_trades'))) return res.status(403).json({ error: 'forbidden' });
       const { rows } = await query('SELECT * FROM bots ORDER BY exchange ASC, symbol ASC');
       const cfg = await query("SELECT value FROM app_config WHERE key='live'");
       return res.status(200).json({ bots: rows.map(pub), live: cfg.rows[0] ? cfg.rows[0].value : null });

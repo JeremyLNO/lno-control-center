@@ -5,12 +5,15 @@
 //   GET                    -> funds (+ bot counts, isEmployeeFund flag) (any auth)
 //   GET ?myEquity=1        -> the caller's Employee Fund share  (any auth)
 //   GET ?employeeSummary=1 -> Employee Fund totals + all shares + pending contributions (admin)
-//   POST   -> create a fund, OR {action:'assignEmployeeContribution', contributionId, userId} (admin)
-//   PATCH  -> rename / recolour / reorder       (admin)
-//   DELETE -> remove a fund (unassigns its bots)(admin)
+//   POST   -> create a fund (admin, or 'manage_funds')
+//             OR {action:'assignEmployeeContribution', contributionId, userId} (admin only —
+//             Employee Fund contributions are HR/financial, kept separate from general fund CRUD)
+//   PATCH  -> rename / recolour / reorder        (admin, or 'manage_funds')
+//   DELETE -> remove a fund (unassigns its bots) (admin, or 'manage_funds')
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
 import { FUND_PALETTE } from './_lib/constants.js';
+import { permsForRole } from './_lib/rolePerms.js';
 import { getMyShare, getEmployeeFundSummary, peekEmployeeFundId, assignContribution } from './_lib/employeeFund.js';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -45,8 +48,8 @@ export default async function handler(req, res) {
     const body = req.body || {};
 
     if (req.method === 'POST') {
-      const a = requireAdmin(req, res); if (!a) return;
       if (body.action === 'assignEmployeeContribution') {
+        const a = requireAdmin(req, res); if (!a) return;
         const contributionId = Number(body.contributionId);
         const userId = String(body.userId || '');
         if (!contributionId || !userId) return res.status(400).json({ error: 'contributionId and userId required' });
@@ -54,6 +57,8 @@ export default async function handler(req, res) {
         catch (e) { return res.status(400).json({ error: String(e.message || e) }); }
         return res.status(200).json(await getEmployeeFundSummary());
       }
+      const a = requireAuth(req, res); if (!a) return;
+      if (a.role !== 'admin' && !(await permsForRole(a.role)).includes('manage_funds')) return res.status(403).json({ error: 'forbidden' });
       const name = String(body.name || '').trim();
       if (!name) return res.status(400).json({ error: 'name required' });
       if (await nameTaken(name)) return res.status(409).json({ error: 'A fund with this name already exists' });
@@ -66,7 +71,8 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PATCH') {
-      const a = requireAdmin(req, res); if (!a) return;
+      const a = requireAuth(req, res); if (!a) return;
+      if (a.role !== 'admin' && !(await permsForRole(a.role)).includes('manage_funds')) return res.status(403).json({ error: 'forbidden' });
       const { id } = body;
       if (!id) return res.status(400).json({ error: 'id required' });
       const sets = [], vals = []; let i = 1;
@@ -84,7 +90,8 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      const a = requireAdmin(req, res); if (!a) return;
+      const a = requireAuth(req, res); if (!a) return;
+      if (a.role !== 'admin' && !(await permsForRole(a.role)).includes('manage_funds')) return res.status(403).json({ error: 'forbidden' });
       const id = body.id || req.query?.id;
       if (!id) return res.status(400).json({ error: 'id required' });
       if (id === await peekEmployeeFundId()) return res.status(400).json({ error: 'The Employee Fund can\'t be deleted — it holds every employee\'s contributed capital.' });

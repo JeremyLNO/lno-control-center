@@ -1,14 +1,18 @@
-// WhatsApp alerts (TextMeBot) config + alert rules + per-type/per-role routing (admin only).
+// WhatsApp alerts (TextMeBot) config + alert rules + per-type/per-role routing.
+// Admins, or any role granted 'manage_whatsapp' — the raw API key is never returned to
+// anyone (only apiKeyMasked/hasApiKey), so there's no admin-vs-manager response-shape split
+// needed here, unlike exchanges.js.
 //   GET  -> config (+ ?log=1 -> sent-messages log)
 //   PUT  -> update enabled / API key / thresholds / alert rules / notification matrix
-//   POST -> {action:'test', message?}  send a test WhatsApp to the requesting admin's own number
+//   POST -> {action:'test', message?}  send a test WhatsApp to the requesting user's own number
 // One firm-wide TextMeBot account key sends to users who enabled WhatsApp in their profile.
 import { query } from './_lib/db.js';
-import { requireAdmin } from './_lib/auth.js';
+import { requireAuth } from './_lib/auth.js';
 import { encrypt, decrypt, mask } from './_lib/crypto.js';
 import { sendTextMeBot, getApiKey } from './_lib/notify.js';
 import { welcomeText } from './_lib/notifyText.js';
 import { DEFAULT_MATRIX, WA_ROLES, WA_MSG_TYPES } from './_lib/constants.js';
+import { permsForRole } from './_lib/rolePerms.js';
 import { audit } from './_lib/audit.js';
 
 async function getCfg() {
@@ -41,7 +45,8 @@ function pub(cfg) {
 }
 
 export default async function handler(req, res) {
-  const a = requireAdmin(req, res); if (!a) return;
+  const a = requireAuth(req, res); if (!a) return;
+  if (a.role !== 'admin' && !(await permsForRole(a.role)).includes('manage_whatsapp')) return res.status(403).json({ error: 'forbidden' });
   try {
     if (req.method === 'GET') {
       if (req.query?.log) {

@@ -17,17 +17,20 @@ const AVATAR_STYLES=[
   {key:'style1',n:1,items:Array.from({length:30},(_,i)=>`/avatars/style1/s1-${String(i+1).padStart(2,'0')}.jpg`)},
   {key:'style2',n:2,items:Array.from({length:30},(_,i)=>`/avatars/style2/s2-${String(i+1).padStart(2,'0')}.jpg`)},
 ];
+// view_logs and manage_users were removed (audit, 2026-07): view_logs never gated anything —
+// there's no "logs" feature in the app for it to control — and manage_users would have let a
+// non-admin holder promote any account (including themselves) to admin via the same PATCH
+// endpoint that edits names/roles, a real privilege-escalation path. User/role management
+// stays admin-only by design; nothing else in PERMISSIONS carries that risk.
 const PERMISSIONS = [
   ['view_activity','View Activity'],
   ['view_realtime','View Real-Time'],
   ['view_trades','View Trades'],
-  ['view_logs','View Logs'],
   ['view_reports_daily','View daily reports'],
   ['view_reports_weekly','View weekly reports'],
   ['view_reports_monthly','View monthly reports'],
   ['view_exchanges','View exchanges'],
   ['export_data','Export data'],
-  ['manage_users','Manage users'],
   ['manage_exchanges','Manage exchanges'],
   ['manage_whatsapp','Manage WhatsApp'],
   ['manage_funds','Manage funds'],
@@ -35,8 +38,8 @@ const PERMISSIONS = [
 const ALL_PERMS = PERMISSIONS.map(p=>p[0]);
 const ROLE_PERMS = {
   admin: ALL_PERMS.slice(),
-  operator: ['view_activity','view_realtime','view_trades','view_logs','export_data'],
-  viewer: ['view_activity','view_realtime','view_trades','view_logs'],
+  operator: ['view_activity','view_realtime','view_trades','export_data'],
+  viewer: ['view_activity','view_realtime','view_trades'],
   // shareholder default: Exchanges (wallets only, no keys), Funds (read-only), Live, System
   // Status + dashboard, and monthly reports only — the only kind ever sent to shareholders
   // (see SHAREHOLDER_KINDS in api/snapshots.js); daily/weekly are internal-only by default.
@@ -927,7 +930,12 @@ const ADMIN_NAV=[
   ['users','nav.users','/admin/users'],
   ['shield','nav.rules','/admin/rules'],
   ['dollar','nav.employeeFund','/admin/employee-fund'],
-  ['msg','nav.whatsapp','/admin/openwa'],
+];
+// Entries under the "Administration" heading that a non-admin can also reach, if granted the
+// matching manage_* permission — unlike ADMIN_NAV above, which stays strictly role==='admin'
+// (user/role management is a privilege-escalation surface, kept admin-only by design).
+const MANAGE_NAV: Array<[string,string,string,string,string]>=[
+  ['msg','nav.whatsapp','/admin/openwa','nav.whatsapp','manage_whatsapp'],
 ];
 const ACCT_NAV=[
   ['usercircle','nav.profile','/profile'],
@@ -969,9 +977,10 @@ function Sidebar(){
       {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
       <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">{t('nav.section.tools')}</div>
       {TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
-      {user.role==='admin'&&<>
+      {(user.role==='admin'||MANAGE_NAV.some(([,,,,perm])=>hasPerm(user,perm)))&&<>
         <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">{t('nav.section.admin')}</div>
-        {ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+        {user.role==='admin'&&ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+        {MANAGE_NAV.filter(([,,,,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
       </>}
       <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">{t('nav.section.account')}</div>
       {user.role!=='shareholder'&&<NavItem icon={MY_EQUITY_NAV[0]} label={t(MY_EQUITY_NAV[1])} path={MY_EQUITY_NAV[2]} active={isAct(MY_EQUITY_NAV[2])} onClick={()=>navigate(MY_EQUITY_NAV[2])}/>}
@@ -1071,7 +1080,7 @@ function MobileNav(){
       <button onClick={()=>setMore(!more)} className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] text-slate-500"><Icon name="menu" className="w-5 h-5"/>{t('common.more')}</button>
     </nav>
     {more&&<div className="lg:hidden fixed inset-0 z-40" onClick={()=>setMore(false)}><div className="absolute bottom-14 inset-x-3 bg-white rounded-xl shadow-xl border border-slate-200 p-2" onClick={e=>e.stopPropagation()}>
-      {[...TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)),...(user.role==='admin'?ADMIN_NAV:[]),...(user.role!=='shareholder'?[MY_EQUITY_NAV]:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{t(l)}</button>)}
+      {[...TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)),...(user.role==='admin'?ADMIN_NAV:[]),...MANAGE_NAV.filter(([,,,,perm])=>hasPerm(user,perm)),...(user.role!=='shareholder'?[MY_EQUITY_NAV]:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{t(l)}</button>)}
       <div className="border-t border-slate-100 mt-1 pt-2 px-1"><LangSwitcher/></div>
     </div></div>}
   </>;

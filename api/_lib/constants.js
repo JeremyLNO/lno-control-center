@@ -1,13 +1,18 @@
 // Shared backend constants (mirror of the frontend's defaults, server-authoritative)
+// view_logs and manage_users were removed (audit, 2026-07): view_logs never gated anything —
+// there's no "logs" feature in the app for it to control — and manage_users would have let a
+// non-admin holder promote any account (including themselves) to admin via the same PATCH
+// endpoint that edits names/roles, a real privilege-escalation path. User/role management
+// stays admin-only by design; nothing else in PERMISSIONS carries that risk.
 export const PERMISSIONS = [
-  'view_activity','view_realtime','view_trades','view_logs',
+  'view_activity','view_realtime','view_trades',
   'view_reports_daily','view_reports_weekly','view_reports_monthly','view_exchanges','export_data',
-  'manage_users','manage_exchanges','manage_whatsapp','manage_funds',
+  'manage_exchanges','manage_whatsapp','manage_funds',
 ];
 export const ROLE_PERMS = {
   admin: PERMISSIONS.slice(),
-  operator: ['view_activity','view_realtime','view_trades','view_logs','export_data'],
-  viewer: ['view_activity','view_realtime','view_trades','view_logs'],
+  operator: ['view_activity','view_realtime','view_trades','export_data'],
+  viewer: ['view_activity','view_realtime','view_trades'],
   // shareholder default: Exchanges (view_exchanges — wallets only, no keys), Funds
   // (view_trades — read-only), Live (view_realtime), System Status + dashboard (view_activity),
   // plus monthly reports only — the only kind ever sent to shareholders (SHAREHOLDER_KINDS

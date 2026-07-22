@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
   WA_MSG_TYPES, WA_ROLE_COLS, fmtDT, api, toast, Icon, Card, SectionTitle, Btn, Toggle, Select, Field,
-  Input, useApp, Login, PageHead, Denied, Loader
+  Input, useApp, Login, PageHead, Denied, Loader, hasPerm
 } from '../ui'
 
 /* ============================================================
@@ -17,8 +17,8 @@ function AdminOpenWA(){
   const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
   const [log,setLog]=useState(null); const [logQ,setLogQ]=useState(''); const [logStatus,setLogStatus]=useState('all');
   const loadLog=()=>api('openwa?log=1').then(r=>setLog(r.log||[])).catch(()=>setLog([]));
-  useEffect(()=>{ if(user.role!=='admin')return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setEnabled(c.enabled); setMatrix(c.notifMatrix||{}); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); loadLog(); },[]);
-  if(user.role!=='admin') return <Denied/>;
+  useEffect(()=>{ if(!hasPerm(user,'manage_whatsapp'))return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setEnabled(c.enabled); setMatrix(c.notifMatrix||{}); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); loadLog(); },[]);
+  if(!hasPerm(user,'manage_whatsapp')) return <Denied/>;
   const scopeOpts=[{value:'portfolio',label:t('wa.portfolio')},...funds.map(f=>({value:'fund:'+f.id,label:t('wa.fundScopeLabel',{name:f.name})}))];
   const metricOpts=[{value:'drawdown',label:t('wa.metricDrawdown')},{value:'pnlDay',label:t('wa.metricPnlDay')}];
   const filteredLog=(log||[]).filter(l=>{

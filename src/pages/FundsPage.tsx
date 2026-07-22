@@ -33,7 +33,7 @@ function FundModal({open,initial,onClose,onSave}: any){
 }
 function FundsPage(){
   const {funds,user,data,reloadData,refreshTick,refreshMs,t}=useApp();
-  const isAdmin=user.role==='admin';
+  const canManage=hasPerm(user,'manage_funds');
   const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
   if(!hasPerm(user,'view_trades')) return <Denied/>;
   async function createFund(v){ await api('funds',{method:'POST',body:v}); await reloadData(); setModal(null); toast.success(t('funds.created')); }
@@ -48,7 +48,7 @@ function FundsPage(){
   return <div>
     <PageHead title={t('funds.title')} subtitle={t('funds.subtitle')}
       refresh={{ms:refreshMs,tick:refreshTick}}
-      actions={isAdmin&&<Btn onClick={()=>setModal({})}><Icon name="plus" className="w-4 h-4"/>{t('funds.newFund')}</Btn>}/>
+      actions={canManage&&<Btn onClick={()=>setModal({})}><Icon name="plus" className="w-4 h-4"/>{t('funds.newFund')}</Btn>}/>
 
     {funds.length>0&&<div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
       <KpiCard label={t('funds.activeFunds')} value={funds.length} icon="layers" accent="#C9A24D"/>
@@ -73,8 +73,8 @@ function FundsPage(){
     </Card>}
 
     {funds.length===0? <EmptyState icon="layers" title={t('funds.noFundsTitle')}
-        hint={isAdmin?t('funds.noFundsHintAdmin'):t('funds.noFundsHintOther')}
-        action={isAdmin&&<Btn onClick={()=>setModal({})}><Icon name="plus" className="w-4 h-4"/>{t('funds.createFund')}</Btn>}/>
+        hint={canManage?t('funds.noFundsHintAdmin'):t('funds.noFundsHintOther')}
+        action={canManage&&<Btn onClick={()=>setModal({})}><Icon name="plus" className="w-4 h-4"/>{t('funds.createFund')}</Btn>}/>
     : <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
       {funds.map(f=><Card key={f.id} className="p-5">
         <div className="flex items-start justify-between">
@@ -83,7 +83,7 @@ function FundsPage(){
             <span className="font-semibold text-navy truncate">{f.name}</span>
             {f.isEmployeeFund&&<span className="text-[10px] font-medium text-gold bg-gold/15 px-1.5 py-0.5 rounded-full shrink-0">{t('funds.employeeFund')}</span>}
           </div>
-          {isAdmin&&<div className="flex gap-1 shrink-0">
+          {canManage&&<div className="flex gap-1 shrink-0">
             <button onClick={()=>setModal(f)} className="text-slate-400 hover:text-navy p-1" data-tip="Edit"><Icon name="pencil" className="w-4 h-4"/></button>
             {!f.isEmployeeFund&&<button onClick={()=>setDel(f)} className="text-slate-400 hover:text-danger p-1" data-tip="Delete"><Icon name="trash" className="w-4 h-4"/></button>}
           </div>}
