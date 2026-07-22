@@ -507,6 +507,29 @@ ok('shareholder view has wallets but never apiKey/secret/status fields', 'wallet
 r = await call(exchanges, { method: 'POST', headers: shH, body: { name: 'binance', label: 'nope' } });
 ok('shareholder cannot create an exchange -> 403', r.status === 403, r.status);
 
+// manage_exchanges: a granted non-admin (operator, here) can create/edit/delete a connection
+// and trigger a sync, but every response back to them stays stripped of the raw key/secret —
+// identical to the read-only GET shape, not the admin one — even though THEY created it.
+await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_logs', 'export_data', 'view_exchanges', 'manage_exchanges'] } } });
+r = await call(auth, { method: 'POST', body: { action: 'login', email: 'sophie.ops@lno.company', password: 'admin' } });
+const mgH = { authorization: 'Bearer ' + r.body.token };
+r = await call(exchanges, { method: 'POST', headers: mgH, body: { name: 'binance', label: 'Ops-managed', apiKey: 'OPSKEY', apiSecret: 'OPSSECRET', wallets: [{ network: 'BTC', address: 'bc1qtest' }] } });
+const mgExId = r.body.exchange && r.body.exchange.id;
+ok('a manage_exchanges non-admin can create an exchange connection', r.status === 201 && r.body.exchange.label === 'Ops-managed', r.body);
+ok('...but the create response never leaks the raw key/secret to a non-admin', !('apiKey' in r.body.exchange) && !('secretMasked' in r.body.exchange), r.body.exchange);
+r = await call(exchanges, { method: 'PATCH', headers: mgH, body: { id: mgExId, label: 'Ops-managed v2' } });
+ok('a manage_exchanges non-admin can edit a connection without re-supplying the key', r.status === 200 && r.body.exchange.label === 'Ops-managed v2', r.body);
+const mgExAsAdmin = (await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.find(e => e.id === mgExId);
+ok('editing without an apiKey does NOT wipe the key that was set on create', mgExAsAdmin && mgExAsAdmin.apiKey === 'OPSKEY', mgExAsAdmin);
+r = await call(bots, { method: 'POST', headers: mgH, body: { action: 'sync' } });
+ok('a manage_exchanges non-admin can trigger a sync', r.status === 200 && r.body.ok === true, r.body);
+r = await call(exchanges, { method: 'DELETE', headers: mgH, body: { id: mgExId } });
+ok('a manage_exchanges non-admin can delete a connection', r.status === 200, r.body);
+ok('deleted connection is gone', !(await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.some(e => e.id === mgExId));
+await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_logs', 'export_data'] } } }); // restore
+r = await call(exchanges, { method: 'POST', headers: mgH, body: { name: 'binance', label: 'nope' } });
+ok('an operator WITHOUT manage_exchanges still cannot create an exchange -> 403', r.status === 403, r.status);
+
 // requestOtp never reveals whether an account exists/qualifies (email enumeration)
 sentEmails.length = 0;
 r = await call(auth, { method: 'POST', body: { action: 'requestOtp', email: 'no-such-account@example.com' } });

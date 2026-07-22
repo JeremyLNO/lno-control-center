@@ -219,6 +219,7 @@ const ICONS = {
   sort:[['path','M11 5h10'],['path','M11 9h7'],['path','M11 13h4'],['path','M3 17l3 3 3-3'],['path','M6 18V4']],
   filter:[['path','M22 3H2l8 9.46V19l4 2v-8.54L22 3z']],
   mail:[['path','M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z'],['path','M22 6l-10 7L2 6']],
+  copy:[['rect',9,9,13,13,2],['path','M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1']],
   clock:[['circle',12,12,10],['path','M12 6v6l4 2']],
   shield:[['path','M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z']],
   dollar:[['path','M12 1v22'],['path','M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6']],

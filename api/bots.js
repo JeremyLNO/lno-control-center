@@ -5,7 +5,7 @@
 //   GET ?fills=1                 -> most recent executed trades         (any auth)
 //   GET ?listenKey=1             -> mint/reuse a Binance user-data-stream listenKey,
 //                                    for the browser to open its own real-time WebSocket (admin)
-//   POST {action:'sync'}         -> run the position sync now           (admin)
+//   POST {action:'sync'}         -> run the position sync now  (admin, or 'manage_exchanges')
 //   POST {action:'listenKeyKeepAlive'} -> extend the listenKey's 60min validity (admin)
 //   PATCH {id, fundId}           -> assign/clear a bot's fund           (admin)
 //   DELETE {id}                  -> remove a bot                        (admin)
@@ -14,6 +14,7 @@ import { requireAuth, requireAdmin } from './_lib/auth.js';
 import { syncExchanges } from './_lib/sync.js';
 import { getAttribution, getCostAnalytics } from './_lib/attribution.js';
 import { createListenKey, keepAliveListenKey } from './_lib/binance.js';
+import { permsForRole } from './_lib/rolePerms.js';
 
 // The one Binance connection whose user-data stream we relay — a listenKey is 1:1 with a
 // single API key, so with multiple exchange rows configured we pick the first usable one
@@ -60,8 +61,12 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
+      if (req.body?.action === 'sync') {
+        const a = requireAuth(req, res); if (!a) return;
+        if (a.role !== 'admin' && !(await permsForRole(a.role)).includes('manage_exchanges')) return res.status(403).json({ error: 'forbidden' });
+        return res.status(200).json({ ok: true, ...(await syncExchanges()) });
+      }
       const a = requireAdmin(req, res); if (!a) return;
-      if (req.body?.action === 'sync') return res.status(200).json({ ok: true, ...(await syncExchanges()) });
       if (req.body?.action === 'listenKeyKeepAlive') {
         const apiKey = await primaryBinanceApiKey();
         if (!apiKey) return res.status(200).json({ ok: false, skipped: 'no-exchange' });

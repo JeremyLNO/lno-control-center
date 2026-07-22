@@ -11,12 +11,17 @@ import {
 function AdminExchanges(){
   const {user,t}=useApp();
   const isAdmin=user.role==='admin';
+  // manage_exchanges: can add/edit/delete connections + trigger sync, and sees operational
+  // status (sync state, last-sync time, note, error) — but never the raw API key/secret,
+  // which stay admin-only regardless of this permission.
+  const canManage=hasPerm(user,'manage_exchanges');
   const [exchanges,setExchanges]=useState([]);
   const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
   const [tick,setTick]=useState(0);
   const reload=()=>{ setTick(x=>x+1); return api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{}); };
   const [syncing,setSyncing]=useState(false);
   async function runSync(){ setSyncing(true); try{ const r=await api('bots',{method:'POST',body:{action:'sync'}}); await reload(); if(r.errors){ toast.error((r.errorMsgs&&r.errorMsgs[0])||t(r.errors===1?'bots.syncFailedOne':'bots.syncFailedMany',{n:r.errors})); } else { const exch=t((r.connected||0)===1?'exchanges.exchangeCountOne':'exchanges.exchangeCountMany',{n:r.connected||0}); const pos=t((r.positions||0)===1?'exchanges.positionCountOne':'exchanges.positionCountMany',{n:r.positions||0}); toast.success(t('exchanges.syncedResult',{exch,pos})); } }catch(e){ toast.error(e.message); } finally{ setSyncing(false); } }
+  async function copyAddress(address){ try{ await navigator.clipboard.writeText(address); toast.success(t('exchanges.addressCopied')); }catch(e){ toast.error(t('exchanges.copyFailed')); } }
   useEffect(()=>{
     if(!hasPerm(user,'view_exchanges')) return;
     reload();
@@ -28,8 +33,9 @@ function AdminExchanges(){
   },[]);
   if(!hasPerm(user,'view_exchanges')) return <Denied/>;
   const mask=(s)=> s? s.slice(0,6)+'••••••••'+s.slice(-4) : '';
+  const subtitle=isAdmin?t('exchanges.subtitle'):canManage?t('exchanges.subtitleManage'):t('exchanges.subtitleReadOnly');
   return <div>
-    <PageHead title={t('exchanges.title')} subtitle={isAdmin?t('exchanges.subtitle'):t('exchanges.subtitleReadOnly')} refresh={isAdmin?{ms:30000,tick}:undefined} actions={isAdmin&&<div className="flex items-center gap-2">
+    <PageHead title={t('exchanges.title')} subtitle={subtitle} refresh={canManage?{ms:30000,tick}:undefined} actions={canManage&&<div className="flex items-center gap-2">
       <Btn variant="outline" onClick={runSync} disabled={syncing}><Icon name="refresh" className="w-4 h-4"/>{syncing?t('bots.syncing'):t('bots.syncNow')}</Btn>
       <Btn onClick={()=>setModal({mode:'add',data:{name:'binance',label:'',apiKey:'',secret:'',note:'',wallets:[]}})}><Icon name="plus" className="w-4 h-4"/>{t('exchanges.addExchange')}</Btn>
     </div>}/>
@@ -37,27 +43,29 @@ function AdminExchanges(){
       {exchanges.map(e=><Card key={e.id} className="p-5">
         <div className="flex items-start justify-between">
           <div><div className="font-semibold text-navy">{e.label}</div><div className="text-xs text-slate-400 font-mono">{e.name}</div></div>
-          {isAdmin&&<StatusPill status={e.status}/>}
+          {canManage&&<StatusPill status={e.status}/>}
         </div>
-        {isAdmin&&<div className="mt-4 space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-slate-400">{t('exchanges.apiKey')}</span><span className="font-mono text-xs">{mask(e.apiKey)}</span></div>
-          <div className="flex justify-between items-center"><span className="text-slate-400">{t('exchanges.apiSecret')}</span>
+        {canManage&&<div className="mt-4 space-y-2 text-sm">
+          {isAdmin&&<div className="flex justify-between"><span className="text-slate-400">{t('exchanges.apiKey')}</span><span className="font-mono text-xs">{mask(e.apiKey)}</span></div>}
+          {isAdmin&&<div className="flex justify-between items-center"><span className="text-slate-400">{t('exchanges.apiSecret')}</span>
             <span className="flex items-center gap-1.5 font-mono text-xs">{e.hasSecret? e.secretMasked : <span className="text-slate-300">{t('exchanges.none')}</span>}<Icon name="shield" className="w-3.5 h-3.5 text-success" data-tip={t('exchanges.encryptedAtRest')}/></span>
-          </div>
+          </div>}
           <div className="flex justify-between"><span className="text-slate-400">{t('exchanges.lastSync')}</span><span className="text-xs">{e.lastSync?fmtDT(e.lastSync):'—'}</span></div>
           {e.note&&<div className="text-xs text-slate-400 pt-1">{e.note}</div>}
           {e.status==='error'&&e.lastError&&<div className="text-xs text-danger bg-danger/5 border border-danger/20 rounded-lg p-2 mt-1 break-words"><span className="font-medium">{t('exchanges.syncError')}</span> {e.lastError}</div>}
         </div>}
-        <div className={isAdmin?"mt-4 pt-4 border-t border-slate-100":"mt-3"}>
+        <div className={canManage?"mt-4 pt-4 border-t border-slate-100":"mt-3"}>
           <div className="text-xs text-slate-400 mb-2">{t('exchanges.wallets')}</div>
           {(!e.wallets||e.wallets.length===0)
             ? <div className="text-xs text-slate-300">{t('exchanges.noWalletAddresses')}</div>
             : <div className="space-y-1.5">{e.wallets.map((w,i)=><div key={i} className="flex items-center justify-between gap-3 text-xs">
                 <span className="text-slate-500 shrink-0">{w.network||'—'}</span>
-                <span className="font-mono text-navy truncate" title={w.address}>{w.address}</span>
+                <span className="flex items-center gap-1 min-w-0"><span className="font-mono text-navy truncate" title={w.address}>{w.address}</span>
+                  <button onClick={()=>copyAddress(w.address)} className="text-slate-300 hover:text-gold p-0.5 shrink-0" title={t('exchanges.copyAddress')}><Icon name="copy" className="w-3.5 h-3.5"/></button>
+                </span>
               </div>)}</div>}
         </div>
-        {isAdmin&&<div className="flex gap-2 mt-4">
+        {canManage&&<div className="flex gap-2 mt-4">
           <Btn variant="outline" size="sm" onClick={()=>setModal({mode:'edit',data:{...e,secret:''}})}><Icon name="pencil" className="w-3.5 h-3.5"/>{t('common.edit')}</Btn>
           <Btn variant="ghost" size="sm" className="text-danger" onClick={()=>setDel(e)}><Icon name="trash" className="w-3.5 h-3.5"/>{t('common.delete')}</Btn>
         </div>}
@@ -85,7 +93,7 @@ function ExchangeModal({modal,onClose,onSave}: any){
     <div className="space-y-3">
       <Field label={t('exchanges.exchangeField')}><Select value={v.name||'binance'} onChange={x=>setV({...v,name:x})} options={[{value:'binance',label:t('exchanges.binanceFuturesLabel')}]}/></Field>
       <Field label={t('exchanges.label')} hint={t('exchanges.labelHint')}><Input value={v.label||''} onChange={e=>setV({...v,label:e.target.value})} placeholder={t('exchanges.labelPlaceholder')}/></Field>
-      <Field label={t('exchanges.apiKey')}><Input autoComplete="off" value={v.apiKey||''} onChange={e=>setV({...v,apiKey:e.target.value})}/></Field>
+      <Field label={t('exchanges.apiKey')} hint={modal.mode==='edit'&&!v.apiKey?t('exchanges.apiKeyHintEdit'):undefined}><Input autoComplete="off" value={v.apiKey||''} onChange={e=>setV({...v,apiKey:e.target.value})} placeholder={modal.mode==='edit'&&!v.apiKey?t('exchanges.apiKeyPlaceholderEdit'):undefined}/></Field>
       <Field label={t('exchanges.apiSecret')} hint={modal.mode==='edit'?t('exchanges.apiSecretHintEdit'):undefined}><Input type="password" autoComplete="new-password" value={v.secret||''} onChange={e=>setV({...v,secret:e.target.value})} placeholder={modal.mode==='edit'?t('exchanges.apiSecretPlaceholderEdit'):undefined}/></Field>
       <Field label={t('exchanges.noteOptional')}><Input value={v.note||''} onChange={e=>setV({...v,note:e.target.value})}/></Field>
       <div className="border-t border-slate-100 pt-3">

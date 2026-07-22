@@ -1,11 +1,13 @@
-// Exchange connections. Mutations (POST/PATCH/DELETE) are admin only. GET is also open to
-// any role granted the 'view_exchanges' permission (shareholders, by default — see
-// api/_lib/rolePerms.js) but those callers only ever get the stripped wallet-only view below:
-// API keys/secrets are never sent to a non-admin under any permission configuration.
+// Exchange connections.
+//   GET                    -> admins get the full record; any role granted 'view_exchanges'
+//                              (shareholders, by default — see api/_lib/rolePerms.js) gets the
+//                              stripped wallet-only view below. API keys/secrets are never sent
+//                              to a non-admin under any permission configuration.
+//   POST/PATCH/DELETE      -> admins, or any role granted 'manage_exchanges'.
 // Secrets are AES-GCM encrypted at rest and NEVER returned to the client — only a masked
 // preview + hasSecret flag, and only to admins.
 import { query } from './_lib/db.js';
-import { requireAdmin, requireAuth } from './_lib/auth.js';
+import { requireAuth } from './_lib/auth.js';
 import { encrypt, decrypt, mask } from './_lib/crypto.js';
 import { permsForRole } from './_lib/rolePerms.js';
 import { audit } from './_lib/audit.js';
@@ -44,7 +46,10 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: String(e.message || e) });
     }
   }
-  const a = requireAdmin(req, res); if (!a) return;
+  const a = requireAuth(req, res); if (!a) return;
+  const isAdmin = a.role === 'admin';
+  if (!isAdmin && !(await permsForRole(a.role)).includes('manage_exchanges')) return res.status(403).json({ error: 'forbidden' });
+  const view = isAdmin ? pub : pubReadOnly; // a manage_exchanges non-admin can act, but every response back to them is still stripped of the raw key/secret — same as GET.
   try {
     const body = req.body || {};
 
@@ -54,15 +59,21 @@ export default async function handler(req, res) {
         [id, body.name || '', body.label || '', body.apiKey || '', body.apiSecret ? encrypt(body.apiSecret) : null, 'pending', body.note || '', JSON.stringify(cleanWallets(body.wallets))]);
       await audit(req, a, 'exchange.create', id, { name: body.name || '', hasSecret: !!body.apiSecret });
       const { rows } = await query('SELECT * FROM exchanges WHERE id=$1', [id]);
-      return res.status(201).json({ exchange: pub(rows[0]) });
+      return res.status(201).json({ exchange: view(rows[0]) });
     }
 
     if (req.method === 'PATCH') {
       const { id } = body;
       if (!id) return res.status(400).json({ error: 'id required' });
-      const m = { name: 'name', label: 'label', apiKey: 'api_key', note: 'note', status: 'status' };
+      // name/label/note/status: update whenever present, even if blank (explicit clear is fine).
+      const m = { name: 'name', label: 'label', note: 'note', status: 'status' };
       const sets = [], vals = []; let i = 1;
       for (const k of Object.keys(m)) { if (k in body) { sets.push(`${m[k]}=$${i}`); vals.push(body[k]); i++; } }
+      // apiKey/apiSecret: only touched when non-empty — a manage_exchanges (non-admin) editor
+      // never receives the current apiKey from GET (see pubReadOnly), so their edit form's
+      // apiKey field starts blank; treating blank as "leave unchanged" (same as the secret
+      // already does) avoids silently wiping a working key on an unrelated edit.
+      if (body.apiKey) { sets.push(`api_key=$${i}`); vals.push(body.apiKey); i++; }
       if (body.apiSecret) { sets.push(`api_secret_enc=$${i}`); vals.push(encrypt(body.apiSecret)); i++; } // re-encrypt only when provided
       if (Array.isArray(body.wallets)) { sets.push(`wallets=$${i}::jsonb`); vals.push(JSON.stringify(cleanWallets(body.wallets))); i++; }
       if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
@@ -70,7 +81,7 @@ export default async function handler(req, res) {
       await query(`UPDATE exchanges SET ${sets.join(',')} WHERE id=$${i}`, vals);
       await audit(req, a, 'exchange.update', id, { fields: Object.keys(body).filter(k => k !== 'id'), secretChanged: !!body.apiSecret });
       const { rows } = await query('SELECT * FROM exchanges WHERE id=$1', [id]);
-      return res.status(200).json({ exchange: pub(rows[0]) });
+      return res.status(200).json({ exchange: view(rows[0]) });
     }
 
     if (req.method === 'DELETE') {
