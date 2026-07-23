@@ -723,20 +723,35 @@ function pctHeatColor(pct){ if(pct==null) return '#f1f5f9'; const f=0.18+Math.mi
 function HeatmapLegend(){
   return <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-2"><span>loss</span><span className="w-3 h-3 rounded-sm" style={{background:'rgba(239,68,68,0.9)'}}/><span className="w-3 h-3 rounded-sm bg-slate-100"/><span className="w-3 h-3 rounded-sm" style={{background:'rgba(16,185,129,0.9)'}}/><span>gain</span></div>;
 }
+// Measures a container's width so calendar heatmaps can always fill their available width with
+// whole columns (most-recent weeks first) instead of overflowing and relying on horizontal scroll.
+function useContainerWidth(){
+  const ref=useRef<any>(null); const [width,setWidth]=useState(0);
+  useEffect(()=>{ if(!ref.current) return; const ro=new ResizeObserver(entries=>{ setWidth(entries[0].contentRect.width); }); ro.observe(ref.current); return ()=>ro.disconnect(); },[]);
+  return [ref,width] as const;
+}
+const HEATMAP_CELL=12, HEATMAP_GAP=4; // px, matches w-3 h-3 (12px) + gap-1 (4px)
+function fittingHeatmapCols(cols:any[], width:number){
+  if(!width) return cols;
+  const n=Math.max(1, Math.floor((width+HEATMAP_GAP)/(HEATMAP_CELL+HEATMAP_GAP)));
+  return cols.slice(-n);
+}
 // GitHub-style daily-PnL heatmap (columns = weeks, rows = Mon..Sun). Intensity is the day's
 // PnL as a % of the equity it started the day with, not raw $ — a $500 day means very
 // different things at $10k vs $1M equity.
 function PnlCalendar({series}: any){
+  const [ref,width]=useContainerWidth();
   if(!series||series.length<2) return <div className="text-slate-300 text-sm">No data</div>;
   const pnls=[]; for(let i=1;i<series.length;i++){ const prev=series[i-1].equity; const pnl=series[i].equity-prev; pnls.push({t:series[i].t, pnl, pct:prev?pnl/prev*100:null}); }
   const dow=t=>{ const d=new Date(t).getUTCDay(); return (d+6)%7; };
   const cols=[]; let col=new Array(dow(pnls[0].t)).fill(null);
   pnls.forEach(p=>{ col.push(p); if(col.length===7){ cols.push(col); col=[]; } });
   if(col.length){ while(col.length<7) col.push(null); cols.push(col); }
+  const visible=fittingHeatmapCols(cols,width);
   return <div>
-    <div className="overflow-x-auto pb-1"><div className="inline-flex gap-1">
-      {cols.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:pctHeatColor(p&&p.pct)}} title={p?`${fmtDate(p.t)} · ${fmtSigned(p.pnl)}${p.pct!=null?` (${fmtPct(p.pct)})`:''}`:''}/>)}</div>)}
-    </div></div>
+    <div ref={ref} className="flex gap-1">
+      {visible.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:pctHeatColor(p&&p.pct)}} title={p?`${fmtDate(p.t)} · ${fmtSigned(p.pnl)}${p.pct!=null?` (${fmtPct(p.pct)})`:''}`:''}/>)}</div>)}
+    </div>
     <HeatmapLegend/>
   </div>;
 }
@@ -746,16 +761,18 @@ function PnlCalendar({series}: any){
 // positions don't map 1:1 to dates.
 function PositionsHeatmap({bots}: any){
   const {t}=useApp();
+  const [ref,width]=useContainerWidth();
   const closed=(bots||[]).filter(b=>b.status==='closed').sort((a,b)=>new Date(a.lastChanged||a.lastSeen).getTime()-new Date(b.lastChanged||b.lastSeen).getTime());
   if(!closed.length) return <div className="text-slate-300 text-sm">{t('activity.noClosedPositions')}</div>;
   const withPct=closed.map(b=>{ const base=b.initialMargin||Math.abs(b.notional)||null; return {...b, pct: base?(b.unrealizedPnl/base*100):null}; });
   const cols=[]; let col=[];
   withPct.forEach(p=>{ col.push(p); if(col.length===7){ cols.push(col); col=[]; } });
   if(col.length){ while(col.length<7) col.push(null); cols.push(col); }
+  const visible=fittingHeatmapCols(cols,width);
   return <div>
-    <div className="overflow-x-auto pb-1"><div className="inline-flex gap-1">
-      {cols.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:p?pctHeatColor(p.pct):'transparent'}} title={p?`${p.symbol} · ${p.side} · ${fmtSigned(p.unrealizedPnl)}${p.pct!=null?` (${fmtPct(p.pct)})`:''}`:''}/>)}</div>)}
-    </div></div>
+    <div ref={ref} className="flex gap-1">
+      {visible.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:p?pctHeatColor(p.pct):'transparent'}} title={p?`${p.symbol} · ${p.side} · ${fmtSigned(p.unrealizedPnl)}${p.pct!=null?` (${fmtPct(p.pct)})`:''}`:''}/>)}</div>)}
+    </div>
     <HeatmapLegend/>
   </div>;
 }
