@@ -5,7 +5,7 @@ import type { DataStatus, Lang } from './types'
 import { SUPPORTED_LANGS, detectBrowserLang, translate } from './i18n'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  FUND_PALETTE, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard
+  FUND_PALETTE, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard
 } from './ui'
 import {
   ActivityPage, RealtimePage, TradesPage, AdminUsers, RulesPage, AdminExchanges, AdminOpenWA,
@@ -20,8 +20,12 @@ import {
 // this exact login page (incl. the real Google Sign-In button) with zero extra Google
 // Cloud config. On a successful login we hand the fresh JWT to that custom scheme
 // instead of rendering the dashboard; a plain browser visit (no param) is unaffected.
-function mobileHandoff(token: string){
-  const redirect=new URLSearchParams(window.location.search).get('mobile_redirect');
+function mobileHandoff(token: string, explicitRedirect?: string|null){
+  // explicitRedirect covers the Google classic-redirect flow: by the time Google's
+  // own redirect lands back on us, the original ?mobile_redirect= query param is
+  // long gone (replaced by whatever redirect_uri we gave Google), so that value
+  // travels in Google's `state` param instead — see consumeGoogleRedirectCallback.
+  const redirect=explicitRedirect||new URLSearchParams(window.location.search).get('mobile_redirect');
   if(!redirect) return false;
   window.location.href = redirect+(redirect.includes('?')?'&':'?')+'token='+encodeURIComponent(token);
   return true;
@@ -246,6 +250,9 @@ class ErrorBoundary extends React.Component<{children:any},{error:any}>{
 }
 
 function Root(){
+  // Must run before useHashRoute's own lazy parse of window.location.hash — this
+  // strips Google's raw id_token out of the hash first so the router never sees it.
+  const [googleCallback]=useState(consumeGoogleRedirectCallback);
   const route=useHashRoute();
   const [user,setUser]=useState(null);
   const [booting,setBooting]=useState(true);
@@ -304,6 +311,19 @@ function Root(){
     const r=await api('auth',{method:'POST',body:{action:'google',credential}});
     setToken(r.token); setUser(r.user); mobileHandoff(r.token); return r.user;
   }
+  // Finishes the classic-redirect Google flow the iOS app's login page kicks off
+  // (see startGoogleRedirectFlow in ui.tsx) — same backend verification as the
+  // regular button/One-Tap credential, just delivered via a redirect instead.
+  useEffect(()=>{
+    if(!googleCallback) return;
+    (async()=>{
+      try{
+        const r=await api('auth',{method:'POST',body:{action:'google',credential:googleCallback.idToken}});
+        setToken(r.token); setUser(r.user);
+        if(googleCallback.redirect) mobileHandoff(r.token, googleCallback.redirect);
+      }catch(e){ toast.error(e.message||'Google sign-in failed'); }
+    })();
+  },[googleCallback]);
   function logout(){ api('auth',{method:'POST',body:{action:'logout'}}).catch(()=>{}); setToken(null); setUser(null); window.location.hash='#/activity'; }
   function navigate(to){ window.location.hash='#'+to; }
 

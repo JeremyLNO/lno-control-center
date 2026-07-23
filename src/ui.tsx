@@ -118,6 +118,40 @@ const PREF={
 // VITE_GOOGLE_CLIENT_ID overrides this default if set.
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '842329765719-vinrm66bckks5vfgq54oj4hb3v6e6r1m.apps.googleusercontent.com';
 
+// Classic OAuth2 redirect flow — used only for the iOS app's Google button. GIS's
+// popup/One-Tap flow (the default, used everywhere else below) needs FedCM in the
+// browser; Safari/WebKit has never implemented FedCM, so inside the iOS app's
+// ASWebAuthenticationSession `google.accounts.id.prompt()` silently does nothing and
+// the user falls through to the real button — which Google deliberately makes
+// unclickable by script (it lives in a cross-origin iframe, anti-clickjacking). A
+// real top-level redirect to Google's own accounts page has none of that: it's the
+// original OAuth mechanism from before One Tap/FedCM existed, works everywhere
+// including WebKit, and ASWebAuthenticationSession is built specifically to follow
+// exactly this kind of provider navigation.
+const GOOGLE_REDIRECT_FLAG = 'mobile_google_cb';
+function startGoogleRedirectFlow(mobileRedirect: string){
+  const redirectUri = window.location.origin + window.location.pathname + '?' + GOOGLE_REDIRECT_FLAG + '=1';
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'id_token',
+    scope: 'openid email profile',
+    nonce: Math.random().toString(36).slice(2) + Date.now().toString(36),
+    prompt: 'select_account',
+    state: encodeURIComponent(mobileRedirect),
+  });
+  window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+}
+/** Reads back Google's redirect (…?mobile_google_cb=1#id_token=…&state=…) and
+ * immediately scrubs the URL so the hash-router never sees the raw id_token. */
+function consumeGoogleRedirectCallback(): {idToken: string; redirect: string|null} | null {
+  if (new URLSearchParams(window.location.search).get(GOOGLE_REDIRECT_FLAG) !== '1') return null;
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const idToken = hash.get('id_token'); const state = hash.get('state');
+  window.history.replaceState(null, '', window.location.pathname);
+  return idToken ? {idToken, redirect: state ? decodeURIComponent(state) : null} : null;
+}
+
 /* ============================================================
    DATA EXPORT — CSV (no dep) + XLSX (code-split). Rows are
    arrays-of-arrays aligned to `headers`.
@@ -814,6 +848,15 @@ function OtpInput({length=6,value,onChange,onComplete,status='idle',disabled}: a
 function Login(){
   const {loginGoogle,api,setUser,lang,t}=useApp();
   const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
+  // The iOS app opens this exact login page inside an ASWebAuthenticationSession
+  // (?mobile_redirect=…) so its "Sign in with Google" button can reuse this real
+  // Google integration with zero extra native OAuth config. Redirect straight to
+  // Google before this page ever renders anything — the user already chose
+  // "Google" on the native side, they should never see the LNO login page at all.
+  useEffect(()=>{
+    const mr=new URLSearchParams(window.location.search).get('mobile_redirect');
+    if(mr) startGoogleRedirectFlow(mr);
+  },[]);
   // Password auth no longer exists anywhere in the product — sign-in is Google
   // (@lno.company) or an emailed one-time code. 'otp-email' = email entry, 'otp-code' = code entry.
   const [mode,setMode]=useState('otp-email');
@@ -855,18 +898,6 @@ function Login(){
         catch(ex){ setErr(ex.message||'Google sign-in failed'); setBusy(false); }
       }});
       window.google.accounts.id.renderButton(gref.current,{ theme:'outline', size:'large', text:'signin_with', shape:'pill', width:300 });
-      // The iOS app's "Sign in with Google" button opens this exact page inside an
-      // ASWebAuthenticationSession (?mobile_redirect=…) specifically so it can reuse
-      // this real Google button with zero extra native OAuth config — but landing on
-      // the full Control Center login page first (with the OTP fields etc. visible)
-      // before the user has to click Google *again* here defeats that: the user
-      // already chose "Google" on the native side. Auto-trigger Google's own account
-      // chooser immediately in that case so the LNO page is never actually seen. The
-      // rendered button stays as a fallback if the browser silently declines to show
-      // One Tap (e.g. no active Google session, or already dismissed).
-      if(new URLSearchParams(window.location.search).get('mobile_redirect')){
-        window.google.accounts.id.prompt();
-      }
     };
     // Google renders its own button text in whatever language its script was loaded with
     // (the `hl` query param) — it doesn't follow our app's language automatically. The
@@ -1237,5 +1268,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };
