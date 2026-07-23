@@ -855,6 +855,18 @@ function Login(){
         catch(ex){ setErr(ex.message||'Google sign-in failed'); setBusy(false); }
       }});
       window.google.accounts.id.renderButton(gref.current,{ theme:'outline', size:'large', text:'signin_with', shape:'pill', width:300 });
+      // The iOS app's "Sign in with Google" button opens this exact page inside an
+      // ASWebAuthenticationSession (?mobile_redirect=…) specifically so it can reuse
+      // this real Google button with zero extra native OAuth config — but landing on
+      // the full Control Center login page first (with the OTP fields etc. visible)
+      // before the user has to click Google *again* here defeats that: the user
+      // already chose "Google" on the native side. Auto-trigger Google's own account
+      // chooser immediately in that case so the LNO page is never actually seen. The
+      // rendered button stays as a fallback if the browser silently declines to show
+      // One Tap (e.g. no active Google session, or already dismissed).
+      if(new URLSearchParams(window.location.search).get('mobile_redirect')){
+        window.google.accounts.id.prompt();
+      }
     };
     // Google renders its own button text in whatever language its script was loaded with
     // (the `hl` query param) — it doesn't follow our app's language automatically. The
