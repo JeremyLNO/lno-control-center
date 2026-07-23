@@ -731,10 +731,15 @@ function useContainerWidth(){
   return [ref,width] as const;
 }
 const HEATMAP_CELL=12, HEATMAP_GAP=4; // px, matches w-3 h-3 (12px) + gap-1 (4px)
+// Picks the most recent `n` columns that fit the measured width — and, when there isn't
+// enough real data to fill it, pads with blank columns on the left so the grid still
+// spans the full width instead of leaving empty space (or shrinking down to content).
 function fittingHeatmapCols(cols:any[], width:number){
   if(!width) return cols;
   const n=Math.max(1, Math.floor((width+HEATMAP_GAP)/(HEATMAP_CELL+HEATMAP_GAP)));
-  return cols.slice(-n);
+  if(cols.length>=n) return cols.slice(-n);
+  const pad=Array.from({length:n-cols.length},()=>new Array(7).fill(null));
+  return [...pad,...cols];
 }
 // GitHub-style daily-PnL heatmap (columns = weeks, rows = Mon..Sun). Intensity is the day's
 // PnL as a % of the equity it started the day with, not raw $ — a $500 day means very
