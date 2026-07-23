@@ -276,10 +276,21 @@ function Root(){
   }
   const t=useCallback((key: string, vars?: Record<string,string|number>)=>translate(lang,key,vars),[lang]);
 
-  // restore session from the JWT on load
+  // restore session from the JWT on load — except for the iOS app's mobile
+  // handoff flow (?mobile_redirect=…): the user just tapped "Sign in with
+  // Google" on the *native* login screen, often right after signing out of
+  // the app itself, expecting a fresh sign-in. Silently restoring whatever
+  // session happens to be cached in this shared ASWebAuthenticationSession
+  // web view (e.g. from a previous handoff, or from browsing cc.lno.company
+  // directly on the same device) would skip Login/the Google redirect
+  // entirely and hand back a stale identity instead of authenticating
+  // whoever is actually sitting at the phone right now.
   useEffect(()=>{
     let alive=true;
     (async()=>{
+      if(new URLSearchParams(window.location.search).get('mobile_redirect')){
+        setToken(null); setBooting(false); return;
+      }
       if(!getToken()){ if(alive){setBooting(false);} return; }
       try{ const r=await api('auth'); if(alive) setUser(r.user); }
       catch(e){ setToken(null); }
