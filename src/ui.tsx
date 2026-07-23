@@ -768,16 +768,18 @@ function PositionsHeatmap({bots}: any){
   const {t}=useApp();
   const [ref,width]=useContainerWidth();
   const closed=(bots||[]).filter(b=>b.status==='closed').sort((a,b)=>new Date(a.lastChanged||a.lastSeen).getTime()-new Date(b.lastChanged||b.lastSeen).getTime());
-  if(!closed.length) return <div className="text-slate-300 text-sm">{t('activity.noClosedPositions')}</div>;
   const withPct=closed.map(b=>{ const base=b.initialMargin||Math.abs(b.notional)||null; return {...b, pct: base?(b.unrealizedPnl/base*100):null}; });
   const cols=[]; let col=[];
   withPct.forEach(p=>{ col.push(p); if(col.length===7){ cols.push(col); col=[]; } });
   if(col.length){ while(col.length<7) col.push(null); cols.push(col); }
+  // Always render the full-width grid (blank cells when there's no data yet), same as
+  // PnL Calendar, instead of collapsing to a text-only empty state.
   const visible=fittingHeatmapCols(cols,width);
   return <div>
     <div ref={ref} className="flex gap-1">
-      {visible.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:p?pctHeatColor(p.pct):'transparent'}} title={p?`${p.symbol} · ${p.side} · ${fmtSigned(p.unrealizedPnl)}${p.pct!=null?` (${fmtPct(p.pct)})`:''}`:''}/>)}</div>)}
+      {visible.map((c,ci)=><div key={ci} className="flex flex-col gap-1">{c.map((p,ri)=><div key={ri} className="w-3 h-3 rounded-sm" style={{background:pctHeatColor(p&&p.pct)}} title={p?`${p.symbol} · ${p.side} · ${fmtSigned(p.unrealizedPnl)}${p.pct!=null?` (${fmtPct(p.pct)})`:''}`:''}/>)}</div>)}
     </div>
+    {!closed.length && <div className="text-slate-300 text-sm mt-2">{t('activity.noClosedPositions')}</div>}
     <HeatmapLegend/>
   </div>;
 }
