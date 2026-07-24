@@ -5,6 +5,8 @@ import {
   useApp, PageHead, Denied, hasPerm
 } from '../ui'
 
+const { Fragment } = React;
+
 /* ============================================================
    ADMIN — EXCHANGES (full CRUD) / shareholder — read-only wallet list
    ============================================================ */
@@ -17,6 +19,7 @@ function AdminExchanges(){
   const canManage=hasPerm(user,'manage_exchanges');
   const [exchanges,setExchanges]=useState([]);
   const [modal,setModal]=useState(null); const [del,setDel]=useState(null);
+  const [exp,setExp]=useState(null);
   const [tick,setTick]=useState(0);
   const reload=()=>{ setTick(x=>x+1); return api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>{}); };
   const [syncing,setSyncing]=useState(false);
@@ -39,38 +42,59 @@ function AdminExchanges(){
       <Btn variant="outline" onClick={runSync} disabled={syncing}><Icon name="refresh" className="w-4 h-4"/>{syncing?t('bots.syncing'):t('bots.syncNow')}</Btn>
       <Btn onClick={()=>setModal({mode:'add',data:{name:'binance',label:'',apiKey:'',secret:'',note:'',wallets:[]}})}><Icon name="plus" className="w-4 h-4"/>{t('exchanges.addExchange')}</Btn>
     </div>}/>
-    <div className="grid md:grid-cols-2 gap-4">
-      {exchanges.map(e=><Card key={e.id} className="p-5">
-        <div className="flex items-start justify-between">
-          <div><div className="font-semibold text-navy">{e.label}</div><div className="text-xs text-slate-400 font-mono">{e.name}</div></div>
-          {canManage&&<StatusPill status={e.status}/>}
-        </div>
-        {canManage&&<div className="mt-4 space-y-2 text-sm">
-          {isAdmin&&<div className="flex justify-between"><span className="text-slate-400">{t('exchanges.apiKey')}</span><span className="font-mono text-xs">{mask(e.apiKey)}</span></div>}
-          {isAdmin&&<div className="flex justify-between items-center"><span className="text-slate-400">{t('exchanges.apiSecret')}</span>
-            <span className="flex items-center gap-1.5 font-mono text-xs">{e.hasSecret? e.secretMasked : <span className="text-slate-300">{t('exchanges.none')}</span>}<Icon name="shield" className="w-3.5 h-3.5 text-success" data-tip={t('exchanges.encryptedAtRest')}/></span>
-          </div>}
-          <div className="flex justify-between"><span className="text-slate-400">{t('exchanges.lastSync')}</span><span className="text-xs">{e.lastSync?fmtDT(e.lastSync):'—'}</span></div>
-          {e.note&&<div className="text-xs text-slate-400 pt-1">{e.note}</div>}
-          {e.status==='error'&&e.lastError&&<div className="text-xs text-danger bg-danger/5 border border-danger/20 rounded-lg p-2 mt-1 break-words"><span className="font-medium">{t('exchanges.syncError')}</span> {e.lastError}</div>}
-        </div>}
-        <div className={canManage?"mt-4 pt-4 border-t border-slate-100":"mt-3"}>
-          <div className="text-xs text-slate-400 mb-2">{t('exchanges.wallets')}</div>
-          {(!e.wallets||e.wallets.length===0)
-            ? <div className="text-xs text-slate-300">{t('exchanges.noWalletAddresses')}</div>
-            : <div className="space-y-1.5">{e.wallets.map((w,i)=><div key={i} className="flex items-center justify-between gap-3 text-xs">
-                <span className="text-slate-500 shrink-0">{w.network||'—'}</span>
-                <span className="flex items-center gap-1 min-w-0"><span className="font-mono text-navy truncate" title={w.address}>{w.address}</span>
-                  <button onClick={()=>copyAddress(w.address)} className="text-slate-300 hover:text-gold p-0.5 shrink-0" title={t('exchanges.copyAddress')}><Icon name="copy" className="w-3.5 h-3.5"/></button>
-                </span>
-              </div>)}</div>}
-        </div>
-        {canManage&&<div className="flex gap-2 mt-4">
-          <Btn variant="outline" size="sm" onClick={()=>setModal({mode:'edit',data:{...e,secret:''}})}><Icon name="pencil" className="w-3.5 h-3.5"/>{t('common.edit')}</Btn>
-          <Btn variant="ghost" size="sm" className="text-danger" onClick={()=>setDel(e)}><Icon name="trash" className="w-3.5 h-3.5"/>{t('common.delete')}</Btn>
-        </div>}
-      </Card>)}
-    </div>
+    {exchanges.length===0? <Card className="p-8 text-center text-sm text-slate-400">{t('sysstatus.noExchangeConnectionsYet')}</Card>
+    : <Card className="overflow-hidden"><table className="w-full text-sm">
+        <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500 text-left">
+          <th className="px-4 py-2.5 font-medium">{t('exchanges.label')}</th>
+          {canManage&&<th className="px-4 py-2.5 font-medium">{t('positions.status')}</th>}
+          {canManage&&<th className="px-4 py-2.5 font-medium">{t('exchanges.lastSync')}</th>}
+          <th className="px-4 py-2.5 font-medium">{t('exchanges.wallets')}</th>
+          <th className="px-4 py-2.5 w-10"></th>
+        </tr></thead>
+        <tbody>
+          {exchanges.map(e=><Fragment key={e.id}>
+            <tr className="border-b border-slate-50 hover:bg-slate-50/60">
+              <td className="px-4 py-2.5">
+                <button onClick={()=>setExp(exp===e.id?null:e.id)} className="text-left">
+                  <div className="font-medium text-navy">{e.label}</div>
+                  <div className="text-[11px] text-slate-400 font-mono">{e.name}</div>
+                </button>
+              </td>
+              {canManage&&<td className="px-4 py-2.5"><StatusPill status={e.status}/></td>}
+              {canManage&&<td className="px-4 py-2.5 text-xs text-slate-500 whitespace-nowrap">{e.lastSync?fmtDT(e.lastSync):'—'}</td>}
+              <td className="px-4 py-2.5 text-xs text-slate-500 tnum">{(e.wallets||[]).length}</td>
+              <td className="px-4 py-2.5 text-right">
+                <button onClick={()=>setExp(exp===e.id?null:e.id)} className="text-slate-400 hover:text-navy p-1"><Icon name="chevdown" className={`w-4 h-4 transition ${exp===e.id?'rotate-180':''}`}/></button>
+              </td>
+            </tr>
+            {exp===e.id&&<tr className="border-b border-slate-50 fadein"><td colSpan={canManage?5:3} className="p-4 space-y-4 bg-slate-50/50">
+              {canManage&&<div className="space-y-2 text-sm max-w-md">
+                {isAdmin&&<div className="flex justify-between"><span className="text-slate-400">{t('exchanges.apiKey')}</span><span className="font-mono text-xs">{mask(e.apiKey)}</span></div>}
+                {isAdmin&&<div className="flex justify-between items-center"><span className="text-slate-400">{t('exchanges.apiSecret')}</span>
+                  <span className="flex items-center gap-1.5 font-mono text-xs">{e.hasSecret? e.secretMasked : <span className="text-slate-300">{t('exchanges.none')}</span>}<Icon name="shield" className="w-3.5 h-3.5 text-success" data-tip={t('exchanges.encryptedAtRest')}/></span>
+                </div>}
+                {e.note&&<div className="text-xs text-slate-400 pt-1">{e.note}</div>}
+                {e.status==='error'&&e.lastError&&<div className="text-xs text-danger bg-danger/5 border border-danger/20 rounded-lg p-2 mt-1 break-words"><span className="font-medium">{t('exchanges.syncError')}</span> {e.lastError}</div>}
+              </div>}
+              <div>
+                <div className="text-xs font-medium text-slate-500 mb-2">{t('exchanges.wallets')}</div>
+                {(!e.wallets||e.wallets.length===0)
+                  ? <div className="text-xs text-slate-400">{t('exchanges.noWalletAddresses')}</div>
+                  : <div className="space-y-1.5">{e.wallets.map((w,i)=><div key={i} className="flex items-center gap-3 text-xs">
+                      <span className="text-slate-500 shrink-0 w-16">{w.network||'—'}</span>
+                      <span className="flex items-center gap-1 min-w-0"><span className="font-mono text-navy truncate" title={w.address}>{w.address}</span>
+                        <button onClick={()=>copyAddress(w.address)} className="text-slate-300 hover:text-gold p-0.5 shrink-0" title={t('exchanges.copyAddress')}><Icon name="copy" className="w-3.5 h-3.5"/></button>
+                      </span>
+                    </div>)}</div>}
+              </div>
+              {canManage&&<div className="flex gap-2 pt-1">
+                <Btn variant="outline" size="sm" onClick={()=>setModal({mode:'edit',data:{...e,secret:''}})}><Icon name="pencil" className="w-3.5 h-3.5"/>{t('common.edit')}</Btn>
+                <Btn variant="ghost" size="sm" className="text-danger" onClick={()=>setDel(e)}><Icon name="trash" className="w-3.5 h-3.5"/>{t('common.delete')}</Btn>
+              </div>}
+            </td></tr>}
+          </Fragment>)}
+        </tbody>
+      </table></Card>}
     <ExchangeModal modal={modal} onClose={()=>setModal(null)} onSave={async(d)=>{
       try{
         const body: any={name:(d.name||'binance'),label:d.label,apiKey:d.apiKey,note:d.note,wallets:(d.wallets||[]).filter((w)=>w.network||w.address)}; if(d.secret) body.apiSecret=d.secret;
