@@ -147,28 +147,44 @@ function AdminUsers(){
       </div>
     </div>
     {filteredUsers.length===0 && <div className="text-sm text-slate-400 text-center py-10">{t('users.noMatchFilter')}</div>}
-    <div className="space-y-3">
-      {filteredUsers.map(u=><Card key={u.id} className={`overflow-hidden ${sel.has(u.id)?'ring-1 ring-gold/40':''}`}>
-        <div className="flex items-center">
-        <label className="pl-4 flex items-center shrink-0"><input type="checkbox" checked={sel.has(u.id)} onChange={()=>toggleSel(u.id)} className="accent-navy w-4 h-4"/></label>
-        <button onClick={()=>setExp(exp===u.id?null:u.id)} className="flex-1 min-w-0 flex items-center gap-3 p-4 text-left hover:bg-slate-50/60">
-          {u.avatar?<img src={u.avatar} className="w-10 h-10 rounded-full object-cover"/>:<span className="w-10 h-10 rounded-full bg-navy text-white grid place-items-center text-xs font-semibold shrink-0">{initialsOf(u)}</span>}
-          <div className="flex-1 min-w-0">
-            <div className="font-medium text-navy flex items-center gap-2">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.email}
-              <Badge className={u.role==='admin'?'bg-gold/15 text-gold':u.role==='operator'?'bg-blue-100 text-blue-700':u.role==='shareholder'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-600'}>{t('role.'+u.role)}</Badge>
-            </div>
-            <div className="text-xs text-slate-400 truncate">{u.email}</div>
-            <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5 truncate">
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline(u)?'bg-success pulse-dot':'bg-slate-300'}`}/>
-              <span className={isOnline(u)?'text-success font-medium':''}>{isOnline(u)?t('users.online'):(u.lastLoginAt?t('users.lastSignIn',{date:fmtDT(u.lastLoginAt)}):t('users.neverSignedIn'))}</span>
-              {u.lastIp&&<span className="font-mono text-slate-400">· {u.lastIp}</span>}
-            </div>
-          </div>
-          <StatusPill status={u.active?'active':'inactive'}/>
-          <Icon name="chevdown" className={`w-4 h-4 text-slate-400 transition ${exp===u.id?'rotate-180':''}`}/>
-        </button>
-        </div>
-        {exp===u.id&&<div className="border-t border-slate-100 p-4 space-y-4 fadein">
+    {filteredUsers.length>0&&<Card className="overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500 text-left">
+          <th className="pl-4 py-2.5 w-8"></th>
+          <th className="px-3 py-2.5 font-medium">{t('login.email')}</th>
+          <th className="px-3 py-2.5 font-medium">{t('users.role')}</th>
+          <th className="px-3 py-2.5 font-medium">{t('users.active')}</th>
+          <th className="px-3 py-2.5 font-medium">{t('users.recentSignIns')}</th>
+          <th className="px-3 py-2.5 font-medium">{t('users.notifications')}</th>
+          <th className="px-3 py-2.5 font-medium text-right pr-4">{t('users.actions')}</th>
+        </tr></thead>
+        <tbody>
+          {filteredUsers.map(u=><React.Fragment key={u.id}>
+            <tr className={`border-b border-slate-50 hover:bg-slate-50/60 ${sel.has(u.id)?'bg-gold/5':''}`}>
+              <td className="pl-4 py-2.5"><input type="checkbox" checked={sel.has(u.id)} onChange={()=>toggleSel(u.id)} className="accent-navy w-4 h-4"/></td>
+              <td className="px-3 py-2.5">
+                <button onClick={()=>setExp(exp===u.id?null:u.id)} className="flex items-center gap-2.5 text-left w-full">
+                  {u.avatar?<img src={u.avatar} className="w-8 h-8 rounded-full object-cover shrink-0"/>:<span className="w-8 h-8 rounded-full bg-navy text-white grid place-items-center text-[11px] font-semibold shrink-0">{initialsOf(u)}</span>}
+                  <div className="min-w-0">
+                    <div className="font-medium text-navy truncate">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.email}</div>
+                    <div className="text-xs text-slate-400 truncate">{u.email}</div>
+                  </div>
+                </button>
+              </td>
+              <td className="px-3 py-2.5"><Badge className={u.role==='admin'?'bg-gold/15 text-gold':u.role==='operator'?'bg-blue-100 text-blue-700':u.role==='shareholder'?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-600'}>{t('role.'+u.role)}</Badge></td>
+              <td className="px-3 py-2.5"><StatusPill status={u.active?'active':'inactive'}/></td>
+              <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                <span className="flex items-center gap-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline(u)?'bg-success pulse-dot':'bg-slate-300'}`}/>
+                  <span className={isOnline(u)?'text-success font-medium':'text-slate-400'}>{isOnline(u)?t('users.online'):(u.lastLoginAt?fmtDT(u.lastLoginAt):t('users.neverSignedIn'))}</span>
+                </span>
+              </td>
+              <td className="px-3 py-2.5"><Icon name={u.notify?'msg':'x'} className={`w-4 h-4 ${u.notify?'text-success':'text-slate-300'}`} data-tip={u.notify?'WhatsApp notifications on':'WhatsApp notifications off'}/></td>
+              <td className="px-3 py-2.5 text-right pr-4">
+                <button onClick={()=>setExp(exp===u.id?null:u.id)} className="text-slate-400 hover:text-navy p-1"><Icon name="chevdown" className={`w-4 h-4 transition ${exp===u.id?'rotate-180':''}`}/></button>
+              </td>
+            </tr>
+            {exp===u.id&&<tr className="border-b border-slate-50 fadein"><td colSpan={7} className="p-4 space-y-4 bg-slate-50/50">
           <div className="flex flex-wrap gap-4 items-start">
             <Field label={t('users.avatar')}><div className="flex items-center gap-2 pt-1">
               {u.avatar?<img src={u.avatar} className="w-10 h-10 rounded-full object-cover"/>:<span className="w-10 h-10 rounded-full bg-navy text-white grid place-items-center text-xs font-semibold shrink-0">{initialsOf(u)}</span>}
@@ -195,9 +211,11 @@ function AdminUsers(){
           <div className="flex justify-end pt-1">
             <Btn variant="danger" size="sm" disabled={u.id===user.id} onClick={()=>setDel(u)}><Icon name="trash" className="w-3.5 h-3.5"/>{t('users.deleteUser')}</Btn>
           </div>
-        </div>}
-      </Card>)}
-    </div>
+            </td></tr>}
+          </React.Fragment>)}
+        </tbody>
+      </table>
+    </Card>}
     <LoginHistoryTable/>
     <AvatarPickerModal userId={avatarPickFor} onClose={()=>setAvatarPickFor(null)} onPick={async(avatar)=>{ await up(avatarPickFor,{avatar}); setAvatarPickFor(null); }}/>
     <AddUserModal open={add} onClose={()=>setAdd(false)} onCreated={u=>{setUsers(us=>[...us,u]);setAdd(false);}}/>

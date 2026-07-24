@@ -794,6 +794,23 @@ function LiveBadge({status}: any){
   if(status==='offline') return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400" data-tip="No exchange connected"><span className="w-2 h-2 rounded-full bg-slate-400"/>{t('liveBadge.offline')}</span>;
   return <span className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400"><span className="w-2 h-2 rounded-full bg-slate-300 animate-pulse"/>…</span>;
 }
+// Compact single-row summary of the same health signals the System Status page covers in
+// full — a quick "is everything fine?" glance at the top of a page, not a duplicate of that
+// page's depth. Purely derived from data the caller already has (+ optionally an incidents
+// flag from the same api/alerts?type=api_error fetch RealtimePage's incident card uses).
+function StatusStrip({dataStatus,connected,syncedAt,hasActiveIncident}: any){
+  const {t}=useApp();
+  const dot=(ok)=>`w-1.5 h-1.5 rounded-full shrink-0 ${ok===true?'bg-success':ok===false?'bg-danger':'bg-slate-300'}`;
+  const marketOk = dataStatus==='live';
+  const exOk = connected>0? (dataStatus!=='partial') : null;
+  const overallOk = !hasActiveIncident && dataStatus==='live';
+  return <Card className="px-4 py-2.5 mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs text-slate-500">
+    <span className="flex items-center gap-1.5"><span className={dot(hasActiveIncident?false:overallOk)}/>{t('sysstrip.systemStatus')}<span className="text-navy font-medium">{hasActiveIncident?t('live.incidentActive'):t('sysstatus.allOperational')}</span></span>
+    <span className="hidden sm:flex items-center gap-1.5"><span className={dot(exOk)}/>{t('sysstrip.exchangeConnectivity')}<span className="text-navy font-medium">{connected>0?t(connected===1?'sysstatus.connectedCountSubOne':'sysstatus.connectedCountSubMany',{n:connected}):t('live.noExchangeConnected')}</span></span>
+    <span className="hidden md:flex items-center gap-1.5"><span className={dot(marketOk)}/>{t('sysstrip.marketData')}<span className="text-navy font-medium">{marketOk?t('liveBadge.live'):t('liveBadge.offline')}</span></span>
+    <span className="hidden lg:flex items-center gap-1.5"><span className={dot(null)}/>{t('sysstrip.autoSync')}<span className="text-navy font-medium">{syncedAt?t('live.syncedAgo',{ago:fmtAgo(syncedAt)}):'—'}</span></span>
+  </Card>;
+}
 // Ticker tape of open positions: base asset + unrealized PnL. Hidden when there are none.
 function MarketTicker(){
   const {data}=useApp(); if(!data||!data.openBots.length) return null;
@@ -1301,5 +1318,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, StatusStrip, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };

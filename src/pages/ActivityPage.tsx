@@ -1,18 +1,24 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtPct, clsPnl, fmtDate, Icon, Card, SectionTitle, Btn, AreaChart, Donut, Sparkline, FUND_PALETTE, useApp,
-  hasPerm, fundOf, sliceByPeriod, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, MarketTicker, PageHead, Denied, KpiCard, TrendBadge, EmptyState,
+  fmtUSD, fmtSigned, fmtPct, fmtAgo, clsPnl, fmtDate, api, Icon, Card, SectionTitle, Btn, AreaChart, Donut, Sparkline, FUND_PALETTE, useApp,
+  hasPerm, fundOf, sliceByPeriod, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, MarketTicker, StatusStrip, PageHead, Denied, KpiCard, TrendBadge, EmptyState,
   SideTag, FundTag, OnboardingCard
 } from '../ui'
 
 function ActivityPage(){
   // period/custom now live in AppContext (rendered once, globally, in Header) rather than
   // page-local state — see types.ts's AppContextValue for why.
-  const {funds,navigate,user,data,refreshTick,refreshMs,period,custom,t}=useApp();
+  const {funds,navigate,user,data,dataStatus,refreshTick,refreshMs,period,custom,t}=useApp();
+  const [incidents,setIncidents]=useState(null);
+  // Same api/alerts?type=api_error incident concept as the Live page's status card — service
+  // health only, not portfolio performance breaches. Feeds the System Health KPI below.
+  useEffect(()=>{ if(!hasPerm(user,'view_activity'))return; api('alerts?type=api_error').then(r=>setIncidents(r.alerts||[])).catch(()=>setIncidents([])); },[]);
   if(!hasPerm(user,'view_activity')) return <Denied/>;
 
-  const {series,equity,openBots,byFund,bots}=data;
+  const {series,equity,openBots,byFund,bots,live}=data;
+  const hasActiveIncident = !!(incidents&&incidents.some((a:any)=>!a.ackedAt));
+  const canSeeReports = hasPerm(user,['view_reports_daily','view_reports_weekly','view_reports_monthly']);
   const view=sliceByPeriod(series,period,custom);            // real equity history, sliced
   const hasHistory=series.length>=2;
   const periodPnl = view.length>1? view[view.length-1].equity-view[0].equity : 0;
@@ -43,14 +49,19 @@ function ActivityPage(){
         hint={t('activity.emptyHint')}
         action={user.role==='admin'&&<Btn onClick={()=>navigate('/admin/exchanges')}><Icon name="link" className="w-4 h-4"/>{t('activity.connectExchange')}</Btn>}/>
     : <>
-      {/* Hero: account equity + KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+      <StatusStrip dataStatus={dataStatus} connected={live?live.connected:0} syncedAt={live&&live.syncedAt} hasActiveIncident={hasActiveIncident}/>
+
+      {/* Hero: account equity + KPI cards, System Health closing the row */}
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-5">
         <KpiCard label={t('activity.equity')} value={fmtUSD(equity)} icon="dollar" accent="#C9A24D"
           spark={equitySpark&&<Sparkline data={equitySpark} positive={positive}/>}/>
         <KpiCard label={t('activity.pnlDay')} value={<span className={clsPnl(pnlDay)}>{fmtSigned(pnlDay)}</span>} badge={equity?<TrendBadge pct={pnlDay/equity*100}/>:null}/>
         <KpiCard label={t('activity.openPnl')} value={<span className={clsPnl(openPnl)}>{fmtSigned(openPnl)}</span>}/>
         <KpiCard label={t('activity.exposure')} value={fmtUSD(exposure)} icon="briefcase" accent="#3B82F6"/>
         <KpiCard label={t('activity.openFunds')} value={`${openBots.length} / ${fundsWithExposure.length||funds.length}`} icon="layers" accent="#10B981"/>
+        <KpiCard label={t('activity.systemHealth')} icon={hasActiveIncident?'triangle':'check'} accent={hasActiveIncident?'#EF4444':'#10B981'}
+          value={incidents===null?'—':hasActiveIncident?<span className="text-danger">{t('live.incidentActive')}</span>:<span className="text-success">{t('activity.healthy')}</span>}
+          badge={<button onClick={()=>navigate('/status')} className="text-[11px] text-slate-400 hover:text-gold whitespace-nowrap">{t('activity.viewIncidents')} <Icon name="chevright" className="w-3 h-3 inline"/></button>}/>
       </div>
 
       {/* Equity curve + bot allocation (per individual open position, not merged by fund) */}
@@ -79,7 +90,13 @@ function ActivityPage(){
         </Card>
       </div>
 
-      {/* By-bot breakdown + PnL calendar side by side */}
+      {/* PnL calendar + drawdown side by side — the two "shape of recent performance" views */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.daily')}</span>}>{t('activity.pnlCalendar')}</SectionTitle><PnlCalendar series={view}/></Card>
+        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.underwater')}</span>}>{t('activity.drawdown')}</SectionTitle><Underwater series={view}/></Card>
+      </div>
+
+      {/* By-bot breakdown + a lightweight pointer to Reports for deeper analysis */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
         <Card className="overflow-hidden lg:col-span-2">
           <div className="p-5 pb-3"><SectionTitle>{t('activity.byBot')}</SectionTitle></div>
@@ -103,15 +120,17 @@ function ActivityPage(){
             </tbody>
           </table></div>}
         </Card>
-        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.daily')}</span>}>{t('activity.pnlCalendar')}</SectionTitle><PnlCalendar series={view}/></Card>
+        <Card className="p-5 flex flex-col items-center justify-center text-center gap-2.5">
+          <span className="w-11 h-11 rounded-full bg-gold/15 grid place-items-center"><Icon name="filetext" className="w-5 h-5 text-gold"/></span>
+          <div className="text-sm font-semibold text-navy">{t('activity.moreInsights')}</div>
+          <p className="text-xs text-slate-500">{t('activity.moreInsightsHint')}</p>
+          {canSeeReports&&<Btn variant="outline" size="sm" onClick={()=>navigate('/admin/reports')} className="mt-1">{t('activity.goToReports')}</Btn>}
+        </Card>
       </div>
 
-      {/* Drawdown + closed-positions heatmap side by side — same GitHub-style grid as the
-          calendar above, but each cell is a closed position */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.underwater')}</span>}>{t('activity.drawdown')}</SectionTitle><Underwater series={view}/></Card>
-        <Card className="p-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.realizedPct')}</span>}>{t('activity.positionsHeatmap')}</SectionTitle><PositionsHeatmap bots={bots}/></Card>
-      </div>
+      {/* Closed-positions heatmap — full width, same GitHub-style grid as the PnL calendar
+          above, but each cell is a closed position */}
+      <Card className="p-5 mb-5"><SectionTitle right={<span className="text-[11px] text-slate-400">{t('activity.realizedPct')}</span>}>{t('activity.positionsHeatmap')}</SectionTitle><PositionsHeatmap bots={bots}/></Card>
 
       {/* Risk & exposure (only meaningful with history/exposure) */}
       {(hasHistory||openBots.length>0)&&<div className="mb-5"><RiskPanel series={view.length?view:series} openBots={openBots} byFund={byFund}/></div>}

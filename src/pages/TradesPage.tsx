@@ -105,7 +105,7 @@ function TradesPage(){
     (!f.q|| (b.symbol+' '+b.exchange+' '+(b.fund?.name||'')).toLowerCase().includes(f.q.toLowerCase()))
   );
   rows=sortRows(rows,sort,POS_GETTERS);
-  const vt=useVirtual({count:rows.length,rowH:41,resetKey:JSON.stringify(f)+sort.col+sort.dir});
+  const vt=useVirtual({count:rows.length,rowH:37,resetKey:JSON.stringify(f)+sort.col+sort.dir});
 
   const clear=()=>setF({fund:'all',side:'All',status:'open',q:''});
   const active = f.fund!=='all'||f.side!=='All'||f.status!=='open'||f.q;
@@ -146,7 +146,7 @@ function TradesPage(){
       </div>}/>
 
     <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
-      <KpiCard label={t('positions.totalPositions')} value={data.openBots.length} icon="briefcase" accent="#C9A24D"/>
+      <KpiCard label={t('positions.totalPositions')} value={data.openBots.length} icon="briefcase" accent="#64748B"/>
       <KpiCard label={t('positions.longExposure')} value={openNotional?fmtPctPlain(longNotional/openNotional*100):'—'} icon="trendup" accent="#10B981"/>
       <KpiCard label={t('positions.shortExposure')} value={openNotional?fmtPctPlain(shortNotional/openNotional*100):'—'} icon="trendup" accent="#EF4444"/>
       <KpiCard label={t('activity.openPnl')} value={<span className={clsPnl(openPnl)}>{fmtSigned(openPnl)}</span>}/>
@@ -172,8 +172,8 @@ function TradesPage(){
           </tr></thead>
           <tbody>
             {vt.padTop>0&&<tr style={{height:vt.padTop}}><td colSpan={cols.length}/></tr>}
-            {rows.slice(vt.start,vt.end).map(b=><tr key={b.id} style={{height:41}} className="border-b border-slate-50 hover:bg-slate-50/60">
-              {cols.map(c=><td key={c.key} className={`px-3 py-2.5 whitespace-nowrap ${c.align==='right'?'text-right':''} ${c.cls||''}`}>{c.cell(b)}</td>)}
+            {rows.slice(vt.start,vt.end).map(b=><tr key={b.id} style={{height:37}} className={`border-b border-slate-50 hover:bg-slate-50/60 ${b.side==='LONG'?'bg-success/[.03]':b.side==='SHORT'?'bg-danger/[.03]':''}`}>
+              {cols.map(c=><td key={c.key} className={`px-3 py-2 whitespace-nowrap ${c.align==='right'?'text-right':''} ${c.cls||''}`}>{c.cell(b)}</td>)}
             </tr>)}
             {vt.padBottom>0&&<tr style={{height:vt.padBottom}}><td colSpan={cols.length}/></tr>}
           </tbody>

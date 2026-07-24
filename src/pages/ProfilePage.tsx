@@ -21,6 +21,7 @@ function ProfilePage(){
   return <div className="max-w-2xl">
     <PageHead title={t('profile.title')} subtitle={t('profile.subtitle')}/>
     <Card className="p-5 mb-4">
+      <SectionTitle>{t('profile.personalInfoTitle')}</SectionTitle>
       <div className="flex items-center gap-4 mb-5">
         <div className="relative">
           {user.avatar?<img src={user.avatar} className="w-20 h-20 rounded-full object-cover"/>:<span className="w-20 h-20 rounded-full bg-navy text-white grid place-items-center text-xl font-semibold">{initialsOf(user)}</span>}

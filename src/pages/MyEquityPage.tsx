@@ -24,7 +24,7 @@ function MyEquityPage(){
   const weekly=data&&data.weekly;
   const weeklyPositive=weekly&&weekly.length>1?weekly[weekly.length-1].equity>=weekly[0].equity:true;
 
-  return <div className="max-w-3xl">
+  return <div className="max-w-4xl mx-auto">
     <PageHead title={t('equity.title')} subtitle={t('equity.subtitle')}/>
 
     {dataErr? <Card className="p-8 text-center text-danger text-sm">{t('equity.loadErr',{err:dataErr})}</Card>
@@ -37,17 +37,18 @@ function MyEquityPage(){
         <KpiCard label={t('equity.gain')} value={<span className={clsPnl(gainPct)}>{gainPct==null?'—':fmtPct(gainPct)}</span>}/>
         <KpiCard label={t('equity.memberSince')} value={fmtDate(mine.joinedAt)} icon="clock"/>
       </div>
-      <Card className="p-5">
-        <SectionTitle>{t('equity.howItWorks')}</SectionTitle>
-        <p className="text-sm text-slate-600">{t('equity.howItWorksBody',{amount:fmtUSD(mine.contributedAmount),total:fmtUSD(data.fund.value)})}</p>
-      </Card>
 
-      <Card className="p-5 mt-5">
+      <Card className="p-5">
         <SectionTitle right={weekly&&weekly.length>1&&<span className={`text-sm font-semibold ${clsPnl(weekly[weekly.length-1].equity-weekly[0].equity)}`}>{fmtSigned(weekly[weekly.length-1].equity-weekly[0].equity)}</span>}>{t('equity.progressionWeekly')}</SectionTitle>
         {weekly&&weekly.length>1? <>
           <AreaChart data={weekly} positive={weeklyPositive} resetKey="my-equity-weekly"/>
           <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>{fmtDate(weekly[0].t)}</span><span>{fmtDate(weekly[weekly.length-1].t)}</span></div>
         </> : <div className="h-[180px] grid place-items-center text-center text-sm text-slate-400">{t('equity.notEnoughHistory')}</div>}
+      </Card>
+
+      <Card className="p-4 mt-4 bg-slate-50/60 border-slate-200/60">
+        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">{t('equity.howItWorks')}</div>
+        <p className="text-xs text-slate-500 leading-relaxed">{t('equity.howItWorksBody',{amount:fmtUSD(mine.contributedAmount),total:fmtUSD(data.fund.value)})}</p>
       </Card>
     </>}
   </div>;
