@@ -50,15 +50,28 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       if (req.query?.log) {
-        // resolve the recipient's name from their phone (digits-only match); newest first
-        const { rows } = await query(`
-          SELECT w.id, w.phone, w.message, w.ok, w.status, w.response, w.created_at,
-            (SELECT NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), '')
+        // Paged 50-at-a-time (?limit&?offset); ?status=ok|fail and ?q=<free text, matches
+        // recipient/phone/message> filter server-side so paging stays correct while a filter
+        // is active — resolves the recipient's name from their phone (digits-only match).
+        const limit = Math.min(Math.max(Number(req.query?.limit) || 50, 1), 500);
+        const offset = Math.max(Number(req.query?.offset) || 0, 0);
+        const statusF = ['ok', 'fail'].includes(req.query?.status) ? req.query.status : null;
+        const q = String(req.query?.q || '').trim();
+        const nameExpr = `(SELECT NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), '')
                FROM users u
                WHERE u.phone <> '' AND regexp_replace(u.phone,'[^0-9]','','g') = regexp_replace(w.phone,'[^0-9]','','g')
-               LIMIT 1) AS recipient_name
-          FROM wa_log w ORDER BY w.created_at DESC LIMIT 100`);
-        return res.status(200).json({ log: rows.map(r => ({
+               LIMIT 1)`;
+        const where = []; const params = [];
+        if (statusF) { params.push(statusF === 'ok'); where.push(`w.ok=$${params.length}`); }
+        if (q) { params.push('%' + q + '%'); const p = params.length; where.push(`(${nameExpr} ILIKE $${p} OR w.phone ILIKE $${p} OR w.message ILIKE $${p})`); }
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        const total = (await query(`SELECT count(*)::int AS n FROM wa_log w ${whereSql}`, params)).rows[0]?.n || 0;
+        const qparams = [...params, limit, offset];
+        const { rows } = await query(`
+          SELECT w.id, w.phone, w.message, w.ok, w.status, w.response, w.created_at, ${nameExpr} AS recipient_name
+          FROM wa_log w ${whereSql}
+          ORDER BY w.created_at DESC LIMIT $${qparams.length - 1} OFFSET $${qparams.length}`, qparams);
+        return res.status(200).json({ total, log: rows.map(r => ({
           id: Number(r.id), recipientName: r.recipient_name || null, phone: r.phone,
           message: r.message, ok: r.ok, status: r.status, response: r.response, createdAt: r.created_at,
         })) });

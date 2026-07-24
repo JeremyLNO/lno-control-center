@@ -15,18 +15,22 @@ function AdminOpenWA(){
   const [ddPct,setDdPct]=useState(10); const [pnlThr,setPnlThr]=useState(-5000); const [dailyReport,setDailyReport]=useState(true);
   const [rules,setRules]=useState([]);
   const [saved,setSaved]=useState(false); const [busy,setBusy]=useState(false); const [test,setTest]=useState(null); const [report,setReport]=useState(null);
-  const [log,setLog]=useState(null); const [logQ,setLogQ]=useState(''); const [logStatus,setLogStatus]=useState('all');
-  const loadLog=()=>api('openwa?log=1').then(r=>setLog(r.log||[])).catch(()=>setLog([]));
-  useEffect(()=>{ if(!hasPerm(user,'manage_whatsapp'))return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setEnabled(c.enabled); setMatrix(c.notifMatrix||{}); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); loadLog(); },[]);
+  const LOG_PAGE_SIZE=50;
+  const [log,setLog]=useState(null); const [logTotal,setLogTotal]=useState(0);
+  const [logQ,setLogQ]=useState(''); const [logStatus,setLogStatus]=useState('all'); const [logOffset,setLogOffset]=useState(0);
+  const loadLog=()=>{
+    const qs=new URLSearchParams({log:'1',limit:String(LOG_PAGE_SIZE),offset:String(logOffset)});
+    if(logStatus!=='all') qs.set('status',logStatus);
+    if(logQ.trim()) qs.set('q',logQ.trim());
+    return api('openwa?'+qs.toString()).then(r=>{ setLog(r.log||[]); setLogTotal(r.total||0); }).catch(()=>{ setLog([]); setLogTotal(0); });
+  };
+  useEffect(()=>{ if(!hasPerm(user,'manage_whatsapp'))return; api('openwa').then(r=>{ const c=r.config; setCfg(c); setEnabled(c.enabled); setMatrix(c.notifMatrix||{}); setDdPct(c.drawdownPct??10); setPnlThr(c.pnlDayThreshold??-5000); setDailyReport(c.dailyReport??true); setRules(c.alertRules||[]); }).catch(()=>{}); },[]);
+  useEffect(()=>{ setLogOffset(0); },[logQ,logStatus]);
+  useEffect(()=>{ if(!hasPerm(user,'manage_whatsapp'))return; loadLog(); },[logQ,logStatus,logOffset]);
   if(!hasPerm(user,'manage_whatsapp')) return <Denied/>;
   const scopeOpts=[{value:'portfolio',label:t('wa.portfolio')},...funds.map(f=>({value:'fund:'+f.id,label:t('wa.fundScopeLabel',{name:f.name})}))];
   const metricOpts=[{value:'drawdown',label:t('wa.metricDrawdown')},{value:'pnlDay',label:t('wa.metricPnlDay')}];
-  const filteredLog=(log||[]).filter(l=>{
-    if(logStatus==='ok'&&!l.ok) return false;
-    if(logStatus==='fail'&&l.ok) return false;
-    if(logQ){ const q=logQ.toLowerCase(); if(!((l.recipientName||'').toLowerCase().includes(q)||(l.phone||'').toLowerCase().includes(q)||(l.message||'').toLowerCase().includes(q))) return false; }
-    return true;
-  });
+  const logFrom=logTotal===0?0:logOffset+1; const logTo=Math.min(logOffset+LOG_PAGE_SIZE,logTotal);
   const updateRule=(i,patch)=>setRules(rs=>rs.map((r,j)=>j===i?{...r,...patch}:r));
   const addRule=()=>setRules(rs=>[...rs,{id:'r'+Date.now(),scope:'portfolio',metric:'drawdown',value:10,enabled:true}]);
   const toggleMatrix=(type,role)=>setMatrix(m=>{ const cur=new Set(m[type]||[]); cur.has(role)?cur.delete(role):cur.add(role); return {...m,[type]:[...cur]}; });
@@ -113,8 +117,9 @@ function AdminOpenWA(){
         <Select value={logStatus} onChange={setLogStatus} className="w-32" options={[{value:'all',label:t('wa.statusAll')},{value:'ok',label:t('wa.statusSent')},{value:'fail',label:t('wa.statusFailed')}]}/>
       </div>
       {log===null? <div className="text-sm text-slate-400"><Loader/></div>
-        : filteredLog.length===0? <div className="text-sm text-slate-400 py-3">{log.length===0?t('wa.noMessagesSent'):t('wa.noMessagesMatch')}</div>
-        : <div className="overflow-x-auto"><table className="w-full text-sm">
+        : log.length===0? <div className="text-sm text-slate-400 py-3">{logTotal===0&&!logQ&&logStatus==='all'?t('wa.noMessagesSent'):t('wa.noMessagesMatch')}</div>
+        : <>
+        <div className="overflow-x-auto"><table className="w-full text-sm">
             <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500 text-left">
               <th className="px-3 py-2 font-medium">{t('wa.recipient')}</th>
               <th className="px-3 py-2 font-medium">{t('wa.number')}</th>
@@ -122,14 +127,22 @@ function AdminOpenWA(){
               <th className="px-3 py-2 font-medium">{t('wa.message')}</th>
             </tr></thead>
             <tbody>
-              {filteredLog.map(l=><tr key={l.id} className="border-b border-slate-50 align-top">
+              {log.map(l=><tr key={l.id} className="border-b border-slate-50 align-top">
                 <td className="px-3 py-2 whitespace-nowrap"><span className="inline-flex items-center gap-2"><span className={`w-2 h-2 rounded-full shrink-0 ${l.ok?'bg-success':'bg-danger'}`} title={l.ok?t('wa.statusSent'):t('wa.statusFailed')}/>{l.recipientName||<span className="text-slate-400">—</span>}</span></td>
                 <td className="px-3 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{l.phone}</td>
                 <td className="px-3 py-2 text-slate-500 whitespace-nowrap text-xs">{fmtDT(l.createdAt)}</td>
                 <td className="px-3 py-2"><div className="text-navy whitespace-pre-wrap break-words max-w-md leading-snug">{l.message}</div>{!l.ok&&l.response&&<div className="text-[11px] text-danger break-words max-w-md mt-1" title={l.response}>{l.response}</div>}</td>
               </tr>)}
             </tbody>
-          </table></div>}
+          </table></div>
+        <div className="flex items-center justify-between gap-3 mt-3 text-xs text-slate-500">
+          <span>{t('common.pageRange',{from:logFrom,to:logTo,total:logTotal})}</span>
+          <div className="flex items-center gap-2">
+            <Btn variant="ghost" size="sm" disabled={logOffset===0} onClick={()=>setLogOffset(o=>Math.max(0,o-LOG_PAGE_SIZE))}><Icon name="chevleft" className="w-4 h-4"/>{t('common.prev')}</Btn>
+            <Btn variant="ghost" size="sm" disabled={logOffset+LOG_PAGE_SIZE>=logTotal} onClick={()=>setLogOffset(o=>o+LOG_PAGE_SIZE)}>{t('common.next')}<Icon name="chevright" className="w-4 h-4"/></Btn>
+          </div>
+        </div>
+        </>}
     </Card>
   </div>;
 }

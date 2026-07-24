@@ -183,6 +183,18 @@ await call(profile, { method: 'PATCH', headers: authH, body: { language: 'en' } 
 r = await call(openwa, { method: 'GET', headers: authH, query: { log: '1' } });
 ok('admin WhatsApp log records sent messages', r.status === 200 && Array.isArray(r.body.log) && r.body.log.length >= 1 && typeof r.body.log[0].message === 'string', r.body.log && r.body.log.length);
 ok('WhatsApp log resolves the recipient name from the phone', r.body.log.some(l => l.recipientName === 'Admin User'), r.body.log.map(l => l.recipientName));
+ok('WhatsApp log response reports a total for pagination', r.status === 200 && typeof r.body.total === 'number' && r.body.total >= r.body.log.length, r.body.total);
+r = await call(openwa, { method: 'GET', headers: authH, query: { log: '1', limit: '1' } });
+ok('WhatsApp log ?limit=1 returns 1 row but the full total', r.status === 200 && r.body.log.length === 1 && r.body.total >= 1, r.body);
+{
+  const page0 = await call(openwa, { method: 'GET', headers: authH, query: { log: '1', limit: '1', offset: '0' } });
+  const page1 = await call(openwa, { method: 'GET', headers: authH, query: { log: '1', limit: '1', offset: '1' } });
+  if (page1.body.log.length) ok('WhatsApp log pagination pages don\'t overlap', page0.body.log[0].id !== page1.body.log[0].id, { page0: page0.body.log, page1: page1.body.log });
+}
+r = await call(openwa, { method: 'GET', headers: authH, query: { log: '1', status: 'ok' } });
+ok('WhatsApp log ?status=ok filters server-side', r.status === 200 && r.body.log.every(l => l.ok === true), r.body.log.map(l => l.ok));
+r = await call(openwa, { method: 'GET', headers: authH, query: { log: '1', q: 'no-such-recipient-xyz' } });
+ok('WhatsApp log ?q filters server-side (no matches)', r.status === 200 && r.body.log.length === 0 && r.body.total === 0, r.body);
 
 // global daily-PnL threshold breach (pnlDayThreshold set very high above) + weekly/monthly via force
 sentMessages.length = 0;
