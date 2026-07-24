@@ -36,17 +36,40 @@ export default async function handler(req, res) {
       }
       // Every user's sign-ins, most recent first (the Users page's admin-only history
       // table) — joined against the CURRENT role/name, not the role at the time of sign-in.
+      // Paged 50-at-a-time (?limit&?offset); ?q (name/email), ?role, ?method, ?date
+      // (YYYY-MM-DD), ?ip (free text, partial match) all filter server-side so paging stays
+      // correct while a filter is active — none of these narrow just the current page.
       if (req.query?.allLogins) {
-        let rows = [];
+        const limit = Math.min(Math.max(Number(req.query?.limit) || 50, 1), 500);
+        const offset = Math.max(Number(req.query?.offset) || 0, 0);
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query?.date || '') ? req.query.date : null;
+        const ip = String(req.query?.ip || '').trim();
+        const roleF = String(req.query?.role || '').trim();
+        const methodF = String(req.query?.method || '').trim();
+        const q = String(req.query?.q || '').trim();
+        const where = []; const params = [];
+        if (date) { params.push(date); where.push(`le.created_at::date=$${params.length}::date`); }
+        if (ip) { params.push('%' + ip + '%'); where.push(`le.ip ILIKE $${params.length}`); }
+        if (roleF) { params.push(roleF); where.push(`u.role=$${params.length}`); }
+        if (methodF) { params.push(methodF); where.push(`le.method=$${params.length}`); }
+        if (q) { params.push('%' + q + '%'); const p = params.length; where.push(`(u.first_name ILIKE $${p} OR u.last_name ILIKE $${p} OR le.username ILIKE $${p})`); }
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        let rows = [], total = 0;
         try {
+          total = (await query(
+            `SELECT count(*)::int AS n FROM login_events le LEFT JOIN users u ON u.id = le.user_id ${whereSql}`,
+            params
+          )).rows[0]?.n || 0;
+          const qparams = [...params, limit, offset];
           rows = (await query(`
             SELECT le.user_id, le.username, le.ip, le.method, le.created_at,
                    u.first_name, u.last_name, u.role
             FROM login_events le
             LEFT JOIN users u ON u.id = le.user_id
-            ORDER BY le.created_at DESC LIMIT 500`)).rows;
+            ${whereSql}
+            ORDER BY le.created_at DESC LIMIT $${qparams.length - 1} OFFSET $${qparams.length}`, qparams)).rows;
         } catch (e) {}
-        return res.status(200).json({ logins: rows.map(r => ({
+        return res.status(200).json({ total, logins: rows.map(r => ({
           userId: r.user_id, email: r.username, firstName: r.first_name || '', lastName: r.last_name || '',
           role: r.role || null, ip: r.ip, method: r.method, createdAt: r.created_at,
         })) });

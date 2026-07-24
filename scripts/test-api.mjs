@@ -374,6 +374,15 @@ ok('no ?type filter still returns both alert types (System Status full history)'
   const rd = await buildReportData(1);
   ok('incidentCount only counts service-health (api_error) alerts, not portfolio breaches', rd.incidentCount >= 1, rd.incidentCount);
 }
+r = await call(alerts, { method: 'GET', headers: authH, query: { limit: '1' } });
+ok('alerts ?limit=1 returns 1 row but reports the full matching total (System Status pagination)', r.status === 200 && r.body.alerts.length === 1 && r.body.total >= 2, r.body);
+{
+  const page0 = await call(alerts, { method: 'GET', headers: authH, query: { limit: '1', offset: '0' } });
+  const page1 = await call(alerts, { method: 'GET', headers: authH, query: { limit: '1', offset: '1' } });
+  ok('alerts pagination pages don\'t overlap', page0.body.alerts[0].id !== page1.body.alerts[0].id, { page0: page0.body.alerts, page1: page1.body.alerts });
+}
+r = await call(alerts, { method: 'GET', headers: authH, query: { date: '1999-01-01' } });
+ok('alerts ?date filters server-side (no rows on an unrelated day)', r.status === 200 && r.body.alerts.length === 0 && r.body.total === 0, r.body);
 
 // ── Real-time: the browser gets a scoped listenKey (never the real key/secret) to open its
 // own WebSocket for instant account/position updates, instead of waiting on the 30s poll ──
@@ -708,6 +717,17 @@ r = await call(users, { method: 'GET', headers: authH, query: { allLogins: '1' }
 ok('admin-only all-sign-ins table lists events across users, with role attached', r.status === 200 && r.body.logins.some(l => l.email === 'admin@lno.company' && l.role === 'admin' && l.ip === '203.0.113.7'), r.body.logins && r.body.logins.slice(0, 3));
 r = await call(users, { method: 'GET', headers: opH, query: { allLogins: '1' } });
 ok('non-admin cannot view the all-sign-ins table -> 403', r.status === 403, r.status);
+r = await call(users, { method: 'GET', headers: authH, query: { allLogins: '1', limit: '1' } });
+ok('all-sign-ins is paginated: ?limit=1 returns 1 row but reports the full total', r.status === 200 && r.body.logins.length === 1 && r.body.total >= 3, r.body);
+{
+  const page0 = await call(users, { method: 'GET', headers: authH, query: { allLogins: '1', limit: '1', offset: '0' } });
+  const page1 = await call(users, { method: 'GET', headers: authH, query: { allLogins: '1', limit: '1', offset: '1' } });
+  ok('all-sign-ins pages don\'t overlap', page0.body.logins[0].createdAt !== page1.body.logins[0].createdAt, { page0: page0.body.logins, page1: page1.body.logins });
+}
+r = await call(users, { method: 'GET', headers: authH, query: { allLogins: '1', ip: '203.0.113.7' } });
+ok('all-sign-ins ?ip filters server-side (partial match)', r.status === 200 && r.body.logins.length > 0 && r.body.logins.every(l => l.ip === '203.0.113.7'), r.body.logins);
+r = await call(users, { method: 'GET', headers: authH, query: { allLogins: '1', ip: '203.0.113.7', date: '1999-01-01' } });
+ok('all-sign-ins ?date filters server-side (no rows on an unrelated day)', r.status === 200 && r.body.logins.length === 0 && r.body.total === 0, r.body);
 
 // Sign in with Google — verification stubbed (real flow verifies the Google JWKS signature).
 globalThis.__GOOGLE_VERIFY__ = async (cred) => JSON.parse(Buffer.from(cred, 'base64').toString());

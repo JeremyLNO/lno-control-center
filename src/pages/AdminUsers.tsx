@@ -24,35 +24,48 @@ function UserLoginHistory({userId}: any){
     </div>)}
   </div>;
 }
-// All users' sign-ins, most recent first — admin-only, filterable by user/role/method.
+// All users' sign-ins, most recent first — admin-only, filterable by user/role/method/date/IP.
+// Paged 50-at-a-time server-side: every filter here is sent to the API so paging always
+// reflects the full matching set, not just whatever happens to be on the current page.
+const LOGIN_PAGE_SIZE=50;
 function LoginHistoryTable(){
   const {t}=useApp();
   const roleOpts=ROLE_OPTIONS.map(o=>({...o,label:t('role.'+o.value)}));
-  const [rows,setRows]=useState(null);
+  const [page,setPage]=useState(null); const [offset,setOffset]=useState(0);
   const [q,setQ]=useState(''); const [roleF,setRoleF]=useState('all'); const [methodF,setMethodF]=useState('all');
-  useEffect(()=>{ api('users?allLogins=1').then(r=>setRows(r.logins||[])).catch(()=>setRows([])); },[]);
-  const methods=useMemo(()=>rows?[...new Set(rows.map(r=>r.method))]:[],[rows]);
-  const filtered=useMemo(()=>{
-    if(!rows) return [];
-    const needle=q.trim().toLowerCase();
-    return rows.filter(r=>{
-      if(roleF!=='all'&&r.role!==roleF) return false;
-      if(methodF!=='all'&&r.method!==methodF) return false;
-      if(needle&&!(`${r.email} ${r.firstName} ${r.lastName}`.toLowerCase().includes(needle))) return false;
-      return true;
-    });
-  },[rows,q,roleF,methodF]);
+  const [dateF,setDateF]=useState(''); const [ipF,setIpF]=useState('');
+  const [methods,setMethods]=useState<string[]>([]);
+  // Sign-in methods for the filter dropdown — from an unfiltered sample, so the option list
+  // doesn't shrink to whatever the current filters/page happen to contain.
+  useEffect(()=>{ api('users?allLogins=1&limit=500').then(r=>setMethods([...new Set((r.logins||[]).map((l:any)=>l.method))] as string[])).catch(()=>{}); },[]);
+  useEffect(()=>{ setOffset(0); },[q,roleF,methodF,dateF,ipF]);
+  useEffect(()=>{
+    const qs=new URLSearchParams({allLogins:'1',limit:String(LOGIN_PAGE_SIZE),offset:String(offset)});
+    if(q.trim()) qs.set('q',q.trim());
+    if(roleF!=='all') qs.set('role',roleF);
+    if(methodF!=='all') qs.set('method',methodF);
+    if(dateF) qs.set('date',dateF);
+    if(ipF.trim()) qs.set('ip',ipF.trim());
+    setPage(null);
+    api('users?'+qs.toString()).then(r=>setPage(r)).catch(()=>setPage({logins:[],total:0}));
+  },[q,roleF,methodF,dateF,ipF,offset]);
+  const rows=page?page.logins:[]; const total=page?page.total:0;
+  const from=total===0?0:offset+1; const to=Math.min(offset+LOGIN_PAGE_SIZE,total);
   return <Card className="p-5 mt-4">
     <SectionTitle>{t('users.allSignIns')}</SectionTitle>
-    {rows===null? <Loader/> : <>
-      <div className="flex flex-wrap gap-2 mb-3">
-        <Input value={q} onChange={e=>setQ(e.target.value)} placeholder={t('users.filterByUser')} className="w-48"/>
-        <Select value={roleF} onChange={setRoleF} className="w-36" options={[{value:'all',label:t('users.allRoles')},...roleOpts]}/>
-        <Select value={methodF} onChange={setMethodF} className="w-32" options={[{value:'all',label:t('users.allMethods')},...methods.map(m=>({value:m,label:m}))]}/>
-      </div>
-      {filtered.length===0
-        ? <div className="text-sm text-slate-400 py-6 text-center">{t('users.noMatchFilter')}</div>
-        : <div className="overflow-x-auto"><table className="w-full text-sm">
+    <div className="flex flex-wrap gap-2 mb-3">
+      <Input value={q} onChange={e=>setQ(e.target.value)} placeholder={t('users.filterByUser')} className="w-48"/>
+      <Select value={roleF} onChange={setRoleF} className="w-36" options={[{value:'all',label:t('users.allRoles')},...roleOpts]}/>
+      <Select value={methodF} onChange={setMethodF} className="w-32" options={[{value:'all',label:t('users.allMethods')},...methods.map(m=>({value:m,label:m}))]}/>
+      <Input type="date" value={dateF} onChange={e=>setDateF(e.target.value)} className="w-40"/>
+      <Input value={ipF} onChange={e=>setIpF(e.target.value)} placeholder={t('users.filterByIp')} className="w-36"/>
+      {(dateF||ipF)&&<button onClick={()=>{setDateF('');setIpF('');}} className="text-xs text-slate-400 hover:text-navy">{t('common.clear')}</button>}
+    </div>
+    {page===null? <Loader/>
+    : rows.length===0
+      ? <div className="text-sm text-slate-400 py-6 text-center">{t('users.noMatchFilter')}</div>
+      : <>
+        <div className="overflow-x-auto"><table className="w-full text-sm">
             <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500 text-left">
               <th className="px-3 py-2 font-medium">{t('login.email')}</th>
               <th className="px-3 py-2 font-medium">{t('users.role')}</th>
@@ -60,15 +73,22 @@ function LoginHistoryTable(){
               <th className="px-3 py-2 font-medium">IP</th>
               <th className="px-3 py-2 font-medium">{t('users.signInDate')}</th>
             </tr></thead>
-            <tbody>{filtered.map((r,i)=><tr key={i} className="border-b border-slate-50">
+            <tbody>{rows.map((r,i)=><tr key={i} className="border-b border-slate-50">
               <td className="px-3 py-2 truncate max-w-[220px]">{(r.firstName||r.lastName)?`${r.firstName} ${r.lastName}`.trim():r.email}</td>
               <td className="px-3 py-2">{r.role?t('role.'+r.role):'—'}</td>
               <td className="px-3 py-2 text-[10px] uppercase tracking-wide text-slate-400">{r.method}</td>
               <td className="px-3 py-2 font-mono text-xs text-slate-400">{r.ip||'—'}</td>
               <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{fmtDT(r.createdAt)}</td>
             </tr>)}</tbody>
-          </table></div>}
-    </>}
+          </table></div>
+        <div className="flex items-center justify-between gap-3 mt-3 text-xs text-slate-500">
+          <span>{t('common.pageRange',{from,to,total})}</span>
+          <div className="flex items-center gap-2">
+            <Btn variant="ghost" disabled={offset===0} onClick={()=>setOffset(o=>Math.max(0,o-LOGIN_PAGE_SIZE))}><Icon name="chevleft" className="w-4 h-4"/>{t('common.prev')}</Btn>
+            <Btn variant="ghost" disabled={offset+LOGIN_PAGE_SIZE>=total} onClick={()=>setOffset(o=>o+LOGIN_PAGE_SIZE)}>{t('common.next')}<Icon name="chevright" className="w-4 h-4"/></Btn>
+          </div>
+        </div>
+      </>}
   </Card>;
 }
 function AdminUsers(){

@@ -7,18 +7,31 @@ import {
 
 const ALERT_TYPES=['breach','api_error'];
 const ALERT_GETTERS={ type:a=>a.type, summary:a=>a.summary, started:a=>+new Date(a.createdAt), ended:a=>a.ackedAt?+new Date(a.ackedAt):Infinity, duration:a=>a.durationSec==null?-1:a.durationSec };
+const HIST_PAGE_SIZE=50;
 function StatusPage(){
   const {user,data,dataStatus,reloadData,refreshTick,refreshMs,t}=useApp();
   const [snaps,setSnaps]=useState(null); const [alerts,setAlerts]=useState(null); const [openwa,setOpenwa]=useState(undefined); const [dbErr,setDbErr]=useState(null);
   const [exchanges,setExchanges]=useState(null);
   const [wipe,setWipe]=useState(false); const [wiping,setWiping]=useState(false);
   const [histType,setHistType]=useState('all'); const [histDate,setHistDate]=useState(''); const [histSort,setHistSort]=useState({col:'started',dir:'desc'});
+  // Alert history table: paged 50-at-a-time server-side (type/date filters applied server-side
+  // too, so paging stays correct while a filter is on) — separate from `alerts` above, which
+  // stays a wider one-shot fetch feeding the KPI cards (total/unacked/MTTA/ack rate).
+  const [histPage,setHistPage]=useState(null); const [histOffset,setHistOffset]=useState(0);
   async function doReset(){ setWiping(true); try{ await api('init',{method:'POST',body:{action:'reset'}}); toast.success(t('sysstatus.resetSuccess')); reloadData&&reloadData(); }catch(e){ toast.error(e.message); } finally{ setWiping(false); setWipe(false); } }
   useEffect(()=>{
     api('snapshots?limit=3').then(r=>setSnaps(r.snapshots||[])).catch(e=>{ setSnaps([]); setDbErr(e.message); });
     api('alerts?limit=300').then(r=>setAlerts(r.alerts||[])).catch(()=>setAlerts([]));
     if(user.role==='admin'){ api('openwa').then(r=>setOpenwa(r.config)).catch(()=>setOpenwa(null)); api('exchanges').then(r=>setExchanges(r.exchanges||[])).catch(()=>setExchanges([])); }
   },[]);
+  useEffect(()=>{ setHistOffset(0); },[histType,histDate]);
+  useEffect(()=>{
+    const qs=new URLSearchParams({limit:String(HIST_PAGE_SIZE),offset:String(histOffset)});
+    if(histType!=='all') qs.set('type',histType);
+    if(histDate) qs.set('date',histDate);
+    setHistPage(null);
+    api('alerts?'+qs.toString()).then(r=>setHistPage(r)).catch(()=>setHistPage({alerts:[],total:0}));
+  },[histType,histDate,histOffset]);
   // exchange connection status/last-sync change as a side effect of the same live re-sync the
   // shared data layer (useData) already runs every 30s for an admin — re-read on that cadence
   // so "Exchange Connections" here doesn't sit stale on a once-per-mount snapshot.
@@ -39,10 +52,13 @@ function StatusPage(){
   const ackRate=(alerts&&alerts.length)? acked.length/alerts.length*100 : null;
   const dormantCount=data.openBots.filter(b=>dormantInfo(b).dormant).length;
 
-  let histRows=alerts||[];
-  if(histType!=='all') histRows=histRows.filter(a=>a.type===histType);
-  if(histDate) histRows=histRows.filter(a=>new Date(a.createdAt).toISOString().slice(0,10)===histDate);
-  histRows=sortRows(histRows,histSort,ALERT_GETTERS);
+  // Sorted within the current 50-row page only — the filters (type/date) that determine which
+  // page you're on are server-side, but re-ordering by column stays a lightweight client-side
+  // affordance over whatever page is currently loaded.
+  const histRows=sortRows(histPage?histPage.alerts:[],histSort,ALERT_GETTERS);
+  const histTotal=histPage?histPage.total:0;
+  const histFrom=histTotal===0?0:histOffset+1;
+  const histTo=Math.min(histOffset+HIST_PAGE_SIZE,histTotal);
 
   // Reconciliation: equity should equal walletBalance + sum(open bots' unrealized PnL) —
   // both recorded from the same sync pass. A gap beyond a small tolerance means the stored
@@ -118,9 +134,10 @@ function StatusPage(){
           {histDate&&<button onClick={()=>setHistDate('')} className="text-xs text-slate-400 hover:text-navy">{t('common.clear')}</button>}
         </div>
       </div>
-      {alerts===null? <Loader/>
+      {histPage===null? <Loader/>
       : histRows.length===0? <div className="text-sm text-slate-400 py-6 text-center">{t('sysstatus.noAlertsMatch')}</div>
-      : <div className="overflow-x-auto"><table className="w-full text-sm">
+      : <>
+      <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs"><tr className="border-b border-slate-100 text-slate-500 text-left">
             <SortHeader label={t('sysstatus.alertTypeCol')} col="type" sort={histSort} setSort={setHistSort}/>
             <th className="px-3 py-2 font-medium">{t('sysstatus.summary')}</th>
@@ -135,7 +152,15 @@ function StatusPage(){
             <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{a.ackedAt?fmtDT(a.ackedAt):<span className="text-danger font-medium">{t('sysstatus.ongoing')}</span>}</td>
             <td className="px-3 py-2 text-right tnum text-slate-500">{a.durationSec==null?'—':fmtSeconds(a.durationSec)}</td>
           </tr>)}</tbody>
-        </table></div>}
+        </table></div>
+      <div className="flex items-center justify-between gap-3 mt-3 text-xs text-slate-500">
+        <span>{t('common.pageRange',{from:histFrom,to:histTo,total:histTotal})}</span>
+        <div className="flex items-center gap-2">
+          <Btn variant="ghost" disabled={histOffset===0} onClick={()=>setHistOffset(o=>Math.max(0,o-HIST_PAGE_SIZE))}><Icon name="chevleft" className="w-4 h-4"/>{t('common.prev')}</Btn>
+          <Btn variant="ghost" disabled={histOffset+HIST_PAGE_SIZE>=histTotal} onClick={()=>setHistOffset(o=>o+HIST_PAGE_SIZE)}>{t('common.next')}<Icon name="chevright" className="w-4 h-4"/></Btn>
+        </div>
+      </div>
+      </>}
     </Card>
     {user.role==='admin'&&<Card className="p-5 mt-5">
       <SectionTitle>{t('sysstatus.maintenance')}</SectionTitle>

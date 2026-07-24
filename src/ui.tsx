@@ -1012,9 +1012,10 @@ const ACCT_NAV=[
 // external investors, not staff, so they don't see this.
 const MY_EQUITY_NAV=['dollar','nav.myEquity','/equity'];
 
-function NavItem({icon,label,path,active,onClick}: any){
-  return <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${active?'bg-gold text-navy font-semibold':'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
-    <Icon name={icon} className="w-[18px] h-[18px]"/>{label}
+function NavItem({icon,label,path,active,onClick,collapsed}: any){
+  return <button onClick={onClick} title={collapsed?label:undefined}
+    className={`w-full flex items-center gap-3 rounded-lg text-sm transition ${collapsed?'justify-center px-0 py-2':'px-3 py-2'} ${active?'bg-gold text-navy font-semibold':'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
+    <Icon name={icon} className="w-[18px] h-[18px] shrink-0"/>{!collapsed&&label}
   </button>;
 }
 // Language switcher — 4 codes, active one highlighted. Shown at the very bottom of the
@@ -1032,30 +1033,38 @@ function LangSwitcher({className=''}: any){
 }
 function Sidebar(){
   const {route,navigate,user,t}=useApp();
+  const [collapsed,setCollapsed]=useState<boolean>(()=>PREF.get('sidebar_collapsed',false));
+  const toggle=()=>{ setCollapsed(c=>{ const n=!c; PREF.set('sidebar_collapsed',n); return n; }); };
   const cur='/'+route.parts.join('/');
   const isAct=(p)=> cur===p || cur.startsWith(p+'/');
-  return <aside className="hidden lg:flex flex-col w-60 shrink-0 bg-navy text-white h-full">
-    <div className="px-5 py-5 flex items-center gap-2">
-      <Logo className="h-6 text-white"/>
-      <div className="text-[10px] text-slate-400 leading-tight mt-1.5">Control<br/>Center</div>
+  const sectionCls=`text-[10px] uppercase tracking-wider text-slate-500 pt-4 pb-1 ${collapsed?'text-center px-0':'px-3'}`;
+  return <aside className={`hidden lg:flex flex-col shrink-0 bg-navy text-white h-full transition-[width] duration-150 ${collapsed?'w-16':'w-60'}`}>
+    <div className={`py-5 flex items-center gap-2 ${collapsed?'justify-center px-0':'px-5'}`}>
+      <Logo className="h-6 text-white shrink-0"/>
+      {!collapsed&&<div className="text-[10px] text-slate-400 leading-tight mt-1.5">Control<br/>Center</div>}
     </div>
-    <nav className="flex-1 overflow-y-auto px-3 space-y-1">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-2 pb-1">{t('nav.section.main')}</div>
-      {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">{t('nav.section.tools')}</div>
-      {TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+    <nav className={`flex-1 overflow-y-auto space-y-1 ${collapsed?'px-2':'px-3'}`}>
+      <div className={sectionCls.replace('pt-4','pt-2')}>{collapsed?'—':t('nav.section.main')}</div>
+      {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
+      <div className={sectionCls}>{collapsed?'—':t('nav.section.tools')}</div>
+      {TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
       {(user.role==='admin'||MANAGE_NAV.some(([,,,,perm])=>hasPerm(user,perm)))&&<>
-        <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">{t('nav.section.admin')}</div>
-        {user.role==='admin'&&ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
-        {MANAGE_NAV.filter(([,,,,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+        <div className={sectionCls}>{collapsed?'—':t('nav.section.admin')}</div>
+        {user.role==='admin'&&ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
+        {MANAGE_NAV.filter(([,,,,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
       </>}
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">{t('nav.section.account')}</div>
-      {user.role!=='shareholder'&&<NavItem icon={MY_EQUITY_NAV[0]} label={t(MY_EQUITY_NAV[1])} path={MY_EQUITY_NAV[2]} active={isAct(MY_EQUITY_NAV[2])} onClick={()=>navigate(MY_EQUITY_NAV[2])}/>}
-      {ACCT_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}/>)}
+      <div className={sectionCls}>{collapsed?'—':t('nav.section.account')}</div>
+      {user.role!=='shareholder'&&<NavItem icon={MY_EQUITY_NAV[0]} label={t(MY_EQUITY_NAV[1])} path={MY_EQUITY_NAV[2]} active={isAct(MY_EQUITY_NAV[2])} onClick={()=>navigate(MY_EQUITY_NAV[2])} collapsed={collapsed}/>}
+      {ACCT_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
     </nav>
     <div className="p-3 border-t border-white/10">
-      <LangSwitcher className="px-2 mb-2"/>
-      <div className="text-[11px] text-slate-400 px-2">{t('sidebar.footer')}<br/>{t('sidebar.footerSub')}</div>
+      {!collapsed&&<LangSwitcher className="px-2 mb-2"/>}
+      {!collapsed&&<div className="text-[11px] text-slate-400 px-2 mb-2">{t('sidebar.footer')}<br/>{t('sidebar.footerSub')}</div>}
+      <button onClick={toggle} title={collapsed?t('sidebar.expand'):t('sidebar.collapse')}
+        className={`w-full flex items-center gap-2 rounded-lg text-slate-400 hover:bg-white/5 hover:text-white transition ${collapsed?'justify-center px-0 py-2':'px-2 py-1.5'}`}>
+        <Icon name={collapsed?'chevright':'chevleft'} className="w-4 h-4 shrink-0"/>
+        {!collapsed&&<span className="text-[11px]">{t('sidebar.collapse')}</span>}
+      </button>
     </div>
   </aside>;
 }
