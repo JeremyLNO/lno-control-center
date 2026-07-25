@@ -7,19 +7,12 @@ import {
 } from '../ui'
 
 /* ============================================================
-   TABLE PRODUCTIVITY HELPERS — virtual rows, column picker, presets
+   TABLE PRODUCTIVITY HELPERS — column picker, presets
    ============================================================ */
-// Windowed row virtualization for a fixed-row-height scroll container.
-function useVirtual({count,rowH,overscan=10,resetKey}){
-  const ref=useRef<any>(null);
-  const [scrollTop,setScrollTop]=useState(0);
-  const [h,setH]=useState(640);
-  useEffect(()=>{ const el=ref.current; if(!el)return; const onScroll=()=>setScrollTop(el.scrollTop); const measure=()=>setH(el.clientHeight||640); measure(); el.addEventListener('scroll',onScroll,{passive:true}); window.addEventListener('resize',measure); return ()=>{ el.removeEventListener('scroll',onScroll); window.removeEventListener('resize',measure); }; },[]);
-  useEffect(()=>{ const el=ref.current; if(el) el.scrollTop=0; setScrollTop(0); },[resetKey]);
-  const start=Math.max(0,Math.floor(scrollTop/rowH)-overscan);
-  const end=Math.min(count,Math.ceil((scrollTop+h)/rowH)+overscan);
-  return {ref,start,end,padTop:start*rowH,padBottom:Math.max(0,(count-end)*rowH)};
-}
+// Row virtualization was removed with the table's fixed-height scroll container: windowing
+// only pays off inside one, and no page here scrolls internally. Paging 50 at a time (the
+// same size as every other table in the app) keeps the rendered row count bounded anyway.
+const POS_PAGE_SIZE=50;
 // Show/hide columns; order always follows the canonical `columns` array.
 function ColumnPicker({columns,visible,onChange}: any){
   const {t}=useApp();
@@ -92,9 +85,13 @@ function TradesPage(){
   const [detailBot,setDetailBot]=useState(null);
   const POS_COLS=useMemo(()=>buildPosCols(t,setDetailBot),[t]);
   const [colKeys,setColKeys]=useState(()=>PREF.get('pos_cols',POS_COLS.filter(c=>c.def).map(c=>c.key)));
+  const [offset,setOffset]=useState(0);
   useEffect(()=>{ PREF.set('pos_filter',f); },[f]);
   useEffect(()=>{ PREF.set('pos_sort',sort); },[sort]);
   useEffect(()=>{ PREF.set('pos_cols',colKeys); },[colKeys]);
+  // Back to page 1 whenever the result set itself changes, so you're never left on a page
+  // that no longer exists after narrowing a filter.
+  useEffect(()=>{ setOffset(0); },[f,sort]);
   if(!hasPerm(user,'view_trades')) return <Denied/>;
 
   const cols=colKeys.map(k=>POS_COLS.find(c=>c.key===k)).filter(Boolean);
@@ -105,7 +102,10 @@ function TradesPage(){
     (!f.q|| (b.symbol+' '+b.exchange+' '+(b.fund?.name||'')).toLowerCase().includes(f.q.toLowerCase()))
   );
   rows=sortRows(rows,sort,POS_GETTERS);
-  const vt=useVirtual({count:rows.length,rowH:37,resetKey:JSON.stringify(f)+sort.col+sort.dir});
+  // `rows` stays the FULL filtered set — export must cover everything the filters match,
+  // not just the page on screen. Only the rendered slice is paged.
+  const pageRows=rows.slice(offset,offset+POS_PAGE_SIZE);
+  const from=rows.length===0?0:offset+1, to=Math.min(offset+POS_PAGE_SIZE,rows.length);
 
   const clear=()=>setF({fund:'all',side:'All',status:'open',q:''});
   const active = f.fund!=='all'||f.side!=='All'||f.status!=='open'||f.q;
@@ -165,21 +165,27 @@ function TradesPage(){
       </div>
     </Card>
     <Card className="overflow-hidden">
-      <div ref={vt.ref} className="overflow-auto" style={{maxHeight:'68vh'}}>
+      {/* No inner scroll: the page scrolls, and the row count is bounded by paging. */}
+      <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="text-xs sticky top-0 z-10"><tr className="bg-white border-b border-slate-200 shadow-sm">
+          <thead className="text-xs"><tr className="bg-white border-b border-slate-200">
             {cols.map(c=><SortHeader key={c.key} label={c.label} col={c.key} sort={sort} setSort={setSort} align={c.align||'left'}/>)}
           </tr></thead>
           <tbody>
-            {vt.padTop>0&&<tr style={{height:vt.padTop}}><td colSpan={cols.length}/></tr>}
-            {rows.slice(vt.start,vt.end).map(b=><tr key={b.id} style={{height:37}} className={`border-b border-slate-50 hover:bg-slate-50/60 ${b.side==='LONG'?'bg-success/[.03]':b.side==='SHORT'?'bg-danger/[.03]':''}`}>
+            {pageRows.map(b=><tr key={b.id} className={`border-b border-slate-50 hover:bg-slate-50/60 ${b.side==='LONG'?'bg-success/[.03]':b.side==='SHORT'?'bg-danger/[.03]':''}`}>
               {cols.map(c=><td key={c.key} className={`px-3 py-2 whitespace-nowrap ${c.align==='right'?'text-right':''} ${c.cls||''}`}>{c.cell(b)}</td>)}
             </tr>)}
-            {vt.padBottom>0&&<tr style={{height:vt.padBottom}}><td colSpan={cols.length}/></tr>}
           </tbody>
         </table>
       </div>
       {rows.length===0&&<div className="p-10"><EmptyState icon="briefcase" title={data.bots.length===0?t('positions.noPositionsYet'):t('positions.noPositionsMatch')} hint={data.bots.length===0?t('positions.noPositionsHint'):undefined}/></div>}
+      {rows.length>POS_PAGE_SIZE&&<div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 text-xs text-slate-500">
+        <span>{t('common.pageRange',{from,to,total:rows.length})}</span>
+        <div className="flex items-center gap-2">
+          <Btn variant="ghost" size="sm" disabled={offset===0} onClick={()=>setOffset(o=>Math.max(0,o-POS_PAGE_SIZE))}><Icon name="chevleft" className="w-4 h-4"/>{t('common.prev')}</Btn>
+          <Btn variant="ghost" size="sm" disabled={offset+POS_PAGE_SIZE>=rows.length} onClick={()=>setOffset(o=>o+POS_PAGE_SIZE)}>{t('common.next')}<Icon name="chevright" className="w-4 h-4"/></Btn>
+        </div>
+      </div>}
     </Card>
       </div>
       <div className="space-y-4">
