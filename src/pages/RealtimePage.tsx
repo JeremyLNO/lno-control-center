@@ -111,7 +111,7 @@ function RealtimePage(){
             <th className="px-3 py-2 font-medium">{t('sysstatus.summary')}</th>
             <th className="px-3 py-2 text-right font-medium">{t('live.amount')}</th>
           </tr></thead>
-          <tbody className="max-h-96">
+          <tbody>
             {events.map(e=>{ const m=eventMeta(e); return <tr key={e.key} className="border-b border-slate-50 hover:bg-slate-50/60">
               <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap tnum">{fmtTime(e.t)}</td>
               <td className="px-3 py-2"><span className={`flex items-center gap-1.5 text-xs font-medium ${m.color}`}><Icon name={m.icon} className="w-3.5 h-3.5"/>{m.label}</span></td>

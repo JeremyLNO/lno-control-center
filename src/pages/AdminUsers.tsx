@@ -179,7 +179,7 @@ function AdminUsers(){
                   <span className={isOnline(u)?'text-success font-medium':'text-slate-400'}>{isOnline(u)?t('users.online'):(u.lastLoginAt?fmtDT(u.lastLoginAt):t('users.neverSignedIn'))}</span>
                 </span>
               </td>
-              <td className="px-3 py-2.5"><Icon name={u.notify?'msg':'x'} className={`w-4 h-4 ${u.notify?'text-success':'text-slate-300'}`} data-tip={u.notify?'WhatsApp notifications on':'WhatsApp notifications off'}/></td>
+              <td className="px-3 py-2.5"><Icon name={u.notify?'msg':'x'} className={`w-4 h-4 ${u.notify?'text-success':'text-slate-300'}`} data-tip={u.notify?t('users.whatsappOn'):t('users.whatsappOff')}/></td>
               <td className="px-3 py-2.5 text-right pr-4">
                 <button onClick={()=>setExp(exp===u.id?null:u.id)} className="text-slate-400 hover:text-navy p-1"><Icon name="chevdown" className={`w-4 h-4 transition ${exp===u.id?'rotate-180':''}`}/></button>
               </td>

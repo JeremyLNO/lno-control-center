@@ -55,7 +55,13 @@ function RulesPage(){
   // an active user receives it if their role holds the permission (admin implicitly holds
   // everything); WhatsApp additionally requires their own opt-in + a phone number. Reflects
   // the UNSAVED matrix above, so you see the consequence before clicking Save.
-  const holders=(perm)=> (users||[]).filter(u=>u.active && (u.role==='admin' || (rolePerms[u.role]||[]).includes(perm)));
+  const hasReport=(u,perm)=> u.role==='admin' || (rolePerms[u.role]||[]).includes(perm);
+  // One row per person who receives at least one report — listing accounts that receive
+  // nothing would just be the user list again. Plain computation, not useMemo: this sits
+  // after the early returns above, where a hook would break the rules-of-hooks ordering.
+  const recipients=(users||[])
+    .filter(u=>u.active && REPORT_KINDS.some(({perm})=>hasReport(u,perm)))
+    .sort((a,b)=>a.role.localeCompare(b.role)||String(a.email).localeCompare(String(b.email)));
   const nameOf=(u)=> (u.firstName||u.lastName)? `${u.firstName} ${u.lastName}`.trim() : u.email;
 
   return <div className="max-w-2xl">
@@ -66,8 +72,9 @@ function RulesPage(){
         <div>{t('rules.adminHint')}</div>
       </div>
     </Card>
-    <Card className="overflow-hidden"><div className="overflow-x-auto max-h-[70vh] overflow-y-auto"><table className="w-full text-sm">
-      <thead className="text-xs sticky top-0 z-10"><tr className="bg-white border-b border-slate-200 shadow-sm">
+    {/* No inner scroll — the whole matrix is always visible, the page itself scrolls. */}
+    <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
+      <thead className="text-xs"><tr className="bg-white border-b border-slate-200">
         <th className="px-4 py-2.5 text-left font-medium text-slate-500 w-1/2">{t('rules.permission')}</th>
         {EDITABLE_ROLES.map(role=><th key={role} className="px-4 py-2.5 text-center font-medium text-slate-500">{t('role.'+role)}</th>)}
       </tr></thead>
@@ -84,35 +91,42 @@ function RulesPage(){
       </tbody>
     </table></div></Card>
 
-    <Card className="p-5 mt-4">
-      <div className="mb-1 text-sm font-semibold text-navy tracking-tight">{t('rules.distributionTitle')}</div>
-      <p className="text-xs text-slate-400 mb-4">{t('rules.distributionHint')}</p>
-      {users===null? <Loader/>
-      : <div className="space-y-4">
-        {REPORT_KINDS.map(({kind,perm})=>{
-          const list=holders(perm);
-          return <div key={kind}>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-xs font-medium text-navy">{t('reports.kind'+kind.charAt(0).toUpperCase()+kind.slice(1))}</span>
-              <span className="text-[11px] text-slate-400">{list.length}</span>
-            </div>
-            {list.length===0? <div className="text-xs text-slate-400 pl-0.5">{t('rules.distributionNobody')}</div>
-            : <div className="flex flex-wrap gap-1.5">
-              {list.map(u=>{
-                const wa=!!(u.notify&&u.phone);
-                return <span key={u.id} className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/70 rounded-full pl-1 pr-2.5 py-1">
-                  {u.avatar? <img src={u.avatar} className="w-5 h-5 rounded-full object-cover"/> : <span className="w-5 h-5 rounded-full bg-navy text-white grid place-items-center text-[9px] font-semibold">{initialsOf(u)}</span>}
-                  <span className="text-xs text-navy">{nameOf(u)}</span>
-                  <span className="flex items-center gap-1 text-slate-400" title={wa?`${t('rules.channelEmail')} + ${t('rules.channelWhatsApp')}`:t('rules.channelEmail')}>
-                    <Icon name="mail" className="w-3 h-3"/>
-                    {wa&&<Icon name="msg" className="w-3 h-3 text-success"/>}
-                  </span>
-                </span>;
-              })}
-            </div>}
-          </div>;
-        })}
-      </div>}
+    <Card className="overflow-hidden mt-4">
+      <div className="p-5 pb-3">
+        <div className="text-sm font-semibold text-navy tracking-tight">{t('rules.distributionTitle')}</div>
+        <p className="text-xs text-slate-400 mt-1">{t('rules.distributionHint')}</p>
+      </div>
+      {users===null? <div className="px-5 pb-5"><Loader/></div>
+      : recipients.length===0? <div className="px-5 pb-5 text-sm text-slate-400">{t('rules.distributionNobody')}</div>
+      : <div className="overflow-x-auto"><table className="w-full text-sm">
+        <thead className="text-xs"><tr className="border-b border-slate-200 text-slate-500">
+          <th className="px-4 py-2.5 text-left font-medium">{t('equity.employee')}</th>
+          <th className="px-4 py-2.5 text-left font-medium">{t('users.role')}</th>
+          {REPORT_KINDS.map(({kind})=><th key={kind} className="px-4 py-2.5 text-center font-medium">{t('reports.kind'+kind.charAt(0).toUpperCase()+kind.slice(1))}</th>)}
+          <th className="px-4 py-2.5 text-left font-medium">{t('rules.channels')}</th>
+        </tr></thead>
+        <tbody>
+          {recipients.map(u=>{
+            const wa=!!(u.notify&&u.phone);
+            return <tr key={u.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+              <td className="px-4 py-2.5"><span className="flex items-center gap-2 min-w-0">
+                {u.avatar? <img src={u.avatar} className="w-6 h-6 rounded-full object-cover shrink-0"/> : <span className="w-6 h-6 rounded-full bg-navy text-white grid place-items-center text-[10px] font-semibold shrink-0">{initialsOf(u)}</span>}
+                <span className="text-navy truncate">{nameOf(u)}</span>
+              </span></td>
+              <td className="px-4 py-2.5 text-slate-500">{t('role.'+u.role)}</td>
+              {REPORT_KINDS.map(({kind,perm})=><td key={kind} className="px-4 py-2.5 text-center">
+                {hasReport(u,perm)? <Icon name="check" className="w-4 h-4 text-success inline"/> : <span className="text-slate-300">—</span>}
+              </td>)}
+              <td className="px-4 py-2.5">
+                <span className="flex items-center gap-1.5 text-slate-400" title={wa?`${t('rules.channelEmail')} + ${t('rules.channelWhatsApp')}`:t('rules.channelEmail')}>
+                  <Icon name="mail" className="w-3.5 h-3.5"/>
+                  {wa? <Icon name="msg" className="w-3.5 h-3.5 text-success"/> : <Icon name="msg" className="w-3.5 h-3.5 text-slate-200"/>}
+                </span>
+              </td>
+            </tr>;
+          })}
+        </tbody>
+      </table></div>}
     </Card>
   </div>;
 }
