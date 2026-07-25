@@ -7,6 +7,23 @@ import { query } from './db.js';
 import { decrypt } from './crypto.js';
 import { DEFAULT_MATRIX, WA_ROLES } from './constants.js';
 import { reportAvailableText } from './notifyText.js';
+import { permsForRole } from './rolePerms.js';
+
+// Report content (daily/weekly/monthly) is additionally gated by the matching
+// view_reports_* Rules-page permission — without this, the WhatsApp notification matrix
+// and the internal-email recipient list were a second, disconnected permission system: a
+// role could be unchecked for "Daily Reports" on the Rules page yet still be enabled for
+// 'daily' in the WhatsApp matrix (or just be 'viewer', the hardcoded internal-email role
+// list) and keep receiving the report regardless. Only applies to report types — other
+// message types (login/breach/stale/api_error/...) have no view_reports_* equivalent.
+const REPORT_TYPE_PERM = { daily: 'view_reports_daily', weekly: 'view_reports_weekly', monthly: 'view_reports_monthly' };
+export async function rolesWithReportAccess(roles, type) {
+  const perm = REPORT_TYPE_PERM[type];
+  if (!perm) return roles;
+  const kept = [];
+  for (const r of roles) { if ((await permsForRole(r)).includes(perm)) kept.push(r); }
+  return kept;
+}
 
 const TEXTMEBOT_URL = 'https://api.textmebot.com/send.php';
 
@@ -59,7 +76,7 @@ export async function sendFile() { return { ok: false, skipped: 'no-files' }; }
 export async function rolesForType(cfg, type) {
   const matrix = (cfg && cfg.notifMatrix && typeof cfg.notifMatrix === 'object') ? cfg.notifMatrix : DEFAULT_MATRIX;
   const roles = Array.isArray(matrix[type]) ? matrix[type] : [];
-  return roles.filter(r => WA_ROLES.includes(r));
+  return rolesWithReportAccess(roles.filter(r => WA_ROLES.includes(r)), type);
 }
 
 // Recipients for a message type = active opted-in users (with a phone) whose role is

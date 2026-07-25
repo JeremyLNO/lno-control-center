@@ -12,7 +12,7 @@
 // real Vercel Cron (no ?mode=alerts) at its scheduled time.
 import { riskMetrics } from '../_lib/metrics.js';
 import { buildPortfolio } from '../_lib/portfolio.js';
-import { getOpenWAConfig, notify, getUsersByRole, rolesForType } from '../_lib/notify.js';
+import { getOpenWAConfig, notify, getUsersByRole, rolesForType, rolesWithReportAccess } from '../_lib/notify.js';
 import { reportText, breachAlertText, dormantAlertText, dailyDigestText, verifyReminderText } from '../_lib/notifyText.js';
 import { syncExchanges } from '../_lib/sync.js';
 import { recordDailyFundSnapshot } from '../_lib/employeeFund.js';
@@ -155,7 +155,11 @@ export default async function handler(req, res) {
         } catch (e) { sent.push({ type: 'daily-pdf', error: String(e.message || e) }); }
 
         try {
-          const recipients = await getUsersByRole(['admin', 'operator', 'viewer']);
+          // Internal-email recipients are further restricted to roles holding
+          // view_reports_daily — being 'admin'/'operator'/'viewer' alone isn't enough if
+          // that permission was unchecked on the Rules page (see rolesWithReportAccess).
+          const emailRoles = await rolesWithReportAccess(['admin', 'operator', 'viewer'], 'daily');
+          const recipients = await getUsersByRole(emailRoles);
           for (const r of recipients) await sendDailyReportEmail(r.email, { equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today, series: eqv.slice(-14) }).catch(() => {});
           sent.push({ type: 'daily-email', recipients: recipients.length });
         } catch (e) { sent.push({ type: 'daily-email', error: String(e.message || e) }); }

@@ -164,6 +164,19 @@ ok('cron unauthorized without admin/secret -> 401', (await call(cronDaily, { met
 // the daily report is also emailed in full HTML to admin/operator/viewer
 ok('daily report emails admin/operator/viewer with the full breakdown', sentEmails.some(e => /LNO Daily Report/i.test(e.subject)), sentEmails.map(e => e.subject));
 
+// Report distribution (email + WhatsApp) must respect view_reports_daily, not just role —
+// operator/viewer lack it by default (see ROLE_PERMS), so being that role alone must NOT be
+// enough to receive the report; revoking/granting the permission should flip it.
+ok('operator (no view_reports_daily by default) does NOT get the daily report email', !sentEmails.some(e => e.to === 'nina.test@lno.company'), sentEmails.map(e => e.to));
+// PUT rolePerms replaces the whole set, not just the role named — pass viewer/shareholder's
+// current defaults through unchanged alongside the operator change, or this silently wipes
+// them to [] for every test that runs before their own explicit restore.
+await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'view_reports_daily'], viewer: ['view_activity', 'view_realtime', 'view_trades'], shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_monthly', 'view_exchanges'] } } });
+sentEmails.length = 0; sentMessages.length = 0;
+await call(cronDaily, { method: 'POST', headers: authH });
+ok('granting view_reports_daily makes operator receive the daily report email', sentEmails.some(e => e.to === 'nina.test@lno.company' && /LNO Daily Report/i.test(e.subject)), sentEmails.map(e => e.to));
+await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'], viewer: ['view_activity', 'view_realtime', 'view_trades'], shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_monthly', 'view_exchanges'] } } }); // restore
+
 // and archived as a PDF report, auto-verified (internal-only kind — no shareholder ever waits on it)
 r = await call(snapshots, { method: 'GET', headers: authH, query: { reports: 'list' } });
 const dailyRow = r.body.reports.find(x => x.kind === 'daily');
