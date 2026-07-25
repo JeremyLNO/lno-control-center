@@ -142,7 +142,9 @@ export async function buildWeeklyPdf(d) {
   return Buffer.from(await doc.save()).toString('base64');
 }
 
-// d: { equity, pnlDay, pctDay, openPnl, exposure, funds, positions, incidentCount, dateLabel, series }
+// d: { equity, pnlDay, pctDay, openPnl, exposure, funds, positions, incidentCount, dateLabel,
+//      series, prevPnl?, prevPct? } — prev* is the same-length window immediately before,
+//      null when history is too short for a full comparable one.
 export async function buildDailyPdf(d) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]); // A4
@@ -161,6 +163,9 @@ export async function buildDailyPdf(d) {
   y -= 12;
   row('Account equity', fUSD(d.equity));
   row('PnL — 24h', fmt(d.pnlDay), d.pnlDay >= 0 ? green : red);
+  // Same window, one period earlier — tells you whether the number above is an improvement.
+  // Omitted entirely when there isn't enough history for a full comparable window.
+  if (d.prevPct != null) at(`prev. ${d.prevPct >= 0 ? '+' : ''}${d.prevPct.toFixed(2)}%`, 420, 10, font, slate);
   row('Open PnL', fmt(d.openPnl || 0), (d.openPnl || 0) >= 0 ? green : red);
   row('Exposure (notional)', fUSD(d.exposure || 0));
   if (d.incidentCount) row('Incidents (24h)', String(d.incidentCount), red);

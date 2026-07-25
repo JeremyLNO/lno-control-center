@@ -137,6 +137,11 @@ export default async function handler(req, res) {
         // end up reflecting the last few minutes rather than a full day. pnlOver(1) always
         // diffs against yesterday's distinct snapshot row, a true ~24h-ago comparison.
         const pnlDay24 = pnlOver(1), pctDay24 = pctOver(1);
+        // The day before that, for a "vs previous period" line — null (and omitted from the
+        // report) until there are enough snapshots to cover two full days.
+        const prevBase = eqv.length >= 3 ? eqv[eqv.length - 3] : null;
+        const prevPnl24 = prevBase == null ? null : eqv[eqv.length - 2] - prevBase;
+        const prevPct24 = prevBase ? (prevPnl24 / prevBase) * 100 : (prevPnl24 == null ? null : 0);
         const openPositions = port.bots.filter(b => b.status === 'open').map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
         // "Incidents" = service-health problems (exchange API/data feed), not portfolio
         // performance threshold breaches (drawdown/PnL) — those are a different alert type.
@@ -148,7 +153,7 @@ export default async function handler(req, res) {
         // role, and a short digest on WhatsApp (admin/operator) — three different formats of
         // the same underlying numbers, matched to what each channel is good at.
         try {
-          const b64 = await buildDailyPdf({ equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today, series: eqv.slice(-14) });
+          const b64 = await buildDailyPdf({ equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today, series: eqv.slice(-14), prevPnl: prevPnl24, prevPct: prevPct24 });
           await query("INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,status,verified_by,verified_at) VALUES ('daily',$1,$2,$3,$4,'verified','system',now())",
             [today, Math.round(port.equity), Math.round(pnlDay24), b64]);
           sent.push({ type: 'daily-pdf', archived: true, bytes: b64.length });
@@ -160,7 +165,7 @@ export default async function handler(req, res) {
           // that permission was unchecked on the Rules page (see rolesWithReportAccess).
           const emailRoles = await rolesWithReportAccess(['admin', 'operator', 'viewer'], 'daily');
           const recipients = await getUsersByRole(emailRoles);
-          for (const r of recipients) await sendDailyReportEmail(r.email, { equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today, series: eqv.slice(-14) }).catch(() => {});
+          for (const r of recipients) await sendDailyReportEmail(r.email, { equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today, series: eqv.slice(-14), prevPnl: prevPnl24, prevPct: prevPct24 }).catch(() => {});
           sent.push({ type: 'daily-email', recipients: recipients.length });
         } catch (e) { sent.push({ type: 'daily-email', error: String(e.message || e) }); }
 

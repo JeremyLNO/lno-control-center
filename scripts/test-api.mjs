@@ -412,6 +412,19 @@ ok('no ?type filter still returns both alert types (System Status full history)'
 {
   const rd = await buildReportData(1);
   ok('incidentCount only counts service-health (api_error) alerts, not portfolio breaches', rd.incidentCount >= 1, rd.incidentCount);
+  // Period-over-period comparison: the same-length window immediately BEFORE the current
+  // one, so a report can say "+12% this month vs +4% last month".
+  ok('report data carries a previous-period comparison when history allows', typeof rd.prevPnl === 'number' && typeof rd.prevPct === 'number', { prevPnl: rd.prevPnl, prevPct: rd.prevPct });
+  ok('...with pnl and pct agreeing in sign', Math.sign(rd.prevPnl) === Math.sign(rd.prevPct), { prevPnl: rd.prevPnl, prevPct: rd.prevPct });
+  const wide = await buildReportData(1000);
+  ok('...and omitted entirely (null) when the window is wider than the whole history', wide.prevPnl === null && wide.prevPct === null, { prevPnl: wide.prevPnl, prevPct: wide.prevPct });
+}
+{
+  // exact value against a known window: the two snapshots before the latest one
+  const eq = (await db.query('SELECT equity FROM equity_snapshots ORDER BY day ASC')).rows.map(r => Number(r.equity));
+  const rd = await buildReportData(1);
+  const expectPnl = eq[eq.length - 2] - eq[eq.length - 3];
+  ok('previous-period pnl matches the two snapshots before the latest', rd.prevPnl === expectPnl, { got: rd.prevPnl, expected: expectPnl });
 }
 r = await call(alerts, { method: 'GET', headers: authH, query: { limit: '1' } });
 ok('alerts ?limit=1 returns 1 row but reports the full matching total (System Status pagination)', r.status === 200 && r.body.alerts.length === 1 && r.body.total >= 2, r.body);

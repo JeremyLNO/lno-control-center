@@ -162,7 +162,8 @@ export async function sendDailyReportEmail(to, d) {
           <div><div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em">Account equity</div>
             <div style="font-size:26px;font-weight:700;color:${NAVY};font-family:monospace">${fUSD(d.equity)}</div></div>
           <div style="text-align:right"><div style="font-family:monospace;font-size:14px;font-weight:700;color:${pnlColor(d.pnlDay)}">${fSigned(d.pnlDay)}</div>
-            <div style="font-family:monospace;font-size:11px;color:${pnlColor(d.pctDay)}">${d.pctDay >= 0 ? '+' : ''}${d.pctDay.toFixed(2)}% vs yesterday</div></div>
+            <div style="font-family:monospace;font-size:11px;color:${pnlColor(d.pctDay)}">${d.pctDay >= 0 ? '+' : ''}${d.pctDay.toFixed(2)}% vs yesterday</div>
+            ${d.prevPct != null ? `<div style="font-family:monospace;font-size:11px;color:#94a3b8">prev. ${d.prevPct >= 0 ? '+' : ''}${d.prevPct.toFixed(2)}%</div>` : ''}</div>
         </div>
         ${spark ? `<div style="margin-top:14px">${spark}</div>` : ''}
       </div>

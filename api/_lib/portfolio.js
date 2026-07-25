@@ -55,10 +55,22 @@ export async function buildReportData(days = 1) {
   // a daily report's chart has enough points to read as a trend, not two dots (14d floor,
   // capped to however much history actually exists).
   const chartLen = Math.min(eqv.length, Math.max(days * 2, 14));
+  // Previous comparable period (the `days` window immediately before this one), so a report
+  // can say "+12% this month vs +4% last month" — a number on its own doesn't say whether
+  // things are improving. null when there isn't enough history to cover two full windows,
+  // rather than silently comparing against a partial one.
+  const prev = (() => {
+    if (eqv.length < days * 2 + 1) return null;
+    const end = eqv[eqv.length - 1 - days];
+    const start = eqv[eqv.length - 1 - days * 2];
+    if (start == null || end == null) return null;
+    const pnl = end - start;
+    return { pnl, pct: start ? (pnl / start) * 100 : 0 };
+  })();
   return {
     equity: port.equity, pnl: pnlOver(days), pct: pctOver(days), openPnl: port.openPnl, exposure: port.exposure,
     funds: port.funds, positions, incidentCount: incidentRows[0]?.n || 0, dateLabel: new Date().toISOString().slice(0, 10),
-    series: eqv.slice(-chartLen),
+    series: eqv.slice(-chartLen), prevPnl: prev ? prev.pnl : null, prevPct: prev ? prev.pct : null,
   };
 }
 
@@ -66,5 +78,5 @@ export async function buildReportData(days = 1) {
 // field names — kept so those callers don't need to change.
 export async function buildDailyReportData() {
   const d = await buildReportData(1);
-  return { equity: d.equity, pnlDay: d.pnl, pctDay: d.pct, openPnl: d.openPnl, exposure: d.exposure, funds: d.funds, positions: d.positions, incidentCount: d.incidentCount, dateLabel: d.dateLabel, series: d.series };
+  return { equity: d.equity, pnlDay: d.pnl, pctDay: d.pct, openPnl: d.openPnl, exposure: d.exposure, funds: d.funds, positions: d.positions, incidentCount: d.incidentCount, dateLabel: d.dateLabel, series: d.series, prevPnl: d.prevPnl, prevPct: d.prevPct };
 }

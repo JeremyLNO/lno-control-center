@@ -1101,19 +1101,50 @@ function Sidebar(){
 function GlobalSearch(){
   const {navigate,data,funds,user,t}=useApp();
   const [q,setQ]=useState(''); const [open,setOpen]=useState(false); const ref=useRef<any>(null);
+  // People are the one searchable thing not already in the shared data layer. Fetched once,
+  // lazily, the first time an admin actually opens the search — not on every page load.
+  const [people,setPeople]=useState(null);
   useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  useEffect(()=>{ if(!open||people!==null||!user||user.role!=='admin') return; api('users').then(r=>setPeople(r.users||[])).catch(()=>setPeople([])); },[open,people,user]);
+  // Every nav destination the current user may actually reach — makes the search a jump-to
+  // rather than a positions-only lookup.
+  const pages=useMemo(()=>{
+    const all=[...MAIN_NAV,...TOOLS_NAV].filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=>({icon:i,key:l,path:p}));
+    if(user&&user.role==='admin') all.push(...ADMIN_NAV.map(([i,l,p])=>({icon:i,key:l,path:p})));
+    all.push(...MANAGE_NAV.filter(([,,,,perm])=>hasPerm(user,perm)).map(([i,l,p])=>({icon:i,key:l,path:p})));
+    if(user&&user.role!=='shareholder') all.push({icon:MY_EQUITY_NAV[0],key:MY_EQUITY_NAV[1],path:MY_EQUITY_NAV[2]});
+    all.push(...ACCT_NAV.map(([i,l,p])=>({icon:i,key:l,path:p})));
+    return all;
+  },[user]);
   const res=useMemo(()=>{
     if(!q.trim())return null; const s=q.toLowerCase();
-    const bots=(data?data.bots:[]).filter(b=> b.symbol.toLowerCase().includes(s)||b.exchange.toLowerCase().includes(s)||(fundOf(funds,b)?.name||'').toLowerCase().includes(s)).slice(0,8);
-    return {bots};
-  },[q,data,funds]);
+    const bots=(data?data.bots:[]).filter(b=> b.symbol.toLowerCase().includes(s)||b.exchange.toLowerCase().includes(s)||(fundOf(funds,b)?.name||'').toLowerCase().includes(s)).slice(0,6);
+    const fundHits=(funds||[]).filter(f=>(f.name||'').toLowerCase().includes(s)).slice(0,4);
+    const pageHits=pages.filter(p=>t(p.key).toLowerCase().includes(s)).slice(0,5);
+    const peopleHits=(people||[]).filter(u=>`${u.firstName||''} ${u.lastName||''} ${u.email||''}`.toLowerCase().includes(s)).slice(0,4);
+    return {bots,fundHits,pageHits,peopleHits,total:bots.length+fundHits.length+pageHits.length+peopleHits.length};
+  },[q,data,funds,pages,people,t]);
   const go=user&&user.role==='admin'?'/admin/bots':'/trades';
+  const pick=(path)=>{ navigate(path); setOpen(false); setQ(''); };
+  const heading=(label)=><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">{label}</div>;
   return <div ref={ref} className="relative flex-1 max-w-md">
     <Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
     <input value={q} onFocus={()=>setOpen(true)} onChange={e=>{setQ(e.target.value);setOpen(true);}} placeholder={t('header.searchPlaceholder')} className="w-full bg-slate-100 focus:bg-white border border-transparent focus:border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none"/>
     {open&&res&&<div className="absolute z-40 mt-1.5 w-full bg-white rounded-xl shadow-xl border border-slate-200 p-2 max-h-96 overflow-y-auto fadein">
-      {res.bots.length===0&&<div className="text-sm text-slate-400 px-3 py-4 text-center">{t('header.noResults')}</div>}
-      {res.bots.length>0&&<div><div className="text-[10px] uppercase tracking-wide text-slate-400 px-2 py-1">{t('header.positions')}</div>{res.bots.map(b=>{ const f=fundOf(funds,b); return <button key={b.id} onClick={()=>{navigate(go);setOpen(false);setQ('');}} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center justify-between gap-2"><span className="flex items-center gap-2"><span className="font-mono text-xs text-navy">{b.symbol}</span>{f&&<span className="w-2 h-2 rounded-full" style={{background:f.color}}/>}<span className="text-[11px] text-slate-400">{b.exchange}</span></span><span className={'font-mono text-xs '+clsPnl(b.unrealizedPnl)}>{fmtSigned(b.unrealizedPnl)}</span></button>; })}</div>}
+      {res.total===0&&<div className="text-sm text-slate-400 px-3 py-4 text-center">{t('header.noResults')}</div>}
+      {res.pageHits.length>0&&<div>{heading(t('header.pages'))}{res.pageHits.map(p=><button key={p.path} onClick={()=>pick(p.path)} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2 text-navy">
+        <Icon name={p.icon} className="w-3.5 h-3.5 text-slate-400"/>{t(p.key)}
+      </button>)}</div>}
+      {res.bots.length>0&&<div>{heading(t('header.positions'))}{res.bots.map(b=>{ const f=fundOf(funds,b); return <button key={b.id} onClick={()=>pick(go)} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center justify-between gap-2"><span className="flex items-center gap-2"><span className="font-mono text-xs text-navy">{b.symbol}</span>{f&&<span className="w-2 h-2 rounded-full" style={{background:f.color}}/>}<span className="text-[11px] text-slate-400">{b.exchange}</span></span><span className={'font-mono text-xs '+clsPnl(b.unrealizedPnl)}>{fmtSigned(b.unrealizedPnl)}</span></button>; })}</div>}
+      {res.fundHits.length>0&&<div>{heading(t('header.funds'))}{res.fundHits.map(f=><button key={f.id} onClick={()=>pick('/funds')} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2">
+        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{background:f.color}}/><span className="text-navy">{f.name}</span>
+        <span className="ml-auto text-[11px] text-slate-400">{f.openCount??0}</span>
+      </button>)}</div>}
+      {res.peopleHits.length>0&&<div>{heading(t('header.people'))}{res.peopleHits.map(u=><button key={u.id} onClick={()=>pick('/admin/users')} className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 text-sm flex items-center gap-2">
+        {u.avatar? <img src={u.avatar} className="w-5 h-5 rounded-full object-cover"/> : <span className="w-5 h-5 rounded-full bg-navy text-white grid place-items-center text-[9px] font-semibold">{initialsOf(u)}</span>}
+        <span className="text-navy truncate">{(u.firstName||u.lastName)?`${u.firstName} ${u.lastName}`.trim():u.email}</span>
+        <span className="ml-auto text-[11px] text-slate-400">{t('role.'+u.role)}</span>
+      </button>)}</div>}
     </div>}
   </div>;
 }
