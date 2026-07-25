@@ -49,7 +49,11 @@ function AdminOpenWA(){
       </div>
       <div className="border-t border-slate-100 pt-4">
         <SectionTitle>{t('wa.whoGetsNotified')}</SectionTitle>
-        <p className="text-xs text-slate-400 mb-3">{t('wa.recipientsHintPre')}<button onClick={()=>navigate('/profile')} className="text-gold hover:underline">{t('wa.profileLink')}</button>{t('wa.recipientsHintPost')}</p>
+        <p className="text-xs text-slate-400 mb-2">{t('wa.recipientsHintPre')}<button onClick={()=>navigate('/profile')} className="text-gold hover:underline">{t('wa.profileLink')}</button>{t('wa.recipientsHintPost')}</p>
+        {user.role==='admin'&&<p className="text-xs text-slate-500 bg-slate-50 border border-slate-200/70 rounded-lg p-2.5 mb-3 flex items-start gap-2">
+          <Icon name="info" className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0"/>
+          <span>{t('wa.reportsMovedToRules')} <button onClick={()=>navigate('/admin/rules')} className="text-gold hover:underline">{t('rules.title')}</button></span>
+        </p>}
         <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead><tr className="text-xs text-slate-500"><th className="text-left font-medium py-2 pr-3">{t('wa.messageType')}</th>{WA_ROLE_COLS.map(([k])=><th key={k} className="font-medium py-2 px-2 text-center w-20">{t('role.'+k)}</th>)}</tr></thead>
           <tbody>

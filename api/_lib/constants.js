@@ -7,7 +7,7 @@
 export const PERMISSIONS = [
   'view_activity','view_realtime','view_trades',
   'view_reports_daily','view_reports_weekly','view_reports_monthly','view_exchanges','export_data',
-  'manage_exchanges','manage_whatsapp','manage_funds',
+  'view_audit','manage_exchanges','manage_whatsapp','manage_funds',
 ];
 export const ROLE_PERMS = {
   admin: PERMISSIONS.slice(),
@@ -40,6 +40,13 @@ export const DEFAULT_USERS = [
 // WhatsApp notification routing: which roles receive each message type.
 export const WA_ROLES = ['admin','operator','viewer','shareholder'];
 export const WA_MSG_TYPES = ['login','breach','stale','daily','weekly','monthly','new_report','api_error','new_signup','verify_reminder'];
+// Report-content message types: WHO receives these is decided solely by the matching
+// view_reports_* permission on the Rules page (see REPORT_TYPE_PERM in _lib/notify.js), not
+// by the matrix below — one source of truth instead of two systems that could disagree
+// (a role could be unchecked for "Daily Reports" in Rules yet still enabled here). The
+// remaining types have no view_reports_* equivalent and stay matrix-driven.
+export const WA_REPORT_TYPES = ['daily','weekly','monthly','new_report'];
+export const WA_MATRIX_TYPES = WA_MSG_TYPES.filter(t => !WA_REPORT_TYPES.includes(t));
 export const DEFAULT_MATRIX = {
   login:      ['admin'],
   breach:     ['admin','operator'],

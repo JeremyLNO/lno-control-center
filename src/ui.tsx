@@ -31,6 +31,7 @@ const PERMISSIONS = [
   ['view_reports_monthly','View monthly reports'],
   ['view_exchanges','View exchanges'],
   ['export_data','Export data'],
+  ['view_audit','View audit log'],
   ['manage_exchanges','Manage exchanges'],
   ['manage_whatsapp','Manage WhatsApp'],
   ['manage_funds','Manage funds'],
@@ -51,14 +52,17 @@ const ROLE_OPTIONS = [
   {value:'shareholder',label:'Shareholder'},
   {value:'viewer',label:'Viewer'},
 ];
-// WhatsApp notification matrix — message types (rows) × roles (columns)
+// WhatsApp notification matrix — message types (rows) × roles (columns).
+// Report CONTENT (daily/weekly/monthly) is deliberately absent: who receives a report is
+// decided once, by the matching view_reports_* permission on the Rules page, for every
+// channel (see CONTENT_TYPE_PERM in api/_lib/notify.js). Editing it here too would be a
+// second switch for the same intent — exactly the split that let a viewer without
+// view_reports_daily keep receiving the daily report. 'new_report' stays: it's an
+// availability ping, not report content, and the permission only narrows it.
 const WA_MSG_TYPES = [
   {key:'login',label:'Login-failure alerts'},
   {key:'breach',label:'Alert rules'},
   {key:'stale',label:'Dormant bot alerts'},
-  {key:'daily',label:'Daily report'},
-  {key:'weekly',label:'Weekly report'},
-  {key:'monthly',label:'Monthly report'},
   {key:'new_report',label:'New report available'},
   {key:'api_error',label:'API/exchange error'},
   {key:'new_signup',label:'New sign-up'},
@@ -354,7 +358,13 @@ function Select({value,onChange,options,className=''}: any){
   </div>;
 }
 function Field({label,children,hint,className=''}: any){ return <label className={`block ${className}`}><span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>{children}{hint&&<span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}</label>; }
-function Input(p){ return <input {...p} className={'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40 '+(p.className||'')}/>; }
+// Defaults to full width, but a caller-supplied w-* wins: appending `w-64` after `w-full`
+// does NOT override it (both are width utilities — the cascade decides by stylesheet order,
+// not class-attribute order), so drop the default when the caller sets its own width.
+function Input(p){
+  const hasWidth=/(^|\s)(w-|min-w-|max-w-)/.test(p.className||'');
+  return <input {...p} className={`${hasWidth?'':'w-full '}bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40 ${p.className||''}`}/>;
+}
 
 // Export-as menu (CSV / Excel). getRows() returns array-of-arrays aligned to headers,
 // resolved lazily on click so it always reflects the current filters/sort.
@@ -1020,6 +1030,7 @@ const ADMIN_NAV=[
 // (user/role management is a privilege-escalation surface, kept admin-only by design).
 const MANAGE_NAV: Array<[string,string,string,string,string]>=[
   ['msg','nav.whatsapp','/admin/openwa','nav.whatsapp','manage_whatsapp'],
+  ['filetext','nav.audit','/admin/audit','nav.audit','view_audit'],
 ];
 const ACCT_NAV=[
   ['usercircle','nav.profile','/profile'],

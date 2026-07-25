@@ -9,7 +9,7 @@ import {
 } from './ui'
 import {
   ActivityPage, RealtimePage, TradesPage, AdminUsers, RulesPage, AdminExchanges, AdminOpenWA,
-  FundsPage, BotsPage, ProfilePage, MyEquityPage, EmployeeFundPage, SupportPage, PricesPage, StatusPage, AdminReports
+  FundsPage, BotsPage, ProfilePage, MyEquityPage, EmployeeFundPage, SupportPage, PricesPage, StatusPage, AdminReports, AuditPage
 } from './pages/index'
 
 /* ============================================================
@@ -213,6 +213,7 @@ function Shell(){
   else if(a==='admin'&&(b==='openwa'||b==='whatsapp')) page=<AdminOpenWA/>;
   else if(a==='admin'&&b==='funds') page=<FundsPage/>;
   else if(a==='admin'&&b==='reports') page=<AdminReports/>;
+  else if(a==='admin'&&b==='audit') page=<AuditPage/>;
   else if(a==='profile') page=<ProfilePage/>;
   else if(a==='equity') page=<MyEquityPage/>;
   else if(a==='admin'&&b==='employee-fund') page=<EmployeeFundPage/>;

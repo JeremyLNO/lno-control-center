@@ -41,6 +41,19 @@ async function call(handler, { method = 'GET', body = null, headers = {}, query 
 let pass = 0, fail = 0;
 function ok(name, cond, extra) { (cond ? pass++ : fail++); console.log(`${cond ? '✓' : '✗ FAIL'}  ${name}${extra && !cond ? '  → ' + JSON.stringify(extra) : ''}`); }
 
+// PUT /api/users {rolePerms} REPLACES the whole role->permission map, so passing just the
+// one role under test silently wipes the others to [] for every later test. These helpers
+// always send a complete map: setPerms() overrides only the named roles on top of the
+// defaults, restorePerms() puts every role back.
+const DEFAULT_PERMS = {
+  operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'],
+  viewer: ['view_activity', 'view_realtime', 'view_trades'],
+  shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_monthly', 'view_exchanges'],
+};
+let USERS_AUTH_H = null; // set once the admin token exists
+const setPerms = (over) => call(users, { method: 'PUT', headers: USERS_AUTH_H, body: { rolePerms: { ...DEFAULT_PERMS, ...over } } });
+const restorePerms = () => setPerms({});
+
 // 1. init
 let r = await call(init, { method: 'POST' });
 ok('init creates + seeds', r.status === 200 && r.body.seeded === true, r.body);
@@ -51,6 +64,7 @@ const token = r.body?.token;
 ok('login admin/admin returns JWT + user', r.status === 200 && !!token && r.body.user.role === 'admin', r.body);
 ok('login response contains NO password field', !('password' in (r.body?.user || {})) && !('password_hash' in (r.body?.user || {})));
 const authH = { authorization: 'Bearer ' + token };
+USERS_AUTH_H = authH;
 
 // 3. wrong password rejected
 r = await call(auth, { method: 'POST', body: { action: 'login', email: 'admin@lno.company', password: 'wrong' } });
@@ -171,11 +185,11 @@ ok('operator (no view_reports_daily by default) does NOT get the daily report em
 // PUT rolePerms replaces the whole set, not just the role named — pass viewer/shareholder's
 // current defaults through unchanged alongside the operator change, or this silently wipes
 // them to [] for every test that runs before their own explicit restore.
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'view_reports_daily'], viewer: ['view_activity', 'view_realtime', 'view_trades'], shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_monthly', 'view_exchanges'] } } });
+await setPerms({ operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'view_reports_daily'] });
 sentEmails.length = 0; sentMessages.length = 0;
 await call(cronDaily, { method: 'POST', headers: authH });
 ok('granting view_reports_daily makes operator receive the daily report email', sentEmails.some(e => e.to === 'nina.test@lno.company' && /LNO Daily Report/i.test(e.subject)), sentEmails.map(e => e.to));
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'], viewer: ['view_activity', 'view_realtime', 'view_trades'], shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_monthly', 'view_exchanges'] } } }); // restore
+await restorePerms();
 
 // and archived as a PDF report, auto-verified (internal-only kind — no shareholder ever waits on it)
 r = await call(snapshots, { method: 'GET', headers: authH, query: { reports: 'list' } });
@@ -542,7 +556,7 @@ r = await call(users, { method: 'GET', headers: authH, query: { rules: '1' } });
 ok('legacy "view_reports" in a saved role config is migrated to daily+monthly, not dropped',
   r.body.rolePerms.shareholder.includes('view_reports_daily') && r.body.rolePerms.shareholder.includes('view_reports_monthly') && !r.body.rolePerms.shareholder.includes('view_reports'),
   r.body.rolePerms.shareholder);
-r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_monthly', 'view_exchanges'] } } });
+r = await restorePerms();
 ok('restore shareholder defaults after the migration probe', r.status === 200, r.body);
 
 // the shareholder signs in via an emailed 6-digit code: request -> extract from the mocked
@@ -570,7 +584,7 @@ ok('shareholder cannot create an exchange -> 403', r.status === 403, r.status);
 // manage_exchanges: a granted non-admin (operator, here) can create/edit/delete a connection
 // and trigger a sync, but every response back to them stays stripped of the raw key/secret —
 // identical to the read-only GET shape, not the admin one — even though THEY created it.
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'view_exchanges', 'manage_exchanges'] } } });
+await setPerms({ operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'view_exchanges', 'manage_exchanges'] });
 r = await call(auth, { method: 'POST', body: { action: 'login', email: 'sophie.ops@lno.company', password: 'admin' } });
 const mgH = { authorization: 'Bearer ' + r.body.token };
 r = await call(exchanges, { method: 'POST', headers: mgH, body: { name: 'binance', label: 'Ops-managed', apiKey: 'OPSKEY', apiSecret: 'OPSSECRET', wallets: [{ network: 'BTC', address: 'bc1qtest' }] } });
@@ -586,7 +600,7 @@ ok('a manage_exchanges non-admin can trigger a sync', r.status === 200 && r.body
 r = await call(exchanges, { method: 'DELETE', headers: mgH, body: { id: mgExId } });
 ok('a manage_exchanges non-admin can delete a connection', r.status === 200, r.body);
 ok('deleted connection is gone', !(await call(exchanges, { method: 'GET', headers: authH })).body.exchanges.some(e => e.id === mgExId));
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'] } } }); // restore
+await restorePerms();
 r = await call(exchanges, { method: 'POST', headers: mgH, body: { name: 'binance', label: 'nope' } });
 ok('an operator WITHOUT manage_exchanges still cannot create an exchange -> 403', r.status === 403, r.status);
 
@@ -617,13 +631,22 @@ ok('freshly generated report is not_verified and did not notify shareholders yet
 r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'verifyReport', id: genForVerify.id } });
 ok('admin verifies the report', r.status === 200 && r.body.report.status === 'verified' && r.body.report.verifiedBy, r.body);
 ok('shareholder gets a "new report available" WhatsApp when the report is verified', sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
-// per-type/per-role matrix: disabling new_report stops the notice (no shareholder gets it)
+// "A new report is available" is an availability PING, not report content: the matrix still
+// chooses who wants to be pinged (see PING_TYPE_PERM in api/_lib/notify.js)…
 await call(openwa, { method: 'PUT', headers: authH, body: { notifMatrix: { new_report: [] } } });
 r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
 sentMessages.length = 0;
 await call(snapshots, { method: 'POST', headers: authH, body: { action: 'verifyReport', id: r.body.report.id } });
 ok('disabling a type in the matrix stops that notification', !sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
 await call(openwa, { method: 'PUT', headers: authH, body: { notifMatrix: { new_report: ['shareholder'] } } }); // restore
+// …and the permission narrows it on top: you're never pinged about a report you can't open,
+// even while the matrix still lists your role.
+await setPerms({ shareholder: ['view_activity', 'view_realtime', 'view_trades', 'view_exchanges'] });
+r = await call(snapshots, { method: 'POST', headers: authH, body: { action: 'generateReport' } });
+sentMessages.length = 0;
+await call(snapshots, { method: 'POST', headers: authH, body: { action: 'verifyReport', id: r.body.report.id } });
+ok('revoking view_reports_monthly stops the ping even with the matrix still enabled', !sentMessages.some(m => /report is available/i.test(m.text)), sentMessages.map(m => m.text));
+await restorePerms();
 
 // admin sets a NEW password — only accounts still on the legacy 'password' provider have one
 // to set (no longer creatable via the API — simulate a pre-existing legacy row directly).
@@ -661,24 +684,24 @@ ok('any authenticated user can list the report archive', r.status === 200 && Arr
 ok('operator sees an empty archive with no view_reports_* permission', (r.body.reports || []).length === 0, r.body.reports);
 r = await call(snapshots, { method: 'GET', headers: opH, query: { report: String(genReport.id) } });
 ok('operator cannot download a report kind they lack permission for -> 403', r.status === 403, r.status);
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'view_reports_daily'] } } });
+await setPerms({ operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'view_reports_daily'] });
 r = await call(snapshots, { method: 'GET', headers: opH, query: { reports: 'list' } });
 ok('granting view_reports_daily surfaces daily reports but not monthly', r.body.reports.length > 0 && r.body.reports.every(x => x.kind === 'daily'), r.body.reports.map(x => x.kind));
 r = await call(snapshots, { method: 'GET', headers: opH, query: { report: String(genReport.id) } });
 ok('still cannot download the monthly report without view_reports_monthly -> 403', r.status === 403, r.status);
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'] } } }); // restore
+await restorePerms();
 r = await call(exchanges, { method: 'GET', headers: opH });
 ok('operator has no view_exchanges by default -> 403', r.status === 403, r.status);
 
 // view_trades/view_realtime/view_activity now actually gate GET /api/bots (was a real bypass
 // before this audit fix — the frontend hid the pages but the API accepted any authenticated
 // caller regardless of role permissions)
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['export_data'] } } }); // strip all three
+await setPerms({ operator: ['export_data'] }); // strip all three
 r = await call(bots, { method: 'GET', headers: opH });
 ok('a role with none of view_activity/view_realtime/view_trades cannot list bots -> 403', r.status === 403, r.status);
 r = await call(bots, { method: 'GET', headers: opH, query: { fills: '1' } });
 ok('...nor read fills without view_realtime -> 403', r.status === 403, r.status);
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'] } } }); // restore
+await restorePerms();
 r = await call(bots, { method: 'GET', headers: opH });
 ok('restored: operator can list bots again', r.status === 200, r.status);
 r = await call(bots, { method: 'GET', headers: opH, query: { attribution: '1' } });
@@ -688,7 +711,7 @@ ok('attribution/costs stay admin-only regardless of permissions (BotsPage is adm
 // now it actually gates fund CRUD the same way manage_exchanges gates exchange CRUD
 r = await call(funds, { method: 'POST', headers: opH, body: { name: 'Nope Fund' } });
 ok('operator WITHOUT manage_funds cannot create a fund -> 403', r.status === 403, r.status);
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'manage_funds'] } } });
+await setPerms({ operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'manage_funds'] });
 r = await call(funds, { method: 'POST', headers: opH, body: { name: 'Ops Fund', color: '#3B82F6' } });
 const opFund = (r.body.funds || []).find(f => f.name === 'Ops Fund');
 ok('operator WITH manage_funds can create a fund', r.status === 201 && !!opFund, r.body);
@@ -698,18 +721,18 @@ r = await call(funds, { method: 'DELETE', headers: opH, body: { id: opFund.id } 
 ok('...and delete it', r.status === 200 && !(r.body.funds || []).some(f => f.id === opFund.id), r.body);
 r = await call(funds, { method: 'POST', headers: opH, body: { action: 'assignEmployeeContribution', contributionId: 1, userId: 'x' } });
 ok('manage_funds does NOT extend to Employee Fund contribution assignment (stays admin-only)', r.status === 403, r.status);
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'] } } }); // restore
+await restorePerms();
 
 // manage_whatsapp: same story as manage_funds — was decorative, now real
 r = await call(openwa, { method: 'GET', headers: opH });
 ok('operator WITHOUT manage_whatsapp cannot view WhatsApp config -> 403', r.status === 403, r.status);
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'manage_whatsapp'] } } });
+await setPerms({ operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'manage_whatsapp'] });
 r = await call(openwa, { method: 'GET', headers: opH });
 ok('operator WITH manage_whatsapp can view WhatsApp config', r.status === 200, r.status);
 r = await call(openwa, { method: 'PUT', headers: opH, body: { dailyReport: false } });
 ok('...and update it', r.status === 200 && r.body.config.dailyReport === false, r.body);
 await call(openwa, { method: 'PUT', headers: authH, body: { dailyReport: true } }); // restore
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'] } } }); // restore
+await restorePerms();
 
 // view_logs and manage_users were removed outright (view_logs never gated anything; a
 // functional manage_users would have let a non-admin promote themselves to admin via the
@@ -718,15 +741,15 @@ r = await call(users, { method: 'GET', headers: authH, query: { rules: '1' } });
 ok('view_logs and manage_users no longer exist as grantable permissions', !r.body.permissions.includes('view_logs') && !r.body.permissions.includes('manage_users'), r.body.permissions);
 r = await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_logs', 'manage_users', 'view_activity'] } } });
 ok('setting a role to those removed strings silently drops them (unknown-perm filtering)', JSON.stringify(r.body.rolePerms.operator) === JSON.stringify(['view_activity']), r.body.rolePerms);
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'] } } }); // restore
+await restorePerms();
 // even granting an operator EVERY remaining permission can't touch user/role management —
 // api/users.js stays hardcoded to role==='admin', not permission-gated, by design
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_daily', 'view_reports_weekly', 'view_reports_monthly', 'view_exchanges', 'export_data', 'manage_exchanges', 'manage_whatsapp', 'manage_funds'] } } });
+await setPerms({ operator: ['view_activity', 'view_realtime', 'view_trades', 'view_reports_daily', 'view_reports_weekly', 'view_reports_monthly', 'view_exchanges', 'export_data', 'manage_exchanges', 'manage_whatsapp', 'manage_funds'] });
 r = await call(users, { method: 'GET', headers: opH });
 ok('no permission, however broad, grants access to user administration -> still 403', r.status === 403, r.status);
 r = await call(users, { method: 'PATCH', headers: opH, body: { id: 'u1', role: 'admin' } });
 ok('...specifically: cannot self-promote to admin via PATCH -> 403', r.status === 403, r.status);
-await call(users, { method: 'PUT', headers: authH, body: { rolePerms: { operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data'] } } }); // restore
+await restorePerms();
 
 // login audit: IP + last-login recorded, heartbeat updates last-seen, history endpoint
 r = await call(auth, { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }, body: { action: 'login', email: 'admin@lno.company', password: 'admin' } });
@@ -806,6 +829,26 @@ const auditActions = auditLog.map(x => x.action);
 ok('audit log records user.create', auditActions.includes('user.create'), auditActions.slice(0, 8));
 ok('audit log records exchange.create', auditActions.includes('exchange.create'), auditActions.slice(0, 8));
 ok('audit entries carry actor + action fields', auditLog.length > 0 && 'actorEmail' in auditLog[0] && 'action' in auditLog[0]);
+// the audit log is the one read on this admin-only endpoint that view_audit can grant
+r = await call(users, { method: 'GET', headers: opH, query: { audit: '1' } });
+ok('non-admin without view_audit cannot read the audit log -> 403', r.status === 403, r.status);
+await setPerms({ operator: ['view_activity', 'view_realtime', 'view_trades', 'export_data', 'view_audit'] });
+r = await call(users, { method: 'GET', headers: opH, query: { audit: '1' } });
+ok('view_audit lets a non-admin read the audit log', r.status === 200 && Array.isArray(r.body.audit) && r.body.audit.length > 0, r.status);
+ok('...but view_audit grants nothing else on that endpoint (user list stays admin-only)', (await call(users, { method: 'GET', headers: opH })).status === 403);
+r = await call(users, { method: 'GET', headers: authH, query: { audit: '1', limit: '1' } });
+ok('audit log is paginated: ?limit=1 returns 1 row but the full total', r.status === 200 && r.body.audit.length === 1 && r.body.total > 1, { n: r.body.audit.length, total: r.body.total });
+{
+  const p0 = await call(users, { method: 'GET', headers: authH, query: { audit: '1', limit: '1', offset: '0' } });
+  const p1 = await call(users, { method: 'GET', headers: authH, query: { audit: '1', limit: '1', offset: '1' } });
+  ok('audit log pages don\'t overlap', p0.body.audit[0].id !== p1.body.audit[0].id, { p0: p0.body.audit, p1: p1.body.audit });
+}
+r = await call(users, { method: 'GET', headers: authH, query: { audit: '1', action: 'user.create' } });
+ok('audit log ?action filters server-side', r.status === 200 && r.body.audit.length > 0 && r.body.audit.every(x => x.action === 'user.create'), r.body.audit.map(x => x.action));
+r = await call(users, { method: 'GET', headers: authH, query: { audit: '1', date: '1999-01-01' } });
+ok('audit log ?date filters server-side (no rows on an unrelated day)', r.status === 200 && r.body.audit.length === 0 && r.body.total === 0, r.body);
+ok('audit log exposes its distinct action keys for the filter dropdown', Array.isArray(r.body.actions) && r.body.actions.includes('user.create'), r.body.actions);
+await restorePerms();
 
 // ── Reset: wipe trading/demo data, keep users + config (admin only) — run last ──
 r = await call(init, { method: 'POST', body: { action: 'reset' } });

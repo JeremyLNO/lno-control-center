@@ -15,3 +15,4 @@ export { SupportPage } from './SupportPage';
 export { PricesPage } from './PricesPage';
 export { StatusPage } from './StatusPage';
 export { AdminReports } from './AdminReports';
+export { AuditPage } from './AuditPage';

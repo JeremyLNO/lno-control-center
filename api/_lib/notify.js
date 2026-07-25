@@ -7,16 +7,26 @@ import { query } from './db.js';
 import { decrypt } from './crypto.js';
 import { DEFAULT_MATRIX, WA_ROLES } from './constants.js';
 import { reportAvailableText } from './notifyText.js';
-import { permsForRole } from './rolePerms.js';
+import { getRolePerms, permsForRole } from './rolePerms.js';
 
-// Report content (daily/weekly/monthly) is additionally gated by the matching
-// view_reports_* Rules-page permission — without this, the WhatsApp notification matrix
-// and the internal-email recipient list were a second, disconnected permission system: a
-// role could be unchecked for "Daily Reports" on the Rules page yet still be enabled for
-// 'daily' in the WhatsApp matrix (or just be 'viewer', the hardcoded internal-email role
-// list) and keep receiving the report regardless. Only applies to report types — other
-// message types (login/breach/stale/api_error/...) have no view_reports_* equivalent.
-const REPORT_TYPE_PERM = { daily: 'view_reports_daily', weekly: 'view_reports_weekly', monthly: 'view_reports_monthly' };
+// Report content (daily/weekly/monthly, and the shareholder "new report available" notice)
+// is distributed purely on the matching view_reports_* Rules-page permission — the Rules
+// page is the single source of truth for WHO gets report content, on every channel. The
+// WhatsApp matrix keeps deciding the other message types (login/breach/stale/api_error/...),
+// which have no view_reports_* equivalent. Before this, the two were disconnected: a role
+// could be unchecked for "Daily Reports" in Rules yet still receive it because the matrix
+// (or, for email, a hardcoded admin/operator/viewer list) said so.
+// Report CONTENT — the audience is exactly the roles holding the permission, matrix ignored.
+const CONTENT_TYPE_PERM = { daily: 'view_reports_daily', weekly: 'view_reports_weekly', monthly: 'view_reports_monthly' };
+// An availability PING ("a new report is available, go download it") is a different thing:
+// the matrix still decides who wants to be pinged (admins who just verified it themselves
+// usually don't), and the permission only narrows it — you can't be told about a report you
+// aren't allowed to open. Shareholders only ever get monthly reports (SHAREHOLDER_KINDS).
+const PING_TYPE_PERM = { new_report: 'view_reports_monthly' };
+const REPORT_TYPE_PERM = { ...CONTENT_TYPE_PERM, ...PING_TYPE_PERM };
+export function permForReportType(type) { return REPORT_TYPE_PERM[type] || null; }
+// Narrows an existing role list to those holding the report permission (used by the
+// internal-email path, which starts from a fixed admin/operator/viewer list).
 export async function rolesWithReportAccess(roles, type) {
   const perm = REPORT_TYPE_PERM[type];
   if (!perm) return roles;
@@ -74,9 +84,17 @@ export async function sendFile() { return { ok: false, skipped: 'no-files' }; }
 
 // Which roles receive a given message type (admin-configurable matrix; falls back to defaults).
 export async function rolesForType(cfg, type) {
+  // Report content ignores the matrix entirely — its audience IS the set of roles holding
+  // the matching view_reports_* permission (see CONTENT_TYPE_PERM above).
+  const contentPerm = CONTENT_TYPE_PERM[type];
+  if (contentPerm) {
+    const map = await getRolePerms();
+    return WA_ROLES.filter(r => (map[r] || []).includes(contentPerm));
+  }
   const matrix = (cfg && cfg.notifMatrix && typeof cfg.notifMatrix === 'object') ? cfg.notifMatrix : DEFAULT_MATRIX;
-  const roles = Array.isArray(matrix[type]) ? matrix[type] : [];
-  return rolesWithReportAccess(roles.filter(r => WA_ROLES.includes(r)), type);
+  const roles = (Array.isArray(matrix[type]) ? matrix[type] : []).filter(r => WA_ROLES.includes(r));
+  // Availability pings stay matrix-chosen, then narrowed by the permission.
+  return PING_TYPE_PERM[type] ? rolesWithReportAccess(roles, type) : roles;
 }
 
 // Recipients for a message type = active opted-in users (with a phone) whose role is

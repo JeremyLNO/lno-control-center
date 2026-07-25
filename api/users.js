@@ -2,10 +2,10 @@
 // no usable password). Shareholders have EXTERNAL emails and sign in with an emailed
 // one-time code (see api/auth.js requestOtp/verifyOtp) — no password at all.
 import { query } from './_lib/db.js';
-import { requireAdmin, hashPassword, passwordIssues } from './_lib/auth.js';
-import { sanitizeUserWithPerms, getRolePerms, setRolePerms } from './_lib/rolePerms.js';
+import { requireAuth, requireAdmin, hashPassword, passwordIssues } from './_lib/auth.js';
+import { sanitizeUserWithPerms, getRolePerms, setRolePerms, permsForRole } from './_lib/rolePerms.js';
 import { PERMISSIONS, randomStyle2Avatar } from './_lib/constants.js';
-import { audit, recentAudit } from './_lib/audit.js';
+import { audit, recentAudit, auditActions } from './_lib/audit.js';
 
 // There must always be at least one active admin — used to block the last one from being
 // deactivated, demoted, or deleted (whether by themselves or another admin).
@@ -17,6 +17,23 @@ async function isLastActiveAdmin(id) {
 }
 
 export default async function handler(req, res) {
+  // The audit log is the one read here that isn't user administration — it's a
+  // read-only activity trail, grantable to a non-admin via view_audit. Everything else on
+  // this endpoint stays strictly admin-only (roles/permissions are a privilege-escalation
+  // surface — see the PERMISSIONS comment in _lib/constants.js).
+  if (req.method === 'GET' && req.query?.audit) {
+    const auth = requireAuth(req, res); if (!auth) return;
+    if (auth.role !== 'admin' && !(await permsForRole(auth.role)).includes('view_audit')) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    try {
+      const { total, entries } = await recentAudit({
+        limit: req.query.limit, offset: req.query.offset,
+        action: req.query.action || null, q: (req.query.q || '').trim() || null, date: req.query.date || null,
+      });
+      return res.status(200).json({ total, audit: entries, actions: await auditActions() });
+    } catch (e) { return res.status(200).json({ total: 0, audit: [], actions: [] }); }
+  }
   const a = requireAdmin(req, res); if (!a) return;
   try {
     if (req.method === 'GET') {
@@ -24,10 +41,6 @@ export default async function handler(req, res) {
       // per user — see api/_lib/rolePerms.js, which every user-sanitizing endpoint reads.
       if (req.query?.rules) {
         return res.status(200).json({ permissions: PERMISSIONS, rolePerms: await getRolePerms() });
-      }
-      if (req.query?.audit) {
-        try { return res.status(200).json({ audit: await recentAudit(req.query.limit || 100) }); }
-        catch (e) { return res.status(200).json({ audit: [] }); }
       }
       if (req.query?.logins) {
         let rows = [];
