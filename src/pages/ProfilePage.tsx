@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  initialsOf, api, toast, Icon, Card, SectionTitle, Btn, Toggle, Field, Input, Confirm, useApp,
+  initialsOf, api, toast, Icon, Card, SectionTitle, Btn, Toggle, Field, Input, Confirm, AvatarPickerModal, useApp,
   PageHead, PW_RULES, passwordOk
 } from '../ui'
 
@@ -13,11 +13,10 @@ function ProfilePage(){
   const [v,setV]=useState({firstName:user.firstName,lastName:user.lastName}); const [saved,setSaved]=useState(false);
   const [pw,setPw]=useState({cur:'',n1:'',n2:''}); const [pwMsg,setPwMsg]=useState(null);
   const [notify,setNotify]=useState(user.notify); const [phone,setPhone]=useState(user.phone||'');
-  const fileRef=useRef<any>(null);
+  const [avatarOpen,setAvatarOpen]=useState(false);
   async function patchSelf(patch){ try{ const r=await api('profile',{method:'PATCH',body:patch}); setUser(r.user); return true; }catch(e){ toast.error(e.message); return false; } }
   async function saveInfo(){ if(await patchSelf({firstName:v.firstName,lastName:v.lastName})){ setSaved(true); setTimeout(()=>setSaved(false),1800); } }
   async function changePw(){ if(!passwordOk(pw.n1))return setPwMsg({err:t('profile.newPasswordRequirementsErr')}); if(pw.n1!==pw.n2)return setPwMsg({err:t('profile.confirmationMismatch')}); try{ await api('auth',{method:'POST',body:{action:'changePassword',current:pw.cur,next:pw.n1}}); setPw({cur:'',n1:'',n2:''}); setPwMsg({ok:t('users.passwordUpdated')}); }catch(e){ setPwMsg({err:e.message||t('profile.couldNotUpdatePassword')}); } }
-  function upload(e){ const file=e.target.files[0]; if(!file)return; if(!['image/png','image/jpeg'].includes(file.type))return toast.error(t('profile.acceptedFormats')); if(file.size>5*1024*1024)return toast.error(t('profile.maxFileSize')); const r=new FileReader(); r.onload=()=>patchSelf({avatar:r.result}); r.readAsDataURL(file); }
   return <div className="max-w-2xl">
     <PageHead title={t('profile.title')} subtitle={t('profile.subtitle')}/>
     <Card className="p-5 mb-4">
@@ -25,10 +24,9 @@ function ProfilePage(){
       <div className="flex items-center gap-4 mb-5">
         <div className="relative">
           {user.avatar?<img src={user.avatar} className="w-20 h-20 rounded-full object-cover"/>:<span className="w-20 h-20 rounded-full bg-navy text-white grid place-items-center text-xl font-semibold">{initialsOf(user)}</span>}
-          <button onClick={()=>fileRef.current.click()} className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-gold text-navy grid place-items-center shadow"><Icon name="camera" className="w-4 h-4"/></button>
-          <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={upload}/>
+          <button onClick={()=>setAvatarOpen(true)} className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-gold text-navy grid place-items-center shadow" title={t('users.chooseAvatar')}><Icon name="camera" className="w-4 h-4"/></button>
         </div>
-        <div><div className="font-semibold text-navy text-lg">{user.firstName||user.email}</div><div className="text-sm text-slate-400">{user.email} · {t('role.'+user.role)}</div><div className="text-[11px] text-slate-400 mt-1">{t('profile.pngOrJpeg')}</div></div>
+        <div><div className="font-semibold text-navy text-lg">{user.firstName||user.email}</div><div className="text-sm text-slate-400">{user.email} · {t('role.'+user.role)}</div><div className="text-[11px] text-slate-400 mt-1">{t('profile.avatarHint')}</div></div>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label={t('users.firstName')}><Input value={v.firstName} onChange={e=>setV({...v,firstName:e.target.value})}/></Field>
@@ -78,6 +76,9 @@ function ProfilePage(){
         <div>{t('profile.textMeBotHint')}</div>
       </div>
     </Card>
+
+    <AvatarPickerModal open={avatarOpen} onClose={()=>setAvatarOpen(false)} canRemove hasAvatar={!!user.avatar}
+      onPick={async(avatar)=>{ await patchSelf({avatar}); setAvatarOpen(false); }}/>
   </div>;
 }
 

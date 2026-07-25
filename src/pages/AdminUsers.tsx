@@ -1,8 +1,8 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  ROLE_OPTIONS, AVATAR_STYLES, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge, SectionTitle,
-  StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, useApp, PageHead, Denied, PW_RULES,
+  ROLE_OPTIONS, fmtDT, initialsOf, api, toast, Icon, Card, Btn, Badge, SectionTitle,
+  StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AvatarPickerModal, useApp, PageHead, Denied, PW_RULES,
   passwordOk, Loader
 } from '../ui'
 
@@ -217,7 +217,7 @@ function AdminUsers(){
       </table>
     </Card>}
     <LoginHistoryTable/>
-    <AvatarPickerModal userId={avatarPickFor} onClose={()=>setAvatarPickFor(null)} onPick={async(avatar)=>{ await up(avatarPickFor,{avatar}); setAvatarPickFor(null); }}/>
+    <AvatarPickerModal open={avatarPickFor} onClose={()=>setAvatarPickFor(null)} onPick={async(avatar)=>{ await up(avatarPickFor,{avatar}); setAvatarPickFor(null); }}/>
     <AddUserModal open={add} onClose={()=>setAdd(false)} onCreated={u=>{setUsers(us=>[...us,u]);setAdd(false);}}/>
     <Confirm open={!!del} title={t('users.deleteUser')} message={t('users.deleteUserConfirm',{email:del?.email})} onCancel={()=>setDel(null)} onConfirm={async()=>{try{await api('users',{method:'DELETE',body:{id:del.id}});setUsers(us=>us.filter(u=>u.id!==del.id));toast.success(t('users.userDeleted'));}catch(e){toast.error(e.message);}setDel(null);setExp(null);}}/>
     <Confirm open={bulkDel} title={t('users.deleteSelectedTitle')} message={t('users.deleteSelectedConfirm',{n:ids.filter(id=>id!==user.id).length})} confirmLabel={t('users.deleteAll')} onCancel={()=>setBulkDel(false)} onConfirm={bulkDelete}/>
@@ -261,32 +261,6 @@ function genPassword(){
   return arr.join('');
 }
 // Admin avatar picker — preset gallery grouped by style (tabs), or upload a new photo.
-function AvatarPickerModal({userId,onClose,onPick}: any){
-  const {t}=useApp();
-  const [style,setStyle]=useState('style1');
-  const fileRef=useRef<any>(null);
-  const active=AVATAR_STYLES.find(s=>s.key===style)||AVATAR_STYLES[0];
-  function upload(e){
-    const file=e.target.files[0]; if(!file) return;
-    if(!['image/png','image/jpeg'].includes(file.type)) return toast.error(t('profile.acceptedFormats'));
-    if(file.size>5*1024*1024) return toast.error(t('profile.maxFileSize'));
-    const r=new FileReader(); r.onload=()=>onPick(r.result); r.readAsDataURL(file);
-  }
-  return <Modal open={!!userId} onClose={onClose} title={t('users.chooseAvatar')} wide>
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        {AVATAR_STYLES.map(s=><button key={s.key} onClick={()=>setStyle(s.key)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${style===s.key?'bg-navy text-white':'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{t('users.avatarStyle',{n:s.n})}</button>)}
-        <Btn size="sm" variant="outline" className="ml-auto" onClick={()=>fileRef.current?.click()}><Icon name="camera" className="w-3.5 h-3.5"/>{t('users.uploadPhoto')}</Btn>
-        <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={upload}/>
-      </div>
-      <div className="grid grid-cols-6 sm:grid-cols-8 gap-2 max-h-80 overflow-y-auto pr-1">
-        {active.items.map(url=><button key={url} onClick={()=>onPick(url)} className="aspect-square rounded-full overflow-hidden ring-2 ring-transparent hover:ring-gold transition">
-          <img src={url} className="w-full h-full object-cover"/>
-        </button>)}
-      </div>
-    </div>
-  </Modal>;
-}
 function AddUserModal({open,onClose,onCreated}: any){
   const {t}=useApp();
   const roleOpts=ROLE_OPTIONS.map(o=>({...o,label:t('role.'+o.value)}));

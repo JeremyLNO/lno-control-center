@@ -405,6 +405,41 @@ function Confirm({open,title,message,onConfirm,onCancel,danger=true,confirmLabel
   </Modal>;
 }
 
+// Avatar chooser — preset gallery (2 styles × 30, static assets) + upload + optional
+// removal. Shared: admins open it from the Users page to set someone else's picture, and
+// each user opens it from their own Profile. `open` is a boolean or the id being edited;
+// onPick receives a data URL (upload), a preset path, or null when the photo is removed —
+// callers persist it via their own endpoint (api/users PATCH vs api/profile PATCH).
+function AvatarPickerModal({open,onClose,onPick,canRemove,hasAvatar}: any){
+  const {t}=useApp();
+  const [style,setStyle]=useState('style1');
+  const fileRef=useRef<any>(null);
+  const active=AVATAR_STYLES.find(s=>s.key===style)||AVATAR_STYLES[0];
+  function upload(e){
+    const file=e.target.files[0]; if(!file) return;
+    if(!['image/png','image/jpeg'].includes(file.type)) return toast.error(t('profile.acceptedFormats'));
+    if(file.size>5*1024*1024) return toast.error(t('profile.maxFileSize'));
+    const r=new FileReader(); r.onload=()=>onPick(r.result); r.readAsDataURL(file);
+  }
+  return <Modal open={!!open} onClose={onClose} title={t('users.chooseAvatar')} wide>
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        {AVATAR_STYLES.map(s=><button key={s.key} onClick={()=>setStyle(s.key)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${style===s.key?'bg-navy text-white':'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{t('users.avatarStyle',{n:s.n})}</button>)}
+        <span className="ml-auto flex items-center gap-2">
+          {canRemove&&hasAvatar&&<Btn size="sm" variant="ghost" className="text-danger" onClick={()=>onPick(null)}><Icon name="trash" className="w-3.5 h-3.5"/>{t('profile.removePhoto')}</Btn>}
+          <Btn size="sm" variant="outline" onClick={()=>fileRef.current?.click()}><Icon name="camera" className="w-3.5 h-3.5"/>{t('users.uploadPhoto')}</Btn>
+        </span>
+        <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={upload}/>
+      </div>
+      <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
+        {active.items.map(url=><button key={url} onClick={()=>onPick(url)} className="aspect-square rounded-full overflow-hidden ring-2 ring-transparent hover:ring-gold transition">
+          <img src={url} className="w-full h-full object-cover"/>
+        </button>)}
+      </div>
+    </div>
+  </Modal>;
+}
+
 /* ============================================================
    CHARTS
    ============================================================ */
@@ -1360,5 +1395,5 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, StatusStrip, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AvatarPickerModal, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, StatusStrip, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
 };
