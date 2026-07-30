@@ -31,12 +31,12 @@ export const DEFAULT_ANOMALY_CONFIG = {
   dormantHours: 48,        // an open position untouched this long -> anomaly
 };
 
-// Detectable only with data this system does not capture. Surfaced to the UI so the absence
-// is visible rather than silently narrowing what "anomaly detection" means here.
+// Detectors not yet possible, surfaced so the absence is visible rather than silently
+// narrowing what "anomaly detection" means here. Both are reachable from Binance's order
+// endpoint; backtest divergence was dropped with the decision to use live exchange data only.
 export const UNDETECTABLE = {
-  slippage_rise: 'no intended/signal price is recorded, only executed fill prices',
+  slippage_rise: 'needs placed-vs-executed price — reachable from Binance once orders are synced',
   unfilled_orders: 'order lifecycle is not synced — only completed fills are',
-  backtest_divergence: 'no backtest results are imported to compare live behaviour against',
 };
 
 export async function getAnomalyConfig() {

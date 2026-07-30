@@ -82,15 +82,18 @@ async function priceContext(t) {
   return { candles, excursion: ex, interval };
 }
 
-// Metrics this page would show if the data existed. Declared per-page rather than assumed
+// Metrics this page would show once the data exists. Declared per-page rather than assumed
 // absent, so a reader can tell "not measured" from "measured as zero".
+//
+// All three are reachable from Binance's own order endpoint and nothing else: the placed
+// price gives slippage, the order list gives amendments and cancellations, and a resting
+// STOP order gives the risk that an R-multiple divides by. Signals, execution logs and
+// order round-trip latency were dropped — they could only ever have come from the strategy
+// side, and the desk is standardising on live exchange data.
 export const TRADE_UNAVAILABLE = {
-  signals: 'the strategy does not report its entry/exit signals to this system',
   orders: 'only executed fills are synced — placed, amended and cancelled orders are not',
-  slippage: 'requires the intended price; only the executed price is known',
-  latency: 'order round-trip time is not measured (only exchange sync latency is)',
-  r_multiple: 'requires the risk per trade — no stop-loss distance is recorded',
-  logs: 'the bots do not ship execution logs to this system',
+  slippage: 'placed price vs executed price, from the same order records',
+  r_multiple: 'needs the risk per trade — readable from the resting stop order, once orders are synced',
 };
 
 export async function getTradeDetail(key) {

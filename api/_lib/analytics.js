@@ -60,14 +60,20 @@ export const DIMENSIONS = {
   regime:    { label: 'dim.regime',    of: t => t.regime || 'unclassified' },
 };
 
-// Metrics the spec asks for that no data source in this system currently feeds. They are
-// declared here — rather than quietly omitted — so the UI can render them as "not
-// instrumented" instead of showing a plausible-looking zero. See docs/DATA-GAPS.md.
+// Metrics not yet fed, declared rather than quietly omitted so the UI can render them as
+// "not instrumented" instead of a plausible-looking zero.
+//
+// Scoped to what LIVE BINANCE DATA can actually provide. Backtest divergence, entry/exit
+// signals, execution logs and true order latency all needed a source outside the exchange
+// (TradingView exports, or the bots reporting their own intent); the desk has settled on
+// Binance live data only, so those are not "missing", they are out of scope and have been
+// removed rather than left as permanent placeholders.
+//
+// Both entries below remain genuinely reachable from Binance and are therefore still listed:
+// slippage once the order endpoint is synced, MAE/MFE once klines are backfilled.
 export const UNAVAILABLE = {
-  slippage:  'no signal/intended price is recorded — only executed fill prices',
-  mae_mfe:   'computed per position from klines on the position page; not backfilled across the whole history, so it cannot be sliced here yet',
-  latency:   'only exchange sync latency is measured, not order round-trip latency',
-  backtest:  'no backtest results are imported to compare live behaviour against',
+  slippage:  'needs the order book side of the trade — placed price vs executed price. Reachable from Binance once the orders endpoint is synced (only fills are today).',
+  mae_mfe:   'computed per position from Binance klines on the position page; not backfilled across the whole history, so it cannot be sliced here yet',
 };
 
 // ---------------------------------------------------------------------------------------
