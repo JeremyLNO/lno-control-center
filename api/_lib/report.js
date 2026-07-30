@@ -116,6 +116,75 @@ export async function buildMonthlyPdf(d) {
   y -= 18; at('Funds', 40, 13, bold, navy);
   y -= 6; y = drawFundBars(page, { x: 40, yTop: y, width: 515, funds: d.funds, font, slate, green, red });
 
+  // ------------------------------------------------------------------------------------
+  // Monthly review. Everything above is the account as it stands today; this is the MONTH —
+  // realised performance per fund and per bot, the shape of it day by day, execution
+  // quality, and what went wrong while it ran.
+  // ------------------------------------------------------------------------------------
+  const rv = d.review;
+  if (rv) {
+    let pg = page;
+    const ensure = (need) => {
+      if (y - need > 60) return;
+      pg = doc.addPage([595, 842]);
+      pg.drawText('LNO Trading Systems — Internal Use Only', { x: 40, y: 40, size: 9, font, color: slate });
+      y = 800;
+    };
+    const put = (t, x, size, f, color) => pg.drawText(String(t), { x, y, size, font: f || font, color: color || navy });
+    // Reserve the heading AND room for a few of its lines: a section title stranded at the
+    // bottom of a page with its content overleaf is worse than a slightly emptier page.
+    const heading = (label) => { ensure(80); y -= 24; put(ascii(label), 40, 13, bold, navy); y -= 4;
+      pg.drawLine({ start: { x: 40, y }, end: { x: 555, y }, thickness: 0.5, color: rgb(0.9, 0.9, 0.92) }); };
+    const line = (t, indent = 40, size = 9.5, color = slate) => { ensure(16); y -= 13; put(ascii(t).slice(0, 112), indent, size, font, color); };
+    const cmp = (label, val, sub, color) => { ensure(20); y -= 17;
+      put(ascii(label), 40, 10, font, slate);
+      put(ascii(val), 250, 11, bold, color || navy);
+      if (sub) put(ascii(sub), 370, 9.5, font, slate); };
+
+    const p2 = rv.portfolio;
+    heading('Month in review - ' + rv.monthLabel);
+    y -= 6;
+    cmp('Realised net PnL', fmt(p2.netPnl), p2.vsPrevPct == null ? 'no comparable previous month'
+      : `${p2.vsPrevPct >= 0 ? '+' : ''}${p2.vsPrevPct}% vs last month (${fmt(p2.prevNetPnl)})`,
+      p2.netPnl >= 0 ? green : red);
+    cmp('Trades closed', String(p2.trades), `${p2.prevTrades} last month - ${rv.daysTraded} days traded`);
+    cmp('Win rate', p2.winRate == null ? '-' : p2.winRate + '%', `${rv.greenDays}/${rv.daysTraded} days positive`);
+    cmp('Profit factor', p2.profitFactor == null ? 'n/a' : String(p2.profitFactor), `expectancy ${fmt(p2.expectancy || 0)}/trade`);
+    cmp('Max drawdown', fmt(p2.maxDrawdown), `best trade ${fmt(p2.bestTrade || 0)} - worst ${fmt(p2.worstTrade || 0)}`, red);
+    cmp('Costs', `${fUSD(p2.fees)} fees`, `funding ${fmt(p2.funding)}`);
+    if (rv.bestDay) cmp('Best / worst day', `${rv.bestDay.day} ${fmt(rv.bestDay.pnl)}`,
+      rv.worstDay ? `${rv.worstDay.day} ${fmt(rv.worstDay.pnl)}` : '');
+
+    if (rv.funds.length) {
+      heading('By fund');
+      for (const f of rv.funds) {
+        line(`${f.name.padEnd(18).slice(0, 18)} ${fmt(f.netPnl).padStart(14)}   ${f.trades} trades, win ${f.winRate ?? '-'}%, PF ${f.profitFactor ?? 'n/a'}`,
+          40, 9.5, f.netPnl >= 0 ? green : red);
+      }
+    }
+    if (rv.bots.length) {
+      heading('By bot');
+      for (const b of rv.bots.slice(0, 14)) {
+        const delta = b.changePct == null ? '' : `  (${b.changePct >= 0 ? '+' : ''}${b.changePct}% vs last month)`;
+        line(`${b.symbol.padEnd(12).slice(0, 12)} ${fmt(b.netPnl).padStart(14)}   ${b.trades} trades, win ${b.winRate ?? '-'}%${delta}`,
+          40, 9.5, b.netPnl >= 0 ? green : red);
+      }
+    }
+    // Execution quality carries its own coverage: an average over the trades that happen to
+    // have orders synced is not the same claim as an average over the month.
+    if (rv.execution.slippage != null || rv.execution.avgRMultiple != null) {
+      heading('Execution quality');
+      if (rv.execution.slippage != null) line(`Slippage cost ${fmt(-rv.execution.slippage)} (measured on ${rv.execution.slippageCoverage}% of trades)`);
+      if (rv.execution.avgRMultiple != null) line(`Average R-multiple ${rv.execution.avgRMultiple} (measured on ${rv.execution.rCoverage}% of trades)`);
+    }
+    heading(`Technical incidents (${rv.incidents.length})`);
+    if (!rv.incidents.length) line('None this month.');
+    else for (const i of rv.incidents.slice(0, 10)) line(`[${i.type}] ${i.summary}${i.resolved ? ' (resolved)' : ' (ongoing)'}`, 40, 9.5, i.resolved ? slate : red);
+    heading(`Anomalies detected (${rv.anomalies.length})`);
+    if (!rv.anomalies.length) line('None this month.');
+    else for (const a of rv.anomalies.slice(0, 10)) line(`[${a.severity}] ${a.summary}${a.resolved ? ' (resolved)' : ''}`, 40, 9.5, a.severity === 'critical' ? red : slate);
+  }
+
   page.drawText('LNO Trading Systems — Internal Use Only', { x: 40, y: 40, size: 9, font, color: slate });
   return Buffer.from(await doc.save()).toString('base64');
 }

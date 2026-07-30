@@ -8,6 +8,10 @@ import {
 /* ============================================================
    ADMIN — REPORT ARCHIVE (verification workflow, item 15)
    ============================================================ */
+// The preview window is written to with document.write, so anything interpolated into it
+// must be escaped — these strings are ours, but the habit is what keeps it true later.
+const escapeForWindow=(s: string)=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c] as string));
+
 function AdminReports(){
   const {user,route,t}=useApp();
   const isAdmin=user.role==='admin';
@@ -36,8 +40,13 @@ function AdminReports(){
       w.document.open(); w.document.write(r.html); w.document.close();
       w.document.title=rep.kind+' — '+rep.periodLabel;
     }catch(e){
+      // A report archived before the body was stored has nothing faithful to show. Say that,
+      // rather than rendering an approximation of what recipients supposedly received.
       w.document.open();
-      w.document.write('<body style="margin:0;font-family:sans-serif;padding:32px;color:#DC2626">'+String(e.message||e)+'</body>');
+      w.document.write(`<body style="margin:0;font-family:-apple-system,sans-serif;padding:40px;max-width:520px;color:#0B1F3A">
+        <h2 style="margin:0 0 8px;font-size:17px">${escapeForWindow(t('reports.noPreviewTitle'))}</h2>
+        <p style="color:#64748B;font-size:14px;line-height:1.5">${escapeForWindow(t('reports.noPreviewBody'))}</p>
+      </body>`);
       w.document.close();
     }
   }
@@ -87,7 +96,8 @@ function AdminReports(){
             <td className="px-4 py-2.5 text-right whitespace-nowrap">
               {isAdmin&&r.status!=='verified'&&<Btn size="sm" variant="outline" className="mr-1.5" disabled={verifying===r.id} onClick={()=>verify(r)}><Icon name="check" className="w-3.5 h-3.5"/>{verifying===r.id?'…':t('reports.verify')}</Btn>}
               {isAdmin&&r.status==='verified'&&<Btn size="sm" variant="outline" className="mr-1.5" disabled={verifying===r.id} onClick={()=>unverify(r)}><Icon name="clock" className="w-3.5 h-3.5"/>{verifying===r.id?'…':t('reports.unverify')}</Btn>}
-              {r.hasHtml&&<Btn size="sm" variant="outline" className="mr-1.5" onClick={()=>preview(r)} title={t('reports.previewHint')}><Icon name="eye" className="w-4 h-4"/>HTML</Btn>}
+              <Btn size="sm" variant="outline" className={`mr-1.5${r.hasHtml?'':' opacity-50'}`} onClick={()=>preview(r)}
+                title={t(r.hasHtml?'reports.previewHint':'reports.noPreviewHint')}><Icon name="eye" className="w-4 h-4"/>HTML</Btn>
               <Btn size="sm" variant="outline" className={isAdmin?'mr-1.5':''} disabled={dl===r.id} onClick={()=>download(r)}><Icon name="download" className="w-4 h-4"/>{dl===r.id?'…':'PDF'}</Btn>
               {isAdmin&&<Btn size="sm" variant="outline" onClick={()=>setDel(r)}><Icon name="trash" className="w-3.5 h-3.5"/></Btn>}
             </td>

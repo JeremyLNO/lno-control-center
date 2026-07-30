@@ -21,3 +21,4 @@ export { default as PlaybookPage } from './PlaybookPage';
 export { default as AnomaliesPage } from './AnomaliesPage';
 export { default as CalendarPage } from './CalendarPage';
 export { default as PositionPage } from './PositionPage';
+export { default as GuidePage } from './GuidePage';

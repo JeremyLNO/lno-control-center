@@ -19,13 +19,16 @@ const r2 = (n) => (n == null ? null : Math.round(n * 100) / 100);
 async function tradesBetween(from, to) {
   const { rows } = await query(
     `SELECT exchange, symbol, direction, net_pnl, gross_pnl, commission, funding, closed_at,
-            opened_at, duration_s, strategy_id, qty, entry_price, exit_price, open_trade_id
+            opened_at, duration_s, strategy_id, qty, entry_price, exit_price, open_trade_id,
+            fund_id, slippage, r_multiple
      FROM trades WHERE closed_at >= $1 AND closed_at < $2 ORDER BY closed_at ASC`, [from, to]
   );
   return rows.map(t => ({
     ...t, net_pnl: Number(t.net_pnl), gross_pnl: Number(t.gross_pnl),
     commission: Number(t.commission), funding: Number(t.funding),
     duration_s: t.duration_s == null ? null : Number(t.duration_s),
+    slippage: t.slippage == null ? null : Number(t.slippage),
+    r_multiple: t.r_multiple == null ? null : Number(t.r_multiple),
   }));
 }
 
@@ -133,5 +136,112 @@ export async function buildWeeklyReview({ now = Date.now() } = {}) {
     anomalies: anomalyRows.map(a => ({ code: a.code, scope: a.scope, severity: a.severity, summary: a.summary, detectedAt: a.detected_at, resolved: !!a.resolved_at })),
     incidents: incidentRows.map(i => ({ code: i.code, summary: i.summary, createdAt: i.created_at, resolved: !!i.acked_at })),
     review,
+  };
+}
+
+// ---------------------------------------------------------------------------------------
+// Monthly review
+// ---------------------------------------------------------------------------------------
+// The monthly is the only SHAREHOLDER-facing report, and until now it carried six numbers
+// and two bar charts — an account snapshot, not a month. This assembles what the Control
+// Center actually knows about the period: realised performance per fund and per bot, the
+// shape of the month day by day, execution quality, technical incidents, and the anomalies
+// that were open while it ran.
+//
+// Shares `buildWeeklyReview`'s helpers on purpose: one definition of "compare against the
+// previous period", one of "who contributed", so the two reports cannot disagree.
+const MONTH_MS = 30 * 86400000;
+
+export async function buildMonthlyReview({ now = Date.now() } = {}) {
+  const end = new Date(now);
+  const start = new Date(now - MONTH_MS);
+  const prevStart = new Date(now - 2 * MONTH_MS);
+
+  const [cur, prev] = await Promise.all([tradesBetween(start, end), tradesBetween(prevStart, start)]);
+  const k = computeKpis(cur), kPrev = computeKpis(prev);
+
+  // Per fund: the roll-up shareholders actually read. A trade inherits its bot's fund, and
+  // trades whose bot was never assigned land in their own bucket rather than being dropped —
+  // the parts must always add back up to the whole.
+  const { rows: fundRows } = await query('SELECT id, name, color FROM funds ORDER BY sort ASC, name ASC');
+  const fundOf = new Map(fundRows.map(f => [f.id, f]));
+  const byFund = new Map();
+  for (const t of cur) {
+    const key = t.fund_id && fundOf.has(t.fund_id) ? t.fund_id : '__unassigned';
+    if (!byFund.has(key)) byFund.set(key, []);
+    byFund.get(key).push(t);
+  }
+  const funds = [...byFund.entries()].map(([id, ts]) => {
+    const kk = computeKpis(ts);
+    return {
+      id, name: id === '__unassigned' ? 'Unassigned' : (fundOf.get(id)?.name || id),
+      color: fundOf.get(id)?.color || '#94A3B8',
+      trades: kk.trades, netPnl: r2(kk.netPnl), winRate: r2(kk.winRate),
+      profitFactor: r2(kk.profitFactor), maxDrawdown: r2(kk.maxDrawdown),
+    };
+  }).sort((a, b) => b.netPnl - a.netPnl);
+
+  // Per bot, with its own comparison against the previous month — a bot that halved is the
+  // thing worth seeing, and a bare monthly number cannot show it.
+  const ids = [...new Set([...cur, ...prev].map(t => `${t.exchange}:${t.symbol}`))];
+  const bots = ids.map(id => {
+    const mine = (arr) => arr.filter(t => `${t.exchange}:${t.symbol}` === id);
+    const a = computeKpis(mine(cur)), b = computeKpis(mine(prev));
+    return {
+      id, symbol: id.split(':')[1],
+      trades: a.trades, netPnl: r2(a.netPnl), winRate: r2(a.winRate),
+      profitFactor: r2(a.profitFactor), fees: r2(a.fees), funding: r2(a.funding),
+      avgDurationS: a.avgDurationS == null ? null : Math.round(a.avgDurationS),
+      prevNetPnl: r2(b.netPnl), changePct: r2(changePct(a.netPnl, b.netPnl)),
+    };
+  }).sort((x, y) => y.netPnl - x.netPnl);
+
+  // Day-by-day, so the month has a shape rather than a single figure: how many days were
+  // green, the best and the worst, and whether the result came from one day or thirty.
+  const byDay = new Map();
+  for (const t of cur) {
+    const d = new Date(t.closed_at).toISOString().slice(0, 10);
+    byDay.set(d, (byDay.get(d) || 0) + t.net_pnl);
+  }
+  const days = [...byDay.entries()].map(([day, pnl]) => ({ day, pnl: r2(pnl) })).sort((a, b) => (a.day < b.day ? -1 : 1));
+  const green = days.filter(d => d.pnl > 0).length;
+  const best = days.reduce((m, d) => (!m || d.pnl > m.pnl ? d : m), null);
+  const worst = days.reduce((m, d) => (!m || d.pnl < m.pnl ? d : m), null);
+
+  // Execution quality — only meaningful where orders were synced, so the coverage travels
+  // with the numbers instead of a silent average over whatever happened to be measured.
+  const slipped = cur.filter(t => t.slippage != null);
+  const withR = cur.filter(t => t.r_multiple != null);
+
+  const { rows: incidents } = await query(
+    `SELECT type, code, summary, created_at, acked_at FROM alerts
+     WHERE created_at >= $1 ORDER BY created_at DESC LIMIT 30`, [start]
+  );
+  const { rows: anomalies } = await query(
+    `SELECT code, scope, severity, summary, detected_at, resolved_at FROM anomalies
+     WHERE detected_at >= $1 ORDER BY
+       CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, detected_at DESC LIMIT 20`, [start]
+  );
+
+  return {
+    monthLabel: `${start.toISOString().slice(0, 10)} -> ${new Date(now - 1).toISOString().slice(0, 10)}`,
+    from: start.toISOString(), to: end.toISOString(),
+    portfolio: {
+      trades: k.trades, netPnl: r2(k.netPnl), grossPnl: r2(k.grossPnl), fees: r2(k.fees), funding: r2(k.funding),
+      winRate: r2(k.winRate), profitFactor: r2(k.profitFactor), expectancy: r2(k.expectancy),
+      maxDrawdown: r2(k.maxDrawdown), avgDurationS: k.avgDurationS == null ? null : Math.round(k.avgDurationS),
+      bestTrade: r2(k.bestTrade), worstTrade: r2(k.worstTrade),
+      prevNetPnl: r2(kPrev.netPnl), prevTrades: kPrev.trades, vsPrevPct: r2(changePct(k.netPnl, kPrev.netPnl)),
+    },
+    execution: {
+      slippage: slipped.length ? r2(slipped.reduce((s, t) => s + t.slippage, 0)) : null,
+      slippageCoverage: cur.length ? r2((slipped.length / cur.length) * 100) : null,
+      avgRMultiple: withR.length ? r2(withR.reduce((s, t) => s + t.r_multiple, 0) / withR.length) : null,
+      rCoverage: cur.length ? r2((withR.length / cur.length) * 100) : null,
+    },
+    funds, bots, days,
+    daysTraded: days.length, greenDays: green, bestDay: best, worstDay: worst,
+    incidents: incidents.map(i => ({ type: i.type, code: i.code, summary: i.summary, createdAt: i.created_at, resolved: !!i.acked_at })),
+    anomalies: anomalies.map(a => ({ code: a.code, scope: a.scope, severity: a.severity, summary: a.summary, resolved: !!a.resolved_at })),
   };
 }

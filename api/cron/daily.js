@@ -21,7 +21,7 @@ import { sendDailyReportEmail, sendWeeklyReportEmail, sendVerifyReminderEmail, d
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
 import { runDetection } from '../_lib/anomalies.js';
-import { buildWeeklyReview } from '../_lib/weeklyReport.js';
+import { buildWeeklyReview, buildMonthlyReview } from '../_lib/weeklyReport.js';
 import { backfillExcursions } from '../_lib/tradeDetail.js';
 
 const REPORTS_URL = 'https://cc.lno.company/#/admin/reports?status=not_verified';
@@ -222,7 +222,10 @@ export default async function handler(req, res) {
         sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
         try {
           const monthPositions = port.bots.filter(b => b.status === 'open').map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
-          const monthData = { equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, positions: monthPositions, dateLabel: today, series: eqv.slice(-60) };
+          let monthReview = null;
+          try { monthReview = await buildMonthlyReview(); }
+          catch (e) { sent.push({ type: 'monthly-review', error: String(e.message || e) }); }
+          const monthData = { review: monthReview, equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, positions: monthPositions, dateLabel: today, series: eqv.slice(-60) };
           const b64 = await buildMonthlyPdf(monthData);
           // status stays the column default ('not_verified') — monthly is the shareholder-
           // facing kind, so an admin must verify it (see api/snapshots.js) before shareholders

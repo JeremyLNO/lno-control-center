@@ -301,6 +301,66 @@ export async function sendMentionEmail(to, { authorName, excerpt, link, entityLa
 // existed as a PDF only — so there was nothing to preview and nothing to read without
 // downloading a file. Same visual language and same helpers as the daily and weekly bodies,
 // so all three previews look like one family.
+// Everything above the review in the monthly is the account as it stands today. This is the
+// MONTH: realised performance per fund and per bot, the shape of it day by day, execution
+// quality with its own coverage, and what went wrong while it ran.
+function monthlyReviewHtml(rv) {
+  if (!rv) return '';
+  const p = rv.portfolio;
+  const colorOf = (n) => (n >= 0 ? '#059669' : '#DC2626');
+  const sec = (title, body) => `<div style="margin-top:22px">
+    <div style="font-size:13px;font-weight:700;color:${NAVY};margin-bottom:6px">${escapeHtml(title)}</div>${body}</div>`;
+  const row2 = (label, value, sub, color) => `<tr>
+    <td style="padding:5px 0;color:#64748B;font-size:13px">${escapeHtml(label)}</td>
+    <td style="padding:5px 0;text-align:right;font-family:monospace;font-weight:600;color:${color || NAVY};font-size:13px">${escapeHtml(String(value))}</td>
+    <td style="padding:5px 0 5px 12px;text-align:right;color:#94A3B8;font-size:11.5px">${escapeHtml(sub || '')}</td></tr>`;
+  const bar = (rows, nameKey) => rows.length ? rows.map(r => {
+    const max = Math.max(...rows.map(x => Math.abs(x.netPnl)), 1);
+    const pct = Math.max(2, Math.round((Math.abs(r.netPnl) / max) * 100));
+    const c = colorOf(r.netPnl);
+    return `<div style="margin:9px 0">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px">
+        <span style="color:#334155;font-weight:500">${escapeHtml(r[nameKey])}</span>
+        <span style="font-family:monospace;color:${c};font-weight:600">${fSigned(r.netPnl)}
+          <span style="color:#94A3B8;font-weight:400">(${r.trades} · win ${r.winRate ?? '-'}%)</span></span>
+      </div>
+      <div style="height:6px;background:#F1F3F6;border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${c};border-radius:3px"></div></div>
+    </div>`;
+  }).join('') : '<div style="color:#94A3B8;font-size:13px">None</div>';
+  const list = (items, empty) => items.length
+    ? `<ul style="margin:4px 0;padding-left:18px;color:#334155;font-size:13px">${items.map(i => `<li style="margin:3px 0">${i}</li>`).join('')}</ul>`
+    : `<div style="color:#94A3B8;font-size:13px">${escapeHtml(empty)}</div>`;
+
+  return `
+  <div style="margin-top:26px;padding-top:18px;border-top:2px solid #E7EAF0">
+    <div style="font-size:15px;font-weight:700;color:${NAVY}">Month in review</div>
+    <div style="font-size:12px;color:#64748B;margin-top:2px">${escapeHtml(rv.monthLabel)}</div>
+    <table style="width:100%;border-collapse:collapse;margin-top:12px">
+      ${row2('Realised net PnL', fSigned(p.netPnl),
+        p.vsPrevPct == null ? 'no comparable previous month' : `${p.vsPrevPct >= 0 ? '+' : ''}${p.vsPrevPct}% vs last month`,
+        colorOf(p.netPnl))}
+      ${row2('Trades closed', p.trades, `${rv.daysTraded} days traded, ${rv.greenDays} positive`)}
+      ${row2('Win rate', p.winRate == null ? '—' : p.winRate + '%', p.profitFactor == null ? '' : `PF ${p.profitFactor}`)}
+      ${row2('Expectancy / trade', fSigned(p.expectancy || 0), '', colorOf(p.expectancy || 0))}
+      ${row2('Max drawdown', fSigned(p.maxDrawdown), `best ${fSigned(p.bestTrade || 0)} · worst ${fSigned(p.worstTrade || 0)}`, '#DC2626')}
+      ${row2('Costs', fUSD(p.fees) + ' fees', `funding ${fSigned(p.funding)}`)}
+      ${rv.bestDay ? row2('Best / worst day', `${rv.bestDay.day} ${fSigned(rv.bestDay.pnl)}`,
+        rv.worstDay ? `${rv.worstDay.day} ${fSigned(rv.worstDay.pnl)}` : '') : ''}
+    </table>
+    ${sec('By fund', bar(rv.funds, 'name'))}
+    ${sec('By bot', bar(rv.bots.slice(0, 12), 'symbol'))}
+    ${(rv.execution.slippage != null || rv.execution.avgRMultiple != null) ? sec('Execution quality', list([
+        rv.execution.slippage != null ? `Slippage cost <b>${fSigned(-rv.execution.slippage)}</b> <i style="color:#94A3B8">(measured on ${rv.execution.slippageCoverage}% of trades)</i>` : null,
+        rv.execution.avgRMultiple != null ? `Average R-multiple <b>${rv.execution.avgRMultiple}</b> <i style="color:#94A3B8">(measured on ${rv.execution.rCoverage}% of trades)</i>` : null,
+      ].filter(Boolean), '')) : ''}
+    ${sec(`Technical incidents (${rv.incidents.length})`, list(rv.incidents.slice(0, 8).map(i =>
+      `${escapeHtml(i.summary)}${i.resolved ? ' <i style="color:#94A3B8">(resolved)</i>' : ' <b style="color:#DC2626">(ongoing)</b>'}`), 'None this month'))}
+    ${sec(`Anomalies detected (${rv.anomalies.length})`, list(rv.anomalies.slice(0, 8).map(a =>
+      `<b style="color:${a.severity === 'critical' ? '#DC2626' : '#B45309'}">[${escapeHtml(a.severity)}]</b> ${escapeHtml(a.summary)}${a.resolved ? ' <i style="color:#94A3B8">(resolved)</i>' : ''}`), 'None this month'))}
+  </div>`;
+}
+
 export function monthlyReportHtml(d) {
   const up = (d.pnl30 || 0) >= 0;
   const colorOf = (n) => (n >= 0 ? '#059669' : '#DC2626');
@@ -331,6 +391,7 @@ export function monthlyReportHtml(d) {
         <div style="font-size:13px;font-weight:700;color:${NAVY};margin-bottom:6px">Funds</div>
         ${fundBarsHtml(d.funds)}
       </div>
+      ${monthlyReviewHtml(d.review)}
       <div style="margin-top:20px;font-size:11px;color:#94A3B8">LNO Trading Systems — internal use only</div>
     </div>
   </div>`;
