@@ -10,15 +10,26 @@ import { PERMISSIONS, api, toast, Icon, Card, Btn, useApp, PageHead, Denied, Loa
 const EDITABLE_ROLES = ['operator', 'viewer', 'shareholder'];
 // Purely a presentational grouping (no permission/role logic changes) — organizes the flat
 // PERMISSIONS list into the visual sections the redesign calls for.
-const PERM_GROUPS = [
+const DECLARED_GROUPS = [
   {key:'dashboard', perms:['view_activity']},
   {key:'trading', perms:['view_realtime','view_trades']},
+  {key:'analysis', perms:['manage_strategies','manage_comments']},
   {key:'reports', perms:['view_reports_daily','view_reports_weekly','view_reports_monthly','export_data']},
   {key:'exchanges', perms:['view_exchanges','manage_exchanges']},
   {key:'funds', perms:['manage_funds']},
   {key:'notifications', perms:['manage_whatsapp']},
   {key:'audit', perms:['view_audit']},
 ];
+// Safety net: any permission that exists but was never assigned to a group above still gets
+// rendered, in an "other" section. Grouping is cosmetic, but a permission MISSING from this
+// page is not — it silently becomes ungrantable, which is exactly how manage_strategies and
+// manage_comments shipped invisible. Derived from PERMISSIONS so the two cannot drift again.
+const PERM_GROUPS = (() => {
+  const grouped = new Set(DECLARED_GROUPS.flatMap(g => g.perms));
+  const orphans = PERMISSIONS.map(p => p[0]).filter(p => !grouped.has(p));
+  const groups = DECLARED_GROUPS.filter(g => g.perms.some(p => PERMISSIONS.some(x => x[0] === p)));
+  return orphans.length ? [...groups, {key:'other', perms:orphans}] : groups;
+})();
 // The scheduled reports, and the permission that decides who receives each — the Rules page
 // is the single source of truth for report distribution on every channel (see
 // CONTENT_TYPE_PERM in api/_lib/notify.js), so the effective recipients belong here.

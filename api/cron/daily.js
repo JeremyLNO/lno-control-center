@@ -17,7 +17,7 @@ import { reportText, breachAlertText, dormantAlertText, dailyDigestText, verifyR
 import { syncExchanges } from '../_lib/sync.js';
 import { recordDailyFundSnapshot } from '../_lib/employeeFund.js';
 import { buildMonthlyPdf, buildWeeklyPdf, buildDailyPdf } from '../_lib/report.js';
-import { sendDailyReportEmail, sendWeeklyReportEmail, sendVerifyReminderEmail } from '../_lib/mailer.js';
+import { sendDailyReportEmail, sendWeeklyReportEmail, sendVerifyReminderEmail, dailyReportHtml, weeklyReportHtml, monthlyReportHtml } from '../_lib/mailer.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
 import { runDetection } from '../_lib/anomalies.js';
@@ -160,9 +160,10 @@ export default async function handler(req, res) {
         // role, and a short digest on WhatsApp (admin/operator) — three different formats of
         // the same underlying numbers, matched to what each channel is good at.
         try {
-          const b64 = await buildDailyPdf({ equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today, series: eqv.slice(-14), prevPnl: prevPnl24, prevPct: prevPct24 });
-          await query("INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,status,verified_by,verified_at) VALUES ('daily',$1,$2,$3,$4,'verified','system',now())",
-            [today, Math.round(port.equity), Math.round(pnlDay24), b64]);
+          const reportData = { equity: port.equity, pnlDay: pnlDay24, pctDay: pctDay24, openPnl: port.openPnl, exposure: port.exposure, funds: port.funds, positions: openPositions, incidentCount, dateLabel: today, series: eqv.slice(-14), prevPnl: prevPnl24, prevPct: prevPct24 };
+          const b64 = await buildDailyPdf(reportData);
+          await query("INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,html_body,status,verified_by,verified_at) VALUES ('daily',$1,$2,$3,$4,$5,'verified','system',now())",
+            [today, Math.round(port.equity), Math.round(pnlDay24), b64, dailyReportHtml(reportData)]);
           sent.push({ type: 'daily-pdf', archived: true, bytes: b64.length });
         } catch (e) { sent.push({ type: 'daily-pdf', error: String(e.message || e) }); }
 
@@ -197,8 +198,8 @@ export default async function handler(req, res) {
             series: eqv.slice(-7), review,
           });
           // Auto-verified like the daily: internal-only, no shareholder is waiting on it.
-          await query("INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,status,verified_by,verified_at) VALUES ('weekly',$1,$2,$3,$4,'verified','system',now())",
-            [review ? review.weekLabel : today, Math.round(port.equity), Math.round(pnlOver(7)), b64]);
+          await query("INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,html_body,status,verified_by,verified_at) VALUES ('weekly',$1,$2,$3,$4,$5,'verified','system',now())",
+            [review ? review.weekLabel : today, Math.round(port.equity), Math.round(pnlOver(7)), b64, review ? weeklyReportHtml(review) : null]);
           sent.push({ type: 'weekly-pdf', archived: true, bytes: b64.length });
         } catch (e) { sent.push({ type: 'weekly-pdf', error: String(e.message || e) }); }
 
@@ -220,11 +221,13 @@ export default async function handler(req, res) {
         sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
         try {
           const monthPositions = port.bots.filter(b => b.status === 'open').map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
-          const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, positions: monthPositions, dateLabel: today, series: eqv.slice(-60) });
+          const monthData = { equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, positions: monthPositions, dateLabel: today, series: eqv.slice(-60) };
+          const b64 = await buildMonthlyPdf(monthData);
           // status stays the column default ('not_verified') — monthly is the shareholder-
           // facing kind, so an admin must verify it (see api/snapshots.js) before shareholders
           // are notified; that's what used to happen automatically right here.
-          try { await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64) VALUES ($1,$2,$3,$4,$5)', ['monthly', today, Math.round(port.equity), Math.round(pnl30), b64]); } catch (e) {}
+          try { await query('INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,html_body) VALUES ($1,$2,$3,$4,$5,$6)',
+            ['monthly', today, Math.round(port.equity), Math.round(pnl30), b64, monthlyReportHtml(monthData)]); } catch (e) {}
           sent.push({ type: 'monthly-pdf', archived: true, bytes: b64.length });
         } catch (e) { sent.push({ type: 'monthly-pdf', error: String(e.message || e) }); }
       }

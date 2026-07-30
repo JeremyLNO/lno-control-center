@@ -24,6 +24,23 @@ function AdminReports(){
   useEffect(()=>{ if(canView) load(); },[]);
   if(!canView) return <Denied/>;
   async function generate(){ setBusy(true); try{ await api('snapshots',{method:'POST',body:{action:'generateReport',kind:genKind}}); toast.success(t('reports.generatedArchived')); load(); }catch(e){ toast.error(e.message); } finally{ setBusy(false); } }
+  // Preview opens the stored email body in its own window. The window is opened SYNCHRONOUSLY
+  // on the click and filled once the fetch resolves — opening it inside the promise would be
+  // a pop-up not triggered by a user gesture, which browsers block.
+  async function preview(rep){
+    const w=window.open('','_blank','noopener,width=680,height=900');
+    if(!w){ toast.error(t('reports.popupBlocked')); return; }
+    w.document.write('<title>'+rep.kind+' — '+rep.periodLabel+'</title><body style="margin:0;font-family:sans-serif;color:#64748B;padding:24px">…</body>');
+    try{
+      const r=await api('snapshots?format=html&report='+rep.id);
+      w.document.open(); w.document.write(r.html); w.document.close();
+      w.document.title=rep.kind+' — '+rep.periodLabel;
+    }catch(e){
+      w.document.open();
+      w.document.write('<body style="margin:0;font-family:sans-serif;padding:32px;color:#DC2626">'+String(e.message||e)+'</body>');
+      w.document.close();
+    }
+  }
   async function download(rep){ setDl(rep.id); try{ const r=await api('snapshots?report='+rep.id); downloadBlob(b64ToBlob(r.pdfBase64), r.filename||('lno-report-'+rep.periodLabel+'.pdf')); toast.success(t('reports.downloaded')); }catch(e){ toast.error(e.message); } finally{ setDl(null); } }
   async function verify(rep){ setVerifying(rep.id); try{ await api('snapshots',{method:'POST',body:{action:'verifyReport',id:rep.id}}); toast.success(t('reports.verified')); load(); }catch(e){ toast.error(e.message); } finally{ setVerifying(null); } }
   async function unverify(rep){ setVerifying(rep.id); try{ await api('snapshots',{method:'POST',body:{action:'unverifyReport',id:rep.id}}); toast.success(t('reports.unverified')); load(); }catch(e){ toast.error(e.message); } finally{ setVerifying(null); } }
@@ -70,6 +87,7 @@ function AdminReports(){
             <td className="px-4 py-2.5 text-right whitespace-nowrap">
               {isAdmin&&r.status!=='verified'&&<Btn size="sm" variant="outline" className="mr-1.5" disabled={verifying===r.id} onClick={()=>verify(r)}><Icon name="check" className="w-3.5 h-3.5"/>{verifying===r.id?'…':t('reports.verify')}</Btn>}
               {isAdmin&&r.status==='verified'&&<Btn size="sm" variant="outline" className="mr-1.5" disabled={verifying===r.id} onClick={()=>unverify(r)}><Icon name="clock" className="w-3.5 h-3.5"/>{verifying===r.id?'…':t('reports.unverify')}</Btn>}
+              {r.hasHtml&&<Btn size="sm" variant="outline" className="mr-1.5" onClick={()=>preview(r)} title={t('reports.previewHint')}><Icon name="eye" className="w-4 h-4"/>HTML</Btn>}
               <Btn size="sm" variant="outline" className={isAdmin?'mr-1.5':''} disabled={dl===r.id} onClick={()=>download(r)}><Icon name="download" className="w-4 h-4"/>{dl===r.id?'…':'PDF'}</Btn>
               {isAdmin&&<Btn size="sm" variant="outline" onClick={()=>setDel(r)}><Icon name="trash" className="w-3.5 h-3.5"/></Btn>}
             </td>

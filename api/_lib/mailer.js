@@ -147,7 +147,7 @@ function fundBarsHtml(funds) {
 
 // Full daily report — HTML in the email BODY, not a PDF attachment (item 14 is explicit
 // about this; the PDF still gets archived separately in Reports, see report.js).
-export async function sendDailyReportEmail(to, d) {
+export function dailyReportHtml(d) {
   const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
   const incidentBanner = d.incidentCount
     ? `<div style="margin-top:16px;padding:10px 14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:#DC2626;font-size:13px;font-weight:600">⚠️ ${d.incidentCount} incident${d.incidentCount === 1 ? '' : 's'} in the last 24h</div>`
@@ -179,7 +179,11 @@ export async function sendDailyReportEmail(to, d) {
       <div style="margin-top:24px;font-size:11px;color:#94a3b8">Full detail, including the archived PDF: Control Center ▸ Reports</div>
     </div>
   </div>`;
-  await client().emails.send({ from, to, subject: `📊 LNO Daily Report — ${d.dateLabel}`, html });
+  return html;
+}
+export async function sendDailyReportEmail(to, d) {
+  const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
+  await client().emails.send({ from, to, subject: `📊 LNO Daily Report — ${d.dateLabel}`, html: dailyReportHtml(d) });
 }
 
 // 8am reminder to admins when unverified reports pile up (item 15) — names them + links
@@ -195,7 +199,7 @@ export async function sendVerifyReminderEmail(to, reportNames, link) {
 // analysis of the week that ended: the result read against the previous week and the recent
 // average, who moved it, and what a person has to look at. Sent as HTML in the body, same as
 // the daily one — the PDF is archived separately in Reports.
-export async function sendWeeklyReportEmail(to, rv) {
+export function weeklyReportHtml(rv) {
   const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
   const p = rv.portfolio;
   const up = (p.netPnl || 0) >= 0;
@@ -271,11 +275,12 @@ export async function sendWeeklyReportEmail(to, rv) {
     </div>
   </div>`;
 
-  await client().emails.send({
-    from, to,
-    subject: `Weekly review — ${fSigned(p.netPnl)} (${rv.weekLabel})`,
-    html,
-  });
+  return html;
+}
+export async function sendWeeklyReportEmail(to, rv) {
+  const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
+  const p = rv.portfolio;
+  await client().emails.send({ from, to, subject: `Weekly review — ${fSigned(p.netPnl)} (${rv.weekLabel})`, html: weeklyReportHtml(rv) });
 }
 
 // "X mentioned you" — the notification that makes @handles worth writing. Deliberately short:
@@ -290,4 +295,43 @@ export async function sendMentionEmail(to, { authorName, excerpt, link, entityLa
      <a href="${link}" style="display:inline-block;margin-top:12px;color:${GOLD};font-weight:600;font-size:13px">Open the comment →</a>`
   );
   await client().emails.send({ from, to, subject: `${authorName || 'Someone'} mentioned you in LNO Control Center`, html });
+}
+
+// Monthly report body. The monthly is the only shareholder-facing kind, and until now it
+// existed as a PDF only — so there was nothing to preview and nothing to read without
+// downloading a file. Same visual language and same helpers as the daily and weekly bodies,
+// so all three previews look like one family.
+export function monthlyReportHtml(d) {
+  const up = (d.pnl30 || 0) >= 0;
+  const colorOf = (n) => (n >= 0 ? '#059669' : '#DC2626');
+  const stat = (label, value, color) => `<tr>
+    <td style="padding:6px 0;color:#64748B;font-size:13px">${escapeHtml(label)}</td>
+    <td style="padding:6px 0;text-align:right;font-family:monospace;font-weight:600;color:${color || NAVY};font-size:13px">${escapeHtml(String(value))}</td></tr>`;
+  return `<div style="background:#F8F7F4;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+    <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px">
+      <img src="https://cc.lno.company/logo.svg" alt="LNO Control Center" width="100" style="height:auto;display:block;margin:0 0 8px"/>
+      <div style="font-size:18px;font-weight:700;color:${NAVY}">Monthly Report — ${escapeHtml(d.dateLabel || '')}</div>
+      <div style="margin-top:18px;padding:20px;background:#F8F7F4;border-radius:10px;text-align:center">
+        <div style="font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:.04em">PnL — 30 days</div>
+        <div style="font-size:30px;font-weight:800;color:${colorOf(d.pnl30 || 0)};font-family:monospace;margin-top:2px">${fSigned(d.pnl30 || 0)}</div>
+      </div>
+      ${sparklineSvg(d.series, up)}
+      <table style="width:100%;border-collapse:collapse;margin-top:14px">
+        ${stat('Account equity', fUSD(d.equity || 0))}
+        ${stat('Open PnL', fSigned(d.openPnl || 0), colorOf(d.openPnl || 0))}
+        ${stat('Exposure (notional)', fUSD(d.exposure || 0))}
+        ${stat('Max drawdown', `${(d.maxDrawdownPct || 0).toFixed(1)}% over ${d.ddDurationDays || 0} days`, '#DC2626')}
+        ${stat('Sharpe / Sortino', `${(d.sharpe || 0).toFixed(2)} / ${(d.sortino || 0).toFixed(2)}`)}
+      </table>
+      <div style="margin-top:22px">
+        <div style="font-size:13px;font-weight:700;color:${NAVY};margin-bottom:6px">By bot</div>
+        ${botBarsHtml(d.positions)}
+      </div>
+      <div style="margin-top:22px">
+        <div style="font-size:13px;font-weight:700;color:${NAVY};margin-bottom:6px">Funds</div>
+        ${fundBarsHtml(d.funds)}
+      </div>
+      <div style="margin-top:20px;font-size:11px;color:#94A3B8">LNO Trading Systems — internal use only</div>
+    </div>
+  </div>`;
 }

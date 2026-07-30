@@ -1050,29 +1050,33 @@ const MAIN_NAV=[
   ['briefcase','nav.positions','/trades','nav.positions','view_trades'],
   ['trendup','nav.prices','/prices','nav.prices','view_activity'],
 ];
+// Tools = the analytical surfaces. Everything that CONFIGURES the desk (connections, funds,
+// report distribution, accounts) moved to Administration, so this section is now purely
+// "things you read".
 const TOOLS_NAV: Array<[string,string,string,string,string|string[]]>=[
   ['activity','nav.analysis','/analysis','nav.analysis','view_trades'],
   ['clock','nav.calendar','/calendar','nav.calendar','view_trades'],
   ['shield','nav.playbook','/playbook','nav.playbook','view_trades'],
   ['triangle','nav.anomalies','/anomalies','nav.anomalies','view_trades'],
-  ['layers','nav.funds','/funds','nav.funds','view_trades'],
-  ['link','nav.exchanges','/admin/exchanges','nav.exchanges','view_exchanges'],
   ['database','nav.status','/status','nav.status.short','view_activity'],
-  ['filetext','nav.reports','/admin/reports','nav.reports',['view_reports_daily','view_reports_weekly','view_reports_monthly']],
-];
-const ADMIN_NAV=[
-  ['list','nav.bots','/admin/bots'],
-  ['users','nav.users','/admin/users'],
-  ['shield','nav.rules','/admin/rules'],
-  ['dollar','nav.employeeFund','/admin/employee-fund'],
-];
-// Entries under the "Administration" heading that a non-admin can also reach, if granted the
-// matching manage_* permission — unlike ADMIN_NAV above, which stays strictly role==='admin'
-// (user/role management is a privilege-escalation surface, kept admin-only by design).
-const MANAGE_NAV: Array<[string,string,string,string,string]>=[
-  ['msg','nav.whatsapp','/admin/openwa','nav.whatsapp','manage_whatsapp'],
   ['filetext','nav.audit','/admin/audit','nav.audit','view_audit'],
 ];
+// Administration, in one ordered list. A null permission means role==='admin' ONLY — user and
+// role management is a privilege-escalation surface and stays that way. Previously this was
+// split across two arrays (admin-only vs permission-gated), which made the rendered ORDER a
+// side effect of which array an entry happened to live in rather than a deliberate choice.
+const ADMIN_NAV: Array<[string,string,string,string,string|string[]|null]>=[
+  ['link','nav.exchanges','/admin/exchanges','nav.exchanges','view_exchanges'],
+  ['layers','nav.funds','/funds','nav.funds','view_trades'],
+  ['filetext','nav.reports','/admin/reports','nav.reports',['view_reports_daily','view_reports_weekly','view_reports_monthly']],
+  ['list','nav.bots','/admin/bots','nav.bots',null],
+  ['users','nav.users','/admin/users','nav.users',null],
+  ['shield','nav.rules','/admin/rules','nav.rules',null],
+  ['dollar','nav.employeeFund','/admin/employee-fund','nav.employeeFund',null],
+  ['msg','nav.whatsapp','/admin/openwa','nav.whatsapp','manage_whatsapp'],
+];
+// A null perm = admin only; anything else defers to hasPerm.
+const navVisible=(user,perm)=> perm===null||perm===undefined ? user.role==='admin' : hasPerm(user,perm);
 const ACCT_NAV=[
   ['usercircle','nav.profile','/profile'],
   ['lifebuoy','nav.support','/support'],
@@ -1081,11 +1085,45 @@ const ACCT_NAV=[
 // external investors, not staff, so they don't see this.
 const MY_EQUITY_NAV=['dollar','nav.myEquity','/equity'];
 
-function NavItem({icon,label,path,active,onClick,collapsed}: any){
-  return <button onClick={onClick} title={collapsed?label:undefined}
-    className={`w-full flex items-center gap-3 rounded-lg text-sm transition ${collapsed?'justify-center px-0 py-2':'px-3 py-2'} ${active?'bg-gold text-navy font-semibold':'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
-    <Icon name={icon} className="w-[18px] h-[18px] shrink-0"/>{!collapsed&&label}
-  </button>;
+function NavItem({icon,label,path,active,onClick,collapsed,starred,onStar,drag}: any){
+  // The star is a real button nested next to the nav button rather than inside it: a button
+  // inside a button is invalid HTML and swallows the inner click in some browsers.
+  return <div className={`group relative flex items-center rounded-lg ${active?'bg-gold':'hover:bg-white/5'}`}
+    draggable={!!drag} onDragStart={drag?.onDragStart} onDragOver={drag?.onDragOver} onDrop={drag?.onDrop} onDragEnd={drag?.onDragEnd}>
+    {drag&&!collapsed&&<Icon name="menu" className="w-3 h-3 ml-1.5 -mr-1 text-slate-500 shrink-0 cursor-grab"/>}
+    <button onClick={onClick} title={collapsed?label:undefined}
+      className={`flex-1 min-w-0 flex items-center gap-3 rounded-lg text-sm transition ${collapsed?'justify-center px-0 py-2':'px-3 py-2'} ${active?'text-navy font-semibold':'text-slate-300 group-hover:text-white'}`}>
+      <Icon name={icon} className="w-[18px] h-[18px] shrink-0"/>{!collapsed&&<span className="truncate text-left">{label}</span>}
+    </button>
+    {/* No room for a star in the 64px rail, and nothing to hover on a touch device either. */}
+    {onStar&&!collapsed&&<button onClick={e=>{e.stopPropagation();onStar(path);}}
+      title={starred?'★':'☆'}
+      className={`px-1.5 py-2 shrink-0 transition ${starred?'text-gold opacity-100':'text-slate-500 opacity-0 group-hover:opacity-100 hover:text-gold'} ${active&&starred?'text-navy':''}`}>
+      <Icon name="star" className="w-3.5 h-3.5"/>
+    </button>}
+  </div>;
+}
+
+// Favourites + per-section collapse, both persisted. Favourites store PATHS, not indices:
+// reordering the nav arrays, or a page moving between sections, must not silently repoint
+// someone's shortcut at a different page.
+const FAV_KEY='nav_favorites', SECT_KEY='nav_sections_collapsed';
+function useNavPrefs(){
+  const [favs,setFavs]=useState<string[]>(()=>PREF.get(FAV_KEY,[]));
+  const [closed,setClosed]=useState<Record<string,boolean>>(()=>PREF.get(SECT_KEY,{}));
+  const toggleFav=useCallback((path)=>setFavs(cur=>{
+    const next=cur.includes(path)?cur.filter(p=>p!==path):[...cur,path];
+    PREF.set(FAV_KEY,next); return next;
+  }),[]);
+  const toggleSection=useCallback((key)=>setClosed(cur=>{
+    const next={...cur,[key]:!cur[key]}; PREF.set(SECT_KEY,next); return next;
+  }),[]);
+  const reorder=useCallback((from,to)=>setFavs(cur=>{
+    if(from===to||from<0||to<0||from>=cur.length||to>=cur.length) return cur;
+    const next=[...cur]; const [moved]=next.splice(from,1); next.splice(to,0,moved);
+    PREF.set(FAV_KEY,next); return next;
+  }),[]);
+  return {favs,closed,toggleFav,toggleSection,reorder};
 }
 // Language switcher — 4 codes, active one highlighted. Shown at the very bottom of the
 // sidebar (desktop) and in the mobile "More" sheet. Persists via useApp().setLang (local
@@ -1100,31 +1138,81 @@ function LangSwitcher({className=''}: any){
     </button>)}
   </div>;
 }
+// A section header: a button when expanded, an inert dash in the 64px rail where there is no
+// label to click. Module-scope, NOT nested in Sidebar — see the note at its call site.
+function NavSection({k,label,collapsed,closed,onToggle}: any){
+  const cls=`text-[10px] uppercase tracking-wider text-slate-500 pt-4 pb-1 ${collapsed?'text-center px-0':'px-3'}`;
+  if(collapsed) return <div className={cls}>—</div>;
+  return <button onClick={()=>onToggle(k)} className={`${cls} w-full flex items-center justify-between hover:text-slate-300 transition`}>
+    <span>{label}</span>
+    <Icon name={closed[k]?'chevright':'chevdown'} className="w-3 h-3 opacity-60"/>
+  </button>;
+}
+
 function Sidebar(){
   const {route,navigate,user,t}=useApp();
   const [collapsed,setCollapsed]=useState<boolean>(()=>PREF.get('sidebar_collapsed',false));
+  const {favs,closed,toggleFav,toggleSection,reorder}=useNavPrefs();
+  const dragFrom=useRef<number>(-1);
   const toggle=()=>{ setCollapsed(c=>{ const n=!c; PREF.set('sidebar_collapsed',n); return n; }); };
   const cur='/'+route.parts.join('/');
   const isAct=(p)=> cur===p || cur.startsWith(p+'/');
-  const sectionCls=`text-[10px] uppercase tracking-wider text-slate-500 pt-4 pb-1 ${collapsed?'text-center px-0':'px-3'}`;
+
+  // Every entry the user can actually reach, indexed by path. Favourites resolve through this,
+  // so a shortcut to a page the user has since lost access to simply stops being rendered
+  // rather than becoming a dead link.
+  const reachable=useMemo(()=>{
+    const out=new Map<string,any>();
+    const add=(rows,gate)=>rows.forEach(r=>{ if(gate(r[4])) out.set(r[2],{icon:r[0],labelKey:r[1],path:r[2]}); });
+    add(MAIN_NAV,perm=>hasPerm(user,perm));
+    add(TOOLS_NAV,perm=>hasPerm(user,perm));
+    add(ADMIN_NAV,perm=>navVisible(user,perm));
+    if(user.role!=='shareholder') out.set(MY_EQUITY_NAV[2],{icon:MY_EQUITY_NAV[0],labelKey:MY_EQUITY_NAV[1],path:MY_EQUITY_NAV[2]});
+    ACCT_NAV.forEach(r=>out.set(r[2],{icon:r[0],labelKey:r[1],path:r[2]}));
+    return out;
+  },[user]);
+  const favItems=favs.map(p=>reachable.get(p)).filter(Boolean);
+
+  const Section=(props)=><NavSection {...props} collapsed={collapsed} closed={closed} onToggle={toggleSection}/>;
+
+  const item=(r,extra={})=>{
+    const [i,l,p]=Array.isArray(r)?r:[r.icon,r.labelKey,r.path];
+    return <NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)}
+      collapsed={collapsed} starred={favs.includes(p)} onStar={toggleFav} {...extra}/>;
+  };
+
   return <aside className={`hidden lg:flex flex-col shrink-0 bg-navy text-white h-full transition-[width] duration-150 ${collapsed?'w-16':'w-60'}`}>
     <div className={`py-5 flex items-center gap-2 ${collapsed?'justify-center px-0':'px-5'}`}>
       <Logo className="h-6 text-white shrink-0"/>
       {!collapsed&&<div className="text-[10px] text-slate-400 leading-tight mt-1.5">Control<br/>Center</div>}
     </div>
     <nav className={`flex-1 overflow-y-auto space-y-1 ${collapsed?'px-2':'px-3'}`}>
-      <div className={sectionCls.replace('pt-4','pt-2')}>{collapsed?'—':t('nav.section.main')}</div>
-      {MAIN_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
-      <div className={sectionCls}>{collapsed?'—':t('nav.section.tools')}</div>
-      {TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
-      {(user.role==='admin'||MANAGE_NAV.some(([,,,,perm])=>hasPerm(user,perm)))&&<>
-        <div className={sectionCls}>{collapsed?'—':t('nav.section.admin')}</div>
-        {user.role==='admin'&&ADMIN_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
-        {MANAGE_NAV.filter(([,,,,perm])=>hasPerm(user,perm)).map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
+      {favItems.length>0&&<>
+        <Section k="fav" label={t('nav.section.favorites')}/>
+        {!closed.fav&&favItems.map((r,idx)=>item(r,{drag:{
+          onDragStart:()=>{ dragFrom.current=idx; },
+          onDragOver:(e)=>e.preventDefault(),
+          onDrop:(e)=>{ e.preventDefault(); reorder(dragFrom.current,idx); dragFrom.current=-1; },
+          onDragEnd:()=>{ dragFrom.current=-1; },
+        }}))}
       </>}
-      <div className={sectionCls}>{collapsed?'—':t('nav.section.account')}</div>
-      {user.role!=='shareholder'&&<NavItem icon={MY_EQUITY_NAV[0]} label={t(MY_EQUITY_NAV[1])} path={MY_EQUITY_NAV[2]} active={isAct(MY_EQUITY_NAV[2])} onClick={()=>navigate(MY_EQUITY_NAV[2])} collapsed={collapsed}/>}
-      {ACCT_NAV.map(([i,l,p])=><NavItem key={p} icon={i} label={t(l)} path={p} active={isAct(p)} onClick={()=>navigate(p)} collapsed={collapsed}/>)}
+
+      <Section k="main" label={t('nav.section.main')}/>
+      {!closed.main&&MAIN_NAV.filter(([,,,,perm])=>hasPerm(user,perm)).map(r=>item(r))}
+
+      <Section k="tools" label={t('nav.section.tools')}/>
+      {!closed.tools&&TOOLS_NAV.filter(([,,,,perm])=>hasPerm(user,perm)).map(r=>item(r))}
+
+      {ADMIN_NAV.some(([,,,,perm])=>navVisible(user,perm))&&<>
+        <Section k="admin" label={t('nav.section.admin')}/>
+        {!closed.admin&&ADMIN_NAV.filter(([,,,,perm])=>navVisible(user,perm)).map(r=>item(r))}
+      </>}
+
+      <Section k="account" label={t('nav.section.account')}/>
+      {!closed.account&&<>
+        {user.role!=='shareholder'&&item(MY_EQUITY_NAV)}
+        {ACCT_NAV.map(r=>item(r))}
+      </>}
     </nav>
     <div className="p-3 border-t border-white/10">
       {!collapsed&&<LangSwitcher className="px-2 mb-2"/>}
@@ -1152,7 +1240,7 @@ function GlobalSearch(){
   const pages=useMemo(()=>{
     const all=[...MAIN_NAV,...TOOLS_NAV].filter(([i,l,p,s,perm])=>hasPerm(user,perm)).map(([i,l,p])=>({icon:i,key:l,path:p}));
     if(user&&user.role==='admin') all.push(...ADMIN_NAV.map(([i,l,p])=>({icon:i,key:l,path:p})));
-    all.push(...MANAGE_NAV.filter(([,,,,perm])=>hasPerm(user,perm)).map(([i,l,p])=>({icon:i,key:l,path:p})));
+    all.push(...ADMIN_NAV.filter(([,,,,perm])=>navVisible(user,perm)).map(([i,l,p])=>({icon:i,key:l,path:p})));
     if(user&&user.role!=='shareholder') all.push({icon:MY_EQUITY_NAV[0],key:MY_EQUITY_NAV[1],path:MY_EQUITY_NAV[2]});
     all.push(...ACCT_NAV.map(([i,l,p])=>({icon:i,key:l,path:p})));
     return all;
@@ -1290,7 +1378,7 @@ function MobileNav(){
       <button onClick={()=>setMore(!more)} className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] text-slate-500"><Icon name="menu" className="w-5 h-5"/>{t('common.more')}</button>
     </nav>
     {more&&<div className="lg:hidden fixed inset-0 z-40" onClick={()=>setMore(false)}><div className="absolute bottom-14 inset-x-3 bg-white rounded-xl shadow-xl border border-slate-200 p-2" onClick={e=>e.stopPropagation()}>
-      {[...TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)),...(user.role==='admin'?ADMIN_NAV:[]),...MANAGE_NAV.filter(([,,,,perm])=>hasPerm(user,perm)),...(user.role!=='shareholder'?[MY_EQUITY_NAV]:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{t(l)}</button>)}
+      {[...TOOLS_NAV.filter(([i,l,p,s,perm])=>hasPerm(user,perm)),...ADMIN_NAV.filter(([,,,,perm])=>navVisible(user,perm)),...(user.role!=='shareholder'?[MY_EQUITY_NAV]:[]),...ACCT_NAV].map(([i,l,p])=><button key={p} onClick={()=>{navigate(p);setMore(false);}} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm"><Icon name={i} className="w-4 h-4"/>{t(l)}</button>)}
       <div className="border-t border-slate-100 mt-1 pt-2 px-1"><LangSwitcher/></div>
     </div></div>}
   </>;
@@ -1764,7 +1852,7 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AvatarPickerModal, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, StatusStrip, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk,
+  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AvatarPickerModal, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, StatusStrip, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, navVisible, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk,
   useAnalysisFilters, AnalysisFilterBar, MultiSelect, filtersToQuery, DOW_KEYS,
   CommentThread, IncidentReview, useDirectory, MentionInput
 };

@@ -398,6 +398,10 @@ export async function migrate() {
   await ddl(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'not_verified'`);
   await ddl(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS verified_by TEXT`);
   await ddl(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ`);
+  // The HTML that was emailed for this report, kept so the Reports page can preview exactly
+  // what recipients received rather than re-rendering an approximation of it. NULL on reports
+  // archived before this existed — the UI offers the PDF only in that case.
+  await ddl(`ALTER TABLE reports ADD COLUMN IF NOT EXISTS html_body TEXT`);
   // One-time backfill: reports created before this feature shipped were already sent to
   // shareholders (the old auto-notify-on-generate behavior) — mark them verified rather
   // than surfacing years of history as "to verify". Date-gated so it's idempotent without

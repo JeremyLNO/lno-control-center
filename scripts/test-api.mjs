@@ -743,8 +743,19 @@ sentMessages.length = 0;
 r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'weekly' } });
 ok('the weekly cron archives a weekly PDF', r.body.sent.some(s => s.type === 'weekly-pdf' && s.archived && s.bytes > 0), r.body.sent.filter(s => String(s.type).startsWith('weekly')));
 ok('the weekly cron emails the review', r.body.sent.some(s => s.type === 'weekly-email' && s.recipients > 0), r.body.sent.filter(s => String(s.type).startsWith('weekly')));
-const wkRow = (await db.query("SELECT kind,status FROM reports WHERE kind='weekly' ORDER BY created_at DESC LIMIT 1")).rows[0];
-ok('the archived weekly report is auto-verified (internal-only)', wkRow && wkRow.status === 'verified', wkRow);
+const wkRow = (await db.query("SELECT id,kind,status,html_body FROM reports WHERE kind='weekly' ORDER BY created_at DESC LIMIT 1")).rows[0];
+ok('the archived weekly report is auto-verified (internal-only)', wkRow && wkRow.status === 'verified', wkRow && wkRow.status);
+// The HTML preview must be the EXACT body that was emailed, so it is stored at generation
+// rather than re-rendered on demand from the same numbers (which could drift).
+ok('the archived report stores the emailed HTML body', !!wkRow.html_body && wkRow.html_body.includes('Weekly Review'), wkRow.html_body?.slice(0, 60));
+r = await call(snapshots, { method: 'GET', headers: authH, query: { report: String(wkRow.id), format: 'html' } });
+ok('a report can be previewed as HTML', r.status === 200 && r.body.html === wkRow.html_body, r.status);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { reports: 'list' } });
+ok('the list flags which reports have a preview', r.body.reports.find(x => x.id === Number(wkRow.id))?.hasHtml === true, r.body.reports.slice(0, 2));
+// A report archived before this feature has no body; saying so beats fabricating one.
+await db.query('UPDATE reports SET html_body=NULL WHERE id=$1', [wkRow.id]);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { report: String(wkRow.id), format: 'html' } });
+ok('a report with no stored body reports that, rather than inventing a preview', r.status === 404, r.status);
 await db.query("DELETE FROM trades WHERE symbol LIKE 'WK%'");
 
 // ---------------------------------------------------------------------------------------

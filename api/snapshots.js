@@ -20,7 +20,7 @@ import { buildReportData, buildDailyReportData } from './_lib/portfolio.js';
 import { buildMonthlyPdf, buildWeeklyPdf, buildDailyPdf } from './_lib/report.js';
 import { notify, REPORT_AVAILABLE, getOpenWAConfig, getApiKey, sendTextMeBot } from './_lib/notify.js';
 import { dailyDigestText } from './_lib/notifyText.js';
-import { sendDailyReportEmail } from './_lib/mailer.js';
+import { sendDailyReportEmail, dailyReportHtml } from './_lib/mailer.js';
 import { permsForRole } from './_lib/rolePerms.js';
 import { DIMENSIONS, UNAVAILABLE, GRANULARITIES, fetchTrades, groupBy, bucketByPeriod } from './_lib/analytics.js';
 import { getTradeDetail } from './_lib/tradeDetail.js';
@@ -130,19 +130,28 @@ export default async function handler(req, res) {
       }
 
       if (req.query?.reports === 'list') {
-        const { rows } = await query('SELECT id,kind,period_label,equity,pnl,status,verified_by,verified_at,created_at FROM reports ORDER BY created_at DESC LIMIT 200');
+        const { rows } = await query('SELECT id,kind,period_label,equity,pnl,status,verified_by,verified_at,created_at,(html_body IS NOT NULL) AS has_html FROM reports ORDER BY created_at DESC LIMIT 200');
         const rolePerms = isAdmin ? null : await permsForRole(a.role);
         const allowed = rows.filter(r => isAdmin || rolePerms.includes('view_reports_' + r.kind));
         return res.status(200).json({ reports: allowed.map(r => ({
           id: Number(r.id), kind: r.kind, periodLabel: r.period_label,
           equity: Number(r.equity), pnl: Number(r.pnl), createdAt: r.created_at,
           status: r.status || 'verified', verifiedBy: r.verified_by || null, verifiedAt: r.verified_at || null,
+          hasHtml: !!r.has_html,
         })) });
       }
       if (req.query?.report) {
-        const { rows } = await query('SELECT pdf_base64,period_label,kind FROM reports WHERE id=$1', [req.query.report]);
+        const { rows } = await query('SELECT pdf_base64,html_body,period_label,kind FROM reports WHERE id=$1', [req.query.report]);
         if (!rows.length) return res.status(404).json({ error: 'report not found' });
         if (!(await canSeeKind(rows[0].kind))) return res.status(403).json({ error: 'forbidden' });
+        // ?format=html previews the EXACT body that was emailed, rather than a second
+        // rendering of the same numbers that could drift from what recipients received.
+        // Reports archived before this was stored have no body — say so instead of
+        // fabricating one.
+        if (req.query.format === 'html') {
+          if (!rows[0].html_body) return res.status(404).json({ error: 'no html preview stored for this report' });
+          return res.status(200).json({ html: rows[0].html_body, kind: rows[0].kind, periodLabel: rows[0].period_label });
+        }
         return res.status(200).json({ pdfBase64: rows[0].pdf_base64, filename: `lno-${rows[0].kind}-report-${rows[0].period_label}.pdf` });
       }
 
