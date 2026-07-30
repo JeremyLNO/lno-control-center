@@ -130,7 +130,12 @@ export default async function handler(req, res) {
       const pnlOver = (d) => eqv.length ? eqv[eqv.length - 1] - eqv[Math.max(0, eqv.length - 1 - d)] : 0;
       const pctOver = (d) => { const base = eqv[Math.max(0, eqv.length - 1 - d)] || 0; return base ? (pnlOver(d) / base) * 100 : 0; };
 
-      if ((cfg.dailyReport ?? true) && cfg.enabled) {
+      // cfg.dailyReport = "produce the daily report at all" (PDF + email + WhatsApp digest).
+      // cfg.enabled is the WhatsApp *transport* master switch and is deliberately NOT tested
+      // here: notify() self-gates on it (api/_lib/notify.js), so turning WhatsApp off silences
+      // only the WhatsApp channel and still archives the PDF and sends the email. Same reason
+      // the weekly/monthly blocks below don't test it either.
+      if (cfg.dailyReport ?? true) {
         // pnlOver(1)/pctOver(1), NOT port.pnlDay/pnlPct: the latter compares against
         // whatever equity_snapshots row is "most recent," but that row gets continuously
         // overwritten intraday by the every-5-minute alerts-only cron — so port.pnlDay can
@@ -173,12 +178,12 @@ export default async function handler(req, res) {
       }
       const force = req.query?.force;
       const dt = new Date();
-      if (cfg.enabled && (dt.getUTCDay() === 1 || force === 'weekly' || force === 'all')) {
+      if (dt.getUTCDay() === 1 || force === 'weekly' || force === 'all') {
         sent.push({ type: 'weekly', ...(await notify((lang) => reportText(lang, 'weekly', port, { pnl: pnlOver(7), pct: pctOver(7), labelKey: 'period7d' }), { type: 'weekly' })) });
       }
       if (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all') {
         const pnl30 = pnlOver(30);
-        if (cfg.enabled) sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
+        sent.push({ type: 'monthly', ...(await notify((lang) => reportText(lang, 'monthly', port, { pnl: pnl30, pct: pctOver(30), labelKey: 'period30d' }), { type: 'monthly' })) });
         try {
           const monthPositions = port.bots.filter(b => b.status === 'open').map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
           const b64 = await buildMonthlyPdf({ equity: port.equity, pnl30, openPnl: port.openPnl, exposure: port.exposure, maxDrawdownPct: m.maxDrawdownPct, ddDurationDays: m.ddDurationDays, sharpe: m.sharpe, sortino: m.sortino, funds: port.funds, positions: monthPositions, dateLabel: today, series: eqv.slice(-60) });

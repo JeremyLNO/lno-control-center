@@ -235,6 +235,23 @@ const { buildMonthlyPdf } = await import('../api/_lib/report.js');
 const pdfB64 = await buildMonthlyPdf({ equity: 1e6, pnl30: 5000, openPnl: 1200, exposure: 8e5, maxDrawdownPct: -8, ddDurationDays: 12, sharpe: 1.2, sortino: 1.5, funds: [{ name: 'Core', color: '#10B981', uPnl: 1200, notional: 8e5, bots: [{}] }], dateLabel: '2026-06-15' });
 ok('buildMonthlyPdf produces a valid %PDF', Buffer.from(pdfB64, 'base64').slice(0, 5).toString() === '%PDF-', pdfB64.slice(0, 8));
 
+// The WhatsApp master switch is a *transport* switch, not a report switch: turning it off
+// must still archive the daily PDF and email the report (they don't travel over WhatsApp).
+// This used to be coupled — `enabled:false` silently killed the daily email too.
+sentMessages.length = 0;
+await call(openwa, { method: 'PUT', headers: authH, body: { enabled: false } });
+r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'all' } });
+const offPdf = r.body.sent.find(s => s.type === 'daily-pdf');
+const offMail = r.body.sent.find(s => s.type === 'daily-email');
+ok('WhatsApp off: daily PDF still archived', !!offPdf && !offPdf.error && offPdf.bytes > 0, offPdf);
+ok('WhatsApp off: daily email still sent', !!offMail && !offMail.error && offMail.recipients > 0, offMail);
+ok('WhatsApp off: monthly PDF still archived', r.body.sent.some(s => s.type === 'monthly-pdf' && !s.error), r.body.sent.map(s => s.type));
+ok('WhatsApp off: no WhatsApp message actually leaves', sentMessages.length === 0, sentMessages.length);
+ok('WhatsApp off: report/weekly/monthly report skipped as disabled',
+  ['report', 'weekly', 'monthly'].every(t => r.body.sent.find(s => s.type === t)?.skipped === 'disabled'),
+  r.body.sent.filter(s => ['report', 'weekly', 'monthly'].includes(s.type)));
+await call(openwa, { method: 'PUT', headers: authH, body: { enabled: true } });
+
 // ?mode=alerts (the frequent GitHub Actions trigger — see .github/workflows/alert-check.yml):
 // still catches the same breach, but must NEVER send the daily/weekly/monthly reports — even
 // with force=all — since a report re-send every ~10 minutes would spam recipients all day.
