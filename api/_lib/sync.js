@@ -11,6 +11,7 @@ import { apiErrorText } from './notifyText.js';
 import { sendApiErrorEmail } from './mailer.js';
 import { rebuildTrades } from './trades.js';
 import { attributeTrades } from './strategies.js';
+import { syncOrders, attachOrderMetrics } from './orders.js';
 
 const INCOME_TYPES = new Set(['REALIZED_PNL', 'FUNDING_FEE', 'COMMISSION']);
 
@@ -129,13 +130,23 @@ export async function syncExchanges() {
         } catch (e) { /* best-effort per symbol — one bad symbol shouldn't drop the rest */ }
       }));
     } catch (e) { /* best-effort — a failed fills fetch shouldn't break the position sync */ }
+
+    // Orders, over the same symbol scope. A fill says what executed; an order says what was
+    // asked for — which is the only source for slippage, cancellations and the resting stop's
+    // risk. Separate try: a key without order-read permission must not cost us the fills.
+    try {
+      const recentlyClosed = (await query(
+        "SELECT DISTINCT symbol FROM bots WHERE exchange='binance' AND status='closed' AND last_seen > now() - interval '1 day'"
+      )).rows.map(r => r.symbol);
+      await syncOrders({ apiKey: ex.api_key, secret, symbols: [...new Set([...pos.map(p => p.symbol), ...recentlyClosed])] });
+    } catch (e) { /* best-effort — orders are enrichment, not the backbone */ }
   }
 
   // Fold the (possibly newly extended) fill stream into round-trip trades — the dataset every
   // analytics surface reads. Runs after the fills loop above so a position that just closed is
   // materialised as a completed trade in the same pass. Incremental and idempotent; best-effort
   // because a reconstruction failure must not cost us the position sync itself.
-  try { await rebuildTrades(); await attributeTrades(); }
+  try { await rebuildTrades(); await attributeTrades(); await attachOrderMetrics(); }
   catch (e) { /* best-effort — analytics can be rebuilt on the next sync */ }
 
   // any previously-open Binance bot no longer reported is now flat

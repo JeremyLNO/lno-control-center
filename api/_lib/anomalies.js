@@ -29,15 +29,14 @@ export const DEFAULT_ANOMALY_CONFIG = {
   dirDivergencePct: 50,    // LONG vs SHORT win-rate gap in points -> anomaly
   latencyMs: 3000,         // exchange round-trip slower than this -> anomaly
   dormantHours: 48,        // an open position untouched this long -> anomaly
+  slippageRisePct: 80,     // slippage cost this much worse than baseline -> anomaly
+  cancelRatePct: 60,       // this share of orders cancelled without filling -> anomaly
 };
 
-// Detectors not yet possible, surfaced so the absence is visible rather than silently
-// narrowing what "anomaly detection" means here. Both are reachable from Binance's order
-// endpoint; backtest divergence was dropped with the decision to use live exchange data only.
-export const UNDETECTABLE = {
-  slippage_rise: 'needs placed-vs-executed price — reachable from Binance once orders are synced',
-  unfilled_orders: 'order lifecycle is not synced — only completed fills are',
-};
+// Nothing left here: slippage and unfilled orders both became detectable once Binance's
+// order endpoint was synced. Kept as an (empty) export so the UI's "not detectable" block
+// stays wired for the next gap.
+export const UNDETECTABLE = {};
 
 export async function getAnomalyConfig() {
   const { rows } = await query("SELECT value FROM app_config WHERE key='anomalyConfig'");
@@ -130,6 +129,53 @@ function detectDirectionDrift(scope, recent, cfg) {
     cause: `The strategy is only working in one direction. In a strongly trending market that is expected rather than broken — but if it persists across regimes, the ${weak} entry conditions are probably a mirror of the other side that does not actually hold.`,
     evidence: { variant: 'default', weakSide: weak, longWinRate: r2(l.winRate), shortWinRate: r2(s.winRate), gapPoints: r2(gap), longNetPnl: r2(l.netPnl), shortNetPnl: r2(s.netPnl), longTrades: l.trades, shortTrades: s.trades },
   }];
+}
+
+// Slippage is measured as a COST per trade. Compared per-trade rather than in total, so a
+// busier fortnight does not read as a worse-executing one.
+function detectSlippage(scope, recent, baseline, cfg) {
+  const per = (arr) => { const v = arr.map(t => t.slippage).filter(x => x != null); return v.length ? { avg: v.reduce((a, b) => a + b, 0) / v.length, n: v.length } : null; };
+  const r = per(recent), b = per(baseline);
+  if (!r || !b || r.n < cfg.minTrades || b.n < cfg.minTrades) return [];
+  // Only a WORSENING matters, and only from a baseline that was actually costing something —
+  // going from +0.01 to +0.03 is a 200% rise and means nothing.
+  if (b.avg <= 0 || r.avg <= b.avg) return [];
+  const rise = pct(r.avg, b.avg);
+  if (rise < cfg.slippageRisePct) return [];
+  return [{
+    code: 'slippage_rise', scope,
+    severity: rise > cfg.slippageRisePct * 2 ? 'critical' : 'warning',
+    summary: `Slippage per trade rose from ${r2(b.avg)} to ${r2(r.avg)}`,
+    cause: 'Orders are executing further from their asked price than usual. Typical causes: thinner liquidity at the hours this strategy trades, larger size against the same book, or a shift from limit to market execution — check whether the order mix changed before blaming the venue.',
+    evidence: { variant: 'default', recentAvg: r2(r.avg), baselineAvg: r2(b.avg), risePct: r2(rise), recentTrades: r.n },
+  }];
+}
+
+// A strategy that places and cancels most of its orders is behaving very differently from one
+// that doesn't — and the fill stream shows neither of them differently, which is exactly why
+// this needed the order endpoint.
+async function detectCancelRate(cfg, now) {
+  const since = new Date(now - cfg.recentDays * 86400000);
+  const { rows } = await query(
+    `SELECT symbol,
+            count(*)::int AS total,
+            count(*) FILTER (WHERE status IN ('CANCELED','EXPIRED','REJECTED') AND executed_qty = 0)::int AS dropped
+     FROM orders WHERE placed_at >= $1 GROUP BY symbol`, [since]
+  );
+  const out = [];
+  for (const row of rows) {
+    if (row.total < cfg.minTrades) continue;
+    const share = (row.dropped / row.total) * 100;
+    if (share < cfg.cancelRatePct) continue;
+    out.push({
+      code: 'unfilled_orders', scope: `bot:binance:${row.symbol}`,
+      severity: share > 85 ? 'critical' : 'warning',
+      summary: `${r2(share)}% of orders on ${row.symbol} were cancelled without filling`,
+      cause: 'Most of what this strategy places never executes. Either its limit prices sit too far from the book, or it is repeatedly repricing the same intent — both waste rate limit and can mean the entry it thinks it took never happened.',
+      evidence: { variant: 'default', symbol: row.symbol, cancelledShare: r2(share), cancelled: row.dropped, placed: row.total },
+    });
+  }
+  return out;
 }
 
 function detectFrequency(scope, recent, baseline, cfg) {
@@ -231,13 +277,14 @@ export async function runDetection({ now = Date.now() } = {}) {
   const found = [];
 
   const { rows: raw } = await query(
-    `SELECT exchange, symbol, direction, net_pnl, gross_pnl, commission, funding, closed_at, duration_s, strategy_id
+    `SELECT exchange, symbol, direction, net_pnl, gross_pnl, commission, funding, closed_at, duration_s, strategy_id, slippage
      FROM trades WHERE closed_at IS NOT NULL ORDER BY closed_at ASC`
   );
   const trades = raw.map(t => ({
     ...t, net_pnl: Number(t.net_pnl), gross_pnl: Number(t.gross_pnl),
     commission: Number(t.commission), funding: Number(t.funding),
     duration_s: t.duration_s == null ? null : Number(t.duration_s),
+    slippage: t.slippage == null ? null : Number(t.slippage),
   }));
 
   // Portfolio-wide, then per bot. Both levels matter: a single bot degrading can be invisible
@@ -257,6 +304,7 @@ export async function runDetection({ now = Date.now() } = {}) {
     found.push(...detectDrawdown(scope, recent, baseline, cfg));
     found.push(...detectFrequency(scope, recent, baseline, cfg));
     found.push(...detectDirectionDrift(scope, recent, cfg));
+    found.push(...detectSlippage(scope, recent, baseline, cfg));
     // Loss concentration is only meaningful across assets, so it runs at portfolio level only.
     if (scope === 'portfolio') found.push(...detectLossConcentration(scope, recent, cfg));
   }
@@ -267,6 +315,7 @@ export async function runDetection({ now = Date.now() } = {}) {
   }
 
   found.push(...(await detectOperational(cfg)));
+  found.push(...(await detectCancelRate(cfg, now)));
 
   return persist(found);
 }

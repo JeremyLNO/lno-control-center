@@ -177,7 +177,7 @@ export default function AnomaliesPage(){
             open={openThread===a.id} onToggle={()=>setOpenThread(o=>o===a.id?null:a.id)}/>)}
         </div>}
 
-    {data.undetectable&&<Card className="p-4">
+    {data.undetectable&&Object.keys(data.undetectable).length>0&&<Card className="p-4">
       <SectionTitle>{t('anomaly.undetectable')}</SectionTitle>
       <p className="text-sm text-slate-500 mb-3">{t('anomaly.undetectableHint')}</p>
       <div className="grid sm:grid-cols-3 gap-2">

@@ -63,17 +63,11 @@ export const DIMENSIONS = {
 // Metrics not yet fed, declared rather than quietly omitted so the UI can render them as
 // "not instrumented" instead of a plausible-looking zero.
 //
-// Scoped to what LIVE BINANCE DATA can actually provide. Backtest divergence, entry/exit
-// signals, execution logs and true order latency all needed a source outside the exchange
-// (TradingView exports, or the bots reporting their own intent); the desk has settled on
-// Binance live data only, so those are not "missing", they are out of scope and have been
-// removed rather than left as permanent placeholders.
-//
-// Both entries below remain genuinely reachable from Binance and are therefore still listed:
-// slippage once the order endpoint is synced, MAE/MFE once klines are backfilled.
+// Only one left: MAE/MFE is computed per position from Binance klines but is not backfilled
+// across the whole history, so it cannot be sliced here yet. Slippage moved OFF this list
+// once the orders endpoint was synced.
 export const UNAVAILABLE = {
-  slippage:  'needs the order book side of the trade — placed price vs executed price. Reachable from Binance once the orders endpoint is synced (only fills are today).',
-  mae_mfe:   'computed per position from Binance klines on the position page; not backfilled across the whole history, so it cannot be sliced here yet',
+  mae_mfe: 'computed per position from Binance klines on the position page; not backfilled across the whole history, so it cannot be sliced here yet',
 };
 
 // ---------------------------------------------------------------------------------------
@@ -126,6 +120,8 @@ export async function fetchTrades(f = {}) {
     ...r,
     net_pnl: Number(r.net_pnl), gross_pnl: Number(r.gross_pnl),
     commission: Number(r.commission), funding: Number(r.funding),
+    slippage: r.slippage == null ? null : Number(r.slippage),
+    r_multiple: r.r_multiple == null ? null : Number(r.r_multiple),
     qty: Number(r.qty), leverage: r.leverage == null ? null : Number(r.leverage),
     duration_s: r.duration_s == null ? null : Number(r.duration_s),
   }));
@@ -185,6 +181,11 @@ export function computeKpis(trades) {
     worstTrade: net.length ? Math.min(...net) : null,
     maxDrawdown: maxDrawdown(net),
     avgDurationS: durations.length ? sum(durations) / durations.length : null,
+    // Averaged over the trades that actually carry the measurement, never over all of them:
+    // a history where only half the trades have orders synced must not report half the
+    // slippage it really had.
+    slippage: (() => { const v = closed.map(t => t.slippage).filter(x => x != null); return v.length ? sum(v) : null; })(),
+    avgRMultiple: (() => { const v = closed.map(t => t.r_multiple).filter(x => x != null); return v.length ? sum(v) / v.length : null; })(),
     tradesPerDay: spanDays ? closed.length / spanDays : null,
   };
 }

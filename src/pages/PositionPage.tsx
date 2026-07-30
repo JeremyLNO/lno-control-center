@@ -83,13 +83,16 @@ export default function PositionPage(){
       subtitle={`${fmtDT(d.openedAt)} → ${d.closedAt?fmtDT(d.closedAt):t('position.stillOpen')}${d.durationS!=null?` · ${fmtSeconds(d.durationS)}`:''}`}
       actions={<Btn variant="outline" onClick={()=>navigate('/trades')}><Icon name="back" className="w-4 h-4"/>{t('position.backToList')}</Btn>}/>
 
-    <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-4">
+    <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3 mb-4">
       <KpiCard label={t('position.netPnl')} value={<span className={clsPnl(d.netPnl)}>{fmtSigned(d.netPnl)}</span>} icon="dollar"/>
       <KpiCard label={t('position.grossPnl')} value={<span className={clsPnl(d.grossPnl)}>{fmtSigned(d.grossPnl)}</span>}/>
       <KpiCard label={t('kpi.fees')} value={<span className="text-danger">{fmtUSD(d.commission)}</span>}/>
       <KpiCard label={t('kpi.funding')} value={<span className={clsPnl(d.funding)}>{fmtSigned(d.funding)}</span>}/>
       <KpiCard label="MAE" value={<span className="text-danger">{d.mae==null?'—':fmtSigned(d.mae)}</span>}/>
       <KpiCard label="MFE" value={<span className="text-success">{d.mfe==null?'—':fmtSigned(d.mfe)}</span>}/>
+      {/* Slippage is a COST: positive means the fills came in worse than what was asked for. */}
+      <KpiCard label={t('position.slippage')} value={d.slippage==null?'—':<span className={d.slippage>0?'text-danger':'text-success'}>{fmtSigned(-d.slippage)}</span>}/>
+      <KpiCard label="R" value={d.rMultiple==null?'—':<span className={clsPnl(d.rMultiple)}>{fmtNum(d.rMultiple,2)}R</span>}/>
     </div>
 
     <Card className="p-4 mb-4">
@@ -134,6 +137,34 @@ export default function PositionPage(){
           : <div className="text-sm text-slate-400 italic py-4">{t('position.noStrategy')}</div>}
       </Card>
     </div>
+
+    {d.orders?.length>0&&<Card className="p-4 mb-4">
+      <SectionTitle right={<span className="text-xs text-slate-400">{t('position.ordersHint')}</span>}>{t('position.orders')}</SectionTitle>
+      <table className="w-full text-sm">
+        <thead><tr className="border-b border-slate-200 text-slate-500">
+          <th className="px-3 py-2 text-left font-medium">{t('position.time')}</th>
+          <th className="px-3 py-2 text-left font-medium">{t('activity.side')}</th>
+          <th className="px-3 py-2 text-left font-medium">{t('position.orderType')}</th>
+          <th className="px-3 py-2 text-left font-medium">{t('playbook.status')}</th>
+          <th className="px-3 py-2 text-right font-medium">{t('position.asked')}</th>
+          <th className="px-3 py-2 text-right font-medium">{t('position.got')}</th>
+          <th className="px-3 py-2 text-right font-medium">{t('position.slippage')}</th>
+        </tr></thead>
+        <tbody>
+          {d.orders.map(o=><tr key={o.orderId} className={`border-b border-slate-100 last:border-0 ${o.unfilled?'opacity-50':''}`}>
+            <td className="px-3 py-1.5 text-slate-500 text-xs">{fmtDT(o.placedAt)}</td>
+            <td className="px-3 py-1.5"><span className={o.side==='BUY'?'text-success font-medium':'text-danger font-medium'}>{o.side}</span></td>
+            <td className="px-3 py-1.5 text-xs font-mono text-slate-500">{o.type}</td>
+            <td className="px-3 py-1.5 text-xs text-slate-500">{o.status}</td>
+            <td className="px-3 py-1.5 text-right tnum text-slate-500">{o.intendedPrice==null?<span className="text-slate-300">{t('position.atMarket')}</span>:fmtPrice(o.intendedPrice)}</td>
+            <td className="px-3 py-1.5 text-right tnum text-slate-600">{o.avgPrice?fmtPrice(o.avgPrice):'—'}</td>
+            <td className={`px-3 py-1.5 text-right tnum ${o.slippage==null?'text-slate-300':o.slippage>0?'text-danger':'text-success'}`}>
+              {o.slippage==null?'—':fmtSigned(-o.slippage)}</td>
+          </tr>)}
+        </tbody>
+      </table>
+      {d.unfilledOrders>0&&<p className="text-xs text-slate-500 mt-2">{t('position.unfilledCount',{n:d.unfilledOrders})}</p>}
+    </Card>}
 
     <Card className="p-4 mb-4">
       <SectionTitle right={<span className="text-xs text-slate-400">{t('position.fillsHint')}</span>}>{t('position.fills')}</SectionTitle>
@@ -185,7 +216,7 @@ export default function PositionPage(){
 
     <div className="mb-4"><CommentThread entityType="position" entityId={d.id}/></div>
 
-    <Card className="p-4">
+    {Object.keys(d.unavailable||{}).length>0&&<Card className="p-4">
       <SectionTitle>{t('analysis.notInstrumented')}</SectionTitle>
       <p className="text-sm text-slate-500 mb-3">{t('position.unavailableHint')}</p>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -196,6 +227,6 @@ export default function PositionPage(){
               <span className="block text-xs text-slate-500">{why}</span></div>
           </div>)}
       </div>
-    </Card>
+    </Card>}
   </div>;
 }

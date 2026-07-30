@@ -139,7 +139,7 @@ export default function AnalysisPage(){
       {data.matrix&&<MatrixCard data={data} t={t} order={(meta?.dimensions||[]).find(d=>d.key===data.compare)?.order}/>}
     </>}
 
-    {meta?.unavailable&&<Card className="p-4 border-slate-200">
+    {meta?.unavailable&&Object.keys(meta.unavailable).length>0&&<Card className="p-4 border-slate-200">
       <SectionTitle>{t('analysis.notInstrumented')}</SectionTitle>
       <p className="text-sm text-slate-500 mb-3">{t('analysis.notInstrumentedHint')}</p>
       <div className="grid sm:grid-cols-2 gap-2">

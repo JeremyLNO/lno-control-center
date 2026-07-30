@@ -224,6 +224,37 @@ export async function migrate() {
   // way to tell a trade that went straight to +50 from one that was -400 underwater first.
   await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS mae DOUBLE PRECISION`);
   await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS mfe DOUBLE PRECISION`);
+  // Order history from Binance's allOrders endpoint. A FILL says what executed; an ORDER says
+  // what was ASKED FOR — including the ones that never filled. That difference is the only
+  // place slippage (asked price vs got price), cancellations and the resting stop's risk can
+  // be read from. Terminal orders are immutable, so syncs dedupe on the exchange's own id.
+  await ddl(`CREATE TABLE IF NOT EXISTS orders (
+    exchange TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    order_id BIGINT NOT NULL,
+    client_order_id TEXT,
+    side TEXT NOT NULL,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    price DOUBLE PRECISION NOT NULL DEFAULT 0,
+    stop_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+    avg_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+    orig_qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+    executed_qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+    reduce_only BOOLEAN NOT NULL DEFAULT false,
+    close_position BOOLEAN NOT NULL DEFAULT false,
+    placed_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ,
+    PRIMARY KEY (exchange, symbol, order_id)
+  )`);
+  await ddl(`CREATE INDEX IF NOT EXISTS orders_placed_idx ON orders (symbol, placed_at DESC)`);
+  // Derived from those orders and cached on the round trip, so the analysis engine can slice
+  // by them without re-deriving per query. slippage is a COST (positive = executed worse than
+  // asked); risk is what an R-multiple divides by, read off the resting stop.
+  await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS slippage DOUBLE PRECISION`);
+  await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS risk DOUBLE PRECISION`);
+  await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS r_multiple DOUBLE PRECISION`);
+  await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS unfilled_orders INT`);
   // Detected behavioural anomalies (see api/_lib/anomalies.js). Distinct from `alerts`:
   // an alert is a threshold being crossed right now (drawdown breach, exchange down), an
   // anomaly is a PATTERN in how a bot is behaving — its profit factor collapsing, its losses

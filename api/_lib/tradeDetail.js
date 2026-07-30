@@ -11,6 +11,7 @@
 // from public klines and cached on the row, so a trade is only ever priced once.
 import { query } from './db.js';
 import { getKlines } from './binance.js';
+import { ordersForTrade } from './orders.js';
 
 export function parseTradeKey(key) {
   // "binance:BTCUSDT:12345" — exchange and symbol never contain a colon, and the id is the
@@ -82,19 +83,11 @@ async function priceContext(t) {
   return { candles, excursion: ex, interval };
 }
 
-// Metrics this page would show once the data exists. Declared per-page rather than assumed
-// absent, so a reader can tell "not measured" from "measured as zero".
-//
-// All three are reachable from Binance's own order endpoint and nothing else: the placed
-// price gives slippage, the order list gives amendments and cancellations, and a resting
-// STOP order gives the risk that an R-multiple divides by. Signals, execution logs and
-// order round-trip latency were dropped — they could only ever have come from the strategy
-// side, and the desk is standardising on live exchange data.
-export const TRADE_UNAVAILABLE = {
-  orders: 'only executed fills are synced — placed, amended and cancelled orders are not',
-  slippage: 'placed price vs executed price, from the same order records',
-  r_multiple: 'needs the risk per trade — readable from the resting stop order, once orders are synced',
-};
+// Everything the page promises is now measured: orders came in from Binance's allOrders
+// endpoint, and slippage and R-multiple fall out of them. Kept as an (empty) export so the
+// UI's "not instrumented" block stays wired up for the next gap rather than being deleted
+// and re-added.
+export const TRADE_UNAVAILABLE = {};
 
 export async function getTradeDetail(key) {
   const parsed = parseTradeKey(key);
@@ -150,6 +143,10 @@ export async function getTradeDetail(key) {
   );
 
   const price = await priceContext(t);
+  // Orders are best-effort: a desk whose key lacks order-read permission still gets the rest
+  // of the page rather than a failure.
+  let orders = [];
+  try { orders = await ordersForTrade({ exchange, symbol, openedAt, closedAt }); } catch (e) { orders = []; }
 
   return {
     id: `${exchange}:${symbol}:${openTradeId}`,
@@ -183,6 +180,9 @@ export async function getTradeDetail(key) {
     version: version && { id: Number(version.id), label: version.label, deployedAt: version.deployed_at, changes: version.changes || '', params: version.params || {} },
     anomalies: anomalies.map(a => ({ code: a.code, scope: a.scope, severity: a.severity, summary: a.summary, detectedAt: a.detected_at })),
     incidents: incidents.map(i => ({ type: i.type, code: i.code, summary: i.summary, createdAt: i.created_at, resolved: !!i.acked_at })),
+    orders,
+    slippage: num(t.slippage), risk: num(t.risk), rMultiple: num(t.r_multiple),
+    unfilledOrders: t.unfilled_orders == null ? null : Number(t.unfilled_orders),
     unavailable: TRADE_UNAVAILABLE,
   };
 }

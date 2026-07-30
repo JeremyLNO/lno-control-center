@@ -93,8 +93,39 @@ await db.query(`INSERT INTO income_events (tran_id,exchange,symbol,income_type,i
   }
   await db.query(`INSERT INTO fills (exchange,symbol,trade_id,side,qty,price,realized_pnl,commission,occurred_at)
     VALUES ${vals.join(',')} ON CONFLICT DO NOTHING`);
+  // dev-only fixture: one order per fill plus a protective stop and the occasional cancel,
+  // so slippage, unfilled-order counts and R-multiples have something real to compute from.
+  {
+    const { rows: fl } = await db.query("SELECT symbol, trade_id, side, qty, price, occurred_at FROM fills ORDER BY trade_id");
+    const vals = [];
+    let oid = 0;
+    for (const f of fl) {
+      const px = Number(f.price);
+      // Executed 0.02% away from the asked price, alternating direction, so the slippage
+      // column is not a constant.
+      const asked = px * (1 + (Number(f.trade_id) % 3 === 0 ? 0.0002 : -0.0002) * (f.side === 'BUY' ? 1 : -1));
+      vals.push(`('binance','${f.symbol}',${++oid},'${f.side}','LIMIT','FILLED',${asked},0,${px},${f.qty},${f.qty},false,false,'${new Date(f.occurred_at).toISOString()}','${new Date(f.occurred_at).toISOString()}')`);
+      // Every 5th fill also had an order that was placed and cancelled.
+      if (Number(f.trade_id) % 5 === 0) {
+        vals.push(`('binance','${f.symbol}',${++oid},'${f.side}','LIMIT','CANCELED',${(px * 0.995).toFixed(6)},0,0,${f.qty},0,false,false,'${new Date(f.occurred_at).toISOString()}','${new Date(f.occurred_at).toISOString()}')`);
+      }
+      // A reduce-only protective stop 3% away, on entries only.
+      if (f.side === 'BUY') {
+        vals.push(`('binance','${f.symbol}',${++oid},'SELL','STOP_MARKET','CANCELED',0,${(px * 0.97).toFixed(6)},0,${f.qty},0,true,false,'${new Date(f.occurred_at).toISOString()}','${new Date(f.occurred_at).toISOString()}')`);
+      }
+    }
+    if (vals.length) {
+      for (let i = 0; i < vals.length; i += 400) {
+        await db.query(`INSERT INTO orders (exchange,symbol,order_id,side,type,status,price,stop_price,avg_price,orig_qty,executed_qty,reduce_only,close_position,placed_at,updated_at)
+          VALUES ${vals.slice(i, i + 400).join(',')} ON CONFLICT DO NOTHING`);
+      }
+    }
+    console.log('[fixture] orders seeded:', vals.length);
+  }
   const { rebuildTrades } = await import('../api/_lib/trades.js');
   const built = await rebuildTrades({ full: true });
+  const { attachOrderMetrics } = await import('../api/_lib/orders.js');
+  await attachOrderMetrics();
   console.log('[fixture] round trips reconstructed from fills:', JSON.stringify(built));
 }
 

@@ -518,7 +518,10 @@ ok('an adverse excursion is clamped at zero, never positive', exNeverDown.mae ==
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', trade: tradeKey } });
 ok('the position detail resolves', r.status === 200 && r.body.id === tradeKey && r.body.symbol && r.body.direction, r.body && { id: r.body.id, sym: r.body.symbol });
 ok('the detail carries the full cost breakdown', r.status === 200 && 'grossPnl' in r.body && 'commission' in r.body && 'funding' in r.body && 'netPnl' in r.body, Object.keys(r.body || {}));
-ok('the detail declares what is not instrumented', !!r.body.unavailable?.slippage && !!r.body.unavailable?.r_multiple, r.body.unavailable);
+// Slippage and R-multiple used to be declared as uninstrumented here; both are measured now
+// that orders are synced, so the gap list is empty and the fields are present instead.
+ok('the detail exposes the order-derived metrics', 'slippage' in r.body && 'rMultiple' in r.body && 'unfilledOrders' in r.body, Object.keys(r.body).filter(k => /slip|rMult|unfilled/i.test(k)));
+ok('the detail declares no remaining uninstrumented metric', Object.keys(r.body.unavailable).length === 0, r.body.unavailable);
 // The exchange is unreachable from the test harness, so the chart degrades to empty rather
 // than failing the request — the page must survive a venue outage.
 ok('an unreachable exchange degrades the chart instead of failing the page', Array.isArray(r.body.candles), r.body.priceError || r.body.candles);
@@ -529,7 +532,7 @@ r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1
 ok('an unknown dimension is rejected -> 400', r.status === 400, r.status);
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: 'meta' } });
 ok('analysis meta exposes dimensions, filter options and the not-instrumented list',
-  r.status === 200 && r.body.dimensions.some(d => d.key === 'leverage') && Array.isArray(r.body.options.symbol) && !!r.body.unavailable.slippage, r.body);
+  r.status === 200 && r.body.dimensions.some(d => d.key === 'leverage') && Array.isArray(r.body.options.symbol) && !!r.body.unavailable.mae_mfe, r.body.unavailable);
 await db.query("DELETE FROM trades WHERE symbol LIKE 'AN%USDT'");
 
 // ---------------------------------------------------------------------------------------
@@ -686,7 +689,9 @@ ok('an anomaly can be acknowledged', r.status === 200 && !!r.body.anomaly.ackedA
 r = await call(alerts, { method: 'GET', headers: authH, query: { anomalies: '1', severity: 'critical' } });
 ok('severity filters server-side', r.status === 200 && r.body.entries.every(a => a.severity === 'critical'), r.body.entries.map(a => a.severity));
 r = await call(alerts, { method: 'GET', headers: authH, query: { anomalies: '1' } });
-ok('the undetectable list is exposed alongside the findings', !!r.body.undetectable.slippage_rise, r.body.undetectable);
+// Slippage rise and unfilled orders both became detectable with the order sync, so the
+// "cannot detect" list is now empty — still exported, so the block stays wired for the next gap.
+ok('the undetectable list is exposed and now empty', r.body.undetectable && Object.keys(r.body.undetectable).length === 0, r.body.undetectable);
 
 await db.query("DELETE FROM trades WHERE symbol LIKE 'AN%'");
 await db.query("DELETE FROM anomalies");
@@ -826,6 +831,79 @@ r = await call(profile, { method: 'GET', headers: sophieH, query: { directory: '
 ok('any signed-in user can read the colleague directory', r.status === 200 && r.body.users.length >= 2, r.body.users?.length);
 ok('the directory exposes no role, phone or login data',
   Object.keys(r.body.users[0]).every(k => ['id', 'username', 'name', 'handle', 'avatar'].includes(k)), Object.keys(r.body.users[0]));
+
+// ---------------------------------------------------------------------------------------
+// Orders (api/_lib/orders.js) — the three metrics only orders can give: slippage, unfilled
+// work, and the risk an R-multiple divides by.
+// ---------------------------------------------------------------------------------------
+const { orderSlippage, isUnfilled, attachOrderMetrics, ordersForTrade } = await import('../api/_lib/orders.js');
+
+// Slippage is a COST normalised by side: a BUY filled above its limit and a SELL filled below
+// it are the same problem, so both come out positive.
+ok('a BUY filled above its limit is positive slippage',
+  orderSlippage({ type: 'LIMIT', side: 'BUY', price: 100, avg_price: 101, executed_qty: 2 }) === 2, 'expected +2');
+ok('a SELL filled below its limit is also positive slippage',
+  orderSlippage({ type: 'LIMIT', side: 'SELL', price: 100, avg_price: 99, executed_qty: 2 }) === 2, 'expected +2');
+ok('a fill better than asked is negative slippage (price improvement)',
+  orderSlippage({ type: 'LIMIT', side: 'BUY', price: 100, avg_price: 99.5, executed_qty: 2 }) === -1, 'expected -1');
+// A MARKET order asks for "whatever is there" — it has no intended price. Reporting 0 would
+// drag every average toward zero and make a genuinely slipping book look fine.
+ok('a MARKET order has no measurable slippage (null, not zero)',
+  orderSlippage({ type: 'MARKET', side: 'BUY', price: 0, avg_price: 101, executed_qty: 2 }) === null, 'expected null');
+// A *_MARKET stop executes at market once triggered; the TRIGGER is what was intended.
+ok('a stop-market measures against its trigger price',
+  orderSlippage({ type: 'STOP_MARKET', side: 'SELL', price: 0, stop_price: 100, avg_price: 98, executed_qty: 1 }) === 2, 'expected +2');
+ok('an order that never executed has no slippage',
+  orderSlippage({ type: 'LIMIT', side: 'BUY', price: 100, avg_price: 0, executed_qty: 0 }) === null, 'expected null');
+ok('a cancelled order with no execution counts as unfilled',
+  isUnfilled({ status: 'CANCELED', executed_qty: 0 }) === true && isUnfilled({ status: 'CANCELED', executed_qty: 1 }) === false, 'partial fills are not unfilled');
+
+// End to end on a seeded round trip: 2 orders that filled with slippage, 1 cancelled,
+// 1 protective stop 10 below a 100 entry on 2 units -> risk 20.
+await db.query("DELETE FROM trades WHERE symbol='ORDUSDT'");
+await db.query("DELETE FROM orders WHERE symbol='ORDUSDT'");
+await db.query(
+  `INSERT INTO trades (exchange,symbol,open_trade_id,close_trade_id,direction,qty,entry_price,exit_price,
+     gross_pnl,commission,funding,net_pnl,opened_at,closed_at,duration_s,entry_hour,entry_dow,fill_count,leverage)
+   VALUES ('binance','ORDUSDT',4001,4002,'LONG',2,100,105,10,0,0,10,
+     now() - interval '2 hours', now() - interval '1 hour',3600,10,1,2,5)`);
+const seedOrder = (id, side, type, status, price, stopPrice, avg, qty, execQty, reduce, minsAgo) => db.query(
+  `INSERT INTO orders (exchange,symbol,order_id,side,type,status,price,stop_price,avg_price,orig_qty,executed_qty,reduce_only,close_position,placed_at,updated_at)
+   VALUES ('binance','ORDUSDT',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false, now() - ($11||' minutes')::interval, now())`,
+  [id, side, type, status, price, stopPrice, avg, qty, execQty, reduce, String(minsAgo)]
+);
+await seedOrder(1, 'BUY', 'LIMIT', 'FILLED', 100, 0, 100.5, 2, 2, false, 110);   // +1 slippage
+await seedOrder(2, 'SELL', 'LIMIT', 'FILLED', 105, 0, 104.5, 2, 2, true, 70);    // +1 slippage
+await seedOrder(3, 'BUY', 'LIMIT', 'CANCELED', 99, 0, 0, 2, 0, false, 100);      // unfilled
+await seedOrder(4, 'SELL', 'STOP_MARKET', 'CANCELED', 0, 90, 0, 2, 0, true, 105); // the protective stop
+
+await attachOrderMetrics({ symbol: 'ORDUSDT' });
+const ordTrade = (await db.query("SELECT slippage, unfilled_orders, risk, r_multiple FROM trades WHERE symbol='ORDUSDT'")).rows[0];
+ok('slippage is summed across the round trip', Math.abs(Number(ordTrade.slippage) - 2) < 1e-9, ordTrade.slippage);
+ok('orders placed and never filled are counted', Number(ordTrade.unfilled_orders) === 2, ordTrade.unfilled_orders);
+// Risk = |entry - stop| x size = |100 - 90| x 2 = 20. R = net 10 / 20 = 0.5.
+ok('risk is read off the protective stop', Math.abs(Number(ordTrade.risk) - 20) < 1e-9, ordTrade.risk);
+ok('the R-multiple divides the result by that risk', Math.abs(Number(ordTrade.r_multiple) - 0.5) < 1e-9, ordTrade.r_multiple);
+
+// An entry stop is not protection — only reduce-only stops define the accepted loss.
+await db.query("UPDATE orders SET reduce_only=false WHERE symbol='ORDUSDT' AND order_id=4");
+await attachOrderMetrics({ symbol: 'ORDUSDT' });
+const noRisk = (await db.query("SELECT risk, r_multiple FROM trades WHERE symbol='ORDUSDT'")).rows[0];
+ok('a non-reducing stop does not count as protection', noRisk.risk === null && noRisk.r_multiple === null, noRisk);
+
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', trade: 'binance:ORDUSDT:4001' } });
+ok('the position detail carries its orders', r.status === 200 && r.body.orders.length === 4, r.body.orders?.length);
+ok('an order row states what was asked and what was got',
+  r.body.orders[0].intendedPrice === 100 && r.body.orders[0].avgPrice === 100.5 && Math.abs(r.body.orders[0].slippage - 1) < 1e-9, r.body.orders[0]);
+ok('a market-style order shows no intended price rather than zero',
+  ordersForTrade && r.body.orders.find(o => o.type === 'STOP_MARKET').intendedPrice === 90, r.body.orders.find(o => o.type === 'STOP_MARKET'));
+// Every declared gap on this page is now measured.
+ok('the position page no longer declares any uninstrumented metric', Object.keys(r.body.unavailable).length === 0, r.body.unavailable);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: 'meta' } });
+ok('slippage is no longer listed as unavailable in the analysis engine', !r.body.unavailable.slippage && !!r.body.unavailable.mae_mfe, r.body.unavailable);
+
+await db.query("DELETE FROM orders WHERE symbol='ORDUSDT'");
+await db.query("DELETE FROM trades WHERE symbol='ORDUSDT'");
 
 r = await call(bots, { method: 'GET', headers: authH });
 const adaBot = r.body.bots.find(b => b.symbol === 'ADAUSDT');

@@ -146,3 +146,22 @@ export async function getKlines({ symbol, interval = '5m', startTime, endTime, l
   const rows = await r.json();
   return (rows || []).map(k => ({ t: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]) }));
 }
+
+// Full order history for one symbol (signed). Distinct from getUserTrades: a FILL is what
+// executed, an ORDER is what was ASKED FOR — including the ones that never filled. That gap
+// is the only place slippage, cancellations and the resting stop's risk can be read from.
+// Like userTrades, futures' allOrders has no all-symbols form, so this is called per symbol.
+export async function getAllOrders(key, secret, { symbol, orderId, startTime, limit = 500 } = {}) {
+  const params = { symbol, limit: String(limit) };
+  if (orderId) params.orderId = String(orderId);
+  else if (startTime) params.startTime = String(startTime);
+  const rows = await signedGet('/fapi/v1/allOrders', key, secret, params);
+  return (rows || []).map(o => ({
+    orderId: Number(o.orderId), clientOrderId: o.clientOrderId, side: o.side,
+    type: o.type, origType: o.origType, status: o.status,
+    price: Number(o.price), stopPrice: Number(o.stopPrice), avgPrice: Number(o.avgPrice),
+    origQty: Number(o.origQty), executedQty: Number(o.executedQty),
+    reduceOnly: !!o.reduceOnly, closePosition: !!o.closePosition,
+    time: Number(o.time), updateTime: Number(o.updateTime),
+  }));
+}
