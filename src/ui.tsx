@@ -117,6 +117,7 @@ const setToken=(t)=>{ try{ t? localStorage.setItem(TOKEN_KEY,t): localStorage.re
 const PREF={
   get:(k,d)=>{ try{ const v=localStorage.getItem('lno_pref_'+k); return v==null?d:JSON.parse(v); }catch(e){ return d; } },
   set:(k,v)=>{ try{ localStorage.setItem('lno_pref_'+k,JSON.stringify(v)); }catch(e){} },
+  del:(k)=>{ try{ localStorage.removeItem('lno_pref_'+k); }catch(e){} },
 };
 
 // Google OAuth client ID — public by design (baked into the browser bundle; the security

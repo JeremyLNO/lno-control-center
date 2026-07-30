@@ -282,11 +282,30 @@ function Root(){
   // sidebar switcher), it's persisted both locally (instant on next visit, incl. logged out)
   // and server-side on their account (users.language) — so it's also their default on any
   // other client reading the same account, e.g. the iOS app.
+  const LANG_PENDING='lang_pending';
   const [lang,setLangState]=useState<Lang>(()=>(PREF.get('lang',null) as Lang)||detectBrowserLang());
-  useEffect(()=>{ if(user&&user.language&&SUPPORTED_LANGS.includes(user.language)&&user.language!==lang){ setLangState(user.language); PREF.set('lang',user.language); } },[user]);
+  // Signing in normally adopts the account's language. But a language picked on the LOGIN
+  // page is a deliberate act by the person in front of the screen, and it must survive the
+  // sign-in that follows — otherwise the interface they just chose flips back a second later.
+  // So an explicit signed-out choice is remembered as PENDING and, on sign-in, written to the
+  // account instead of being overwritten by it.
+  useEffect(()=>{
+    if(!user) return;
+    const pending=PREF.get(LANG_PENDING,null) as Lang|null;
+    if(pending&&SUPPORTED_LANGS.includes(pending)){
+      PREF.del(LANG_PENDING);
+      if(pending!==user.language){
+        // Persist to the account so every other client (and the iOS app) agrees.
+        api('profile',{method:'PATCH',body:{language:pending}}).then(r=>setUser(r.user)).catch(()=>{});
+        return;
+      }
+    }
+    if(user.language&&SUPPORTED_LANGS.includes(user.language)&&user.language!==lang){ setLangState(user.language); PREF.set('lang',user.language); }
+  },[user]);
   async function setLang(l: Lang){
     setLangState(l); PREF.set('lang',l);
     if(user){ try{ const r=await api('profile',{method:'PATCH',body:{language:l}}); setUser(r.user); }catch(e){ toast.error(e.message); } }
+    else PREF.set(LANG_PENDING,l);   // no account yet — carry the choice through sign-in
   }
   const t=useCallback((key: string, vars?: Record<string,string|number>)=>translate(lang,key,vars),[lang]);
 
