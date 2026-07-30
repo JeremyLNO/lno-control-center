@@ -1051,6 +1051,7 @@ const MAIN_NAV=[
 ];
 const TOOLS_NAV: Array<[string,string,string,string,string|string[]]>=[
   ['activity','nav.analysis','/analysis','nav.analysis','view_trades'],
+  ['clock','nav.calendar','/calendar','nav.calendar','view_trades'],
   ['shield','nav.playbook','/playbook','nav.playbook','view_trades'],
   ['triangle','nav.anomalies','/anomalies','nav.anomalies','view_trades'],
   ['layers','nav.funds','/funds','nav.funds','view_trades'],

@@ -461,6 +461,34 @@ r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1
 ok('list filters narrow the set server-side', r.status === 200 && r.body.rows.length === 1 && r.body.total.trades === 3, r.body.total);
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'symbol', hour: '14', from: '2026-06-01', to: '2026-06-30' } });
 ok('entry-hour filter narrows the set server-side', r.status === 200 && r.body.total.trades === 2 && r.body.total.netPnl === -200, r.body.total);
+// Calendar bucketing: same trade set, keyed by period instead of by dimension.
+// The seeded set is 5 trades on 5 consecutive June days: +100 +200 -50 +300 -150.
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', calendar: 'day', from: '2026-06-01', to: '2026-06-30' } });
+ok('calendar buckets by day', r.status === 200 && r.body.granularity === 'day' && r.body.rows.length === 5, r.body.rows);
+ok('calendar days are chronological and carry the full KPI block',
+  r.body.rows[0].key === '2026-06-01' && r.body.rows[0].netPnl === 100 && r.body.rows[0].winRate === 100
+  && r.body.rows[4].key === '2026-06-05', r.body.rows.map(x => `${x.key}:${x.netPnl}`));
+ok('calendar buckets reconcile with the unsliced total',
+  r.body.rows.reduce((s, x) => s + x.netPnl, 0) === r.body.total.netPnl, { sum: r.body.rows.reduce((s, x) => s + x.netPnl, 0), total: r.body.total.netPnl });
+
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', calendar: 'month', from: '2026-06-01', to: '2026-06-30' } });
+ok('calendar buckets by month', r.status === 200 && r.body.rows.length === 1 && r.body.rows[0].key === '2026-06' && r.body.rows[0].trades === 5, r.body.rows);
+
+// ISO weeks belong to the year containing their Thursday. 2026-06-01 is a Monday, so these
+// five days are all week 23 — the naive "day-of-year / 7" would split them.
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', calendar: 'week', from: '2026-06-01', to: '2026-06-30' } });
+ok('calendar buckets by ISO week (Monday-first)', r.status === 200 && r.body.rows.length === 1 && /^2026-W\d\d$/.test(r.body.rows[0].key), r.body.rows);
+// 2027-01-01 is a Friday, so it belongs to ISO week 53 of 2026, not week 1 of 2027 — the
+// case a hand-rolled week number always gets wrong.
+await seedTrade(9101, 'ANCUSDT', 'LONG', 10, 1, 9);
+await db.query("UPDATE trades SET closed_at='2027-01-01T12:00:00Z', opened_at='2027-01-01T11:00:00Z' WHERE open_trade_id=9101");
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', calendar: 'week', symbol: 'ANCUSDT', from: '2026-12-01', to: '2027-01-31' } });
+ok('a January 1st that falls on a Friday lands in the previous ISO year', r.body.rows[0]?.key === '2026-W53', r.body.rows);
+await db.query("DELETE FROM trades WHERE open_trade_id=9101");
+
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', calendar: 'fortnight' } });
+ok('an unknown granularity is rejected -> 400', r.status === 400, r.status);
+
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'nonsense' } });
 ok('an unknown dimension is rejected -> 400', r.status === 400, r.status);
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: 'meta' } });

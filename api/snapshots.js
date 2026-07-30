@@ -22,7 +22,7 @@ import { notify, REPORT_AVAILABLE, getOpenWAConfig, getApiKey, sendTextMeBot } f
 import { dailyDigestText } from './_lib/notifyText.js';
 import { sendDailyReportEmail } from './_lib/mailer.js';
 import { permsForRole } from './_lib/rolePerms.js';
-import { DIMENSIONS, UNAVAILABLE, fetchTrades, groupBy } from './_lib/analytics.js';
+import { DIMENSIONS, UNAVAILABLE, GRANULARITIES, fetchTrades, groupBy, bucketByPeriod } from './_lib/analytics.js';
 
 // Query-string -> filter object for the analysis engine. List filters arrive comma-separated
 // (?symbol=BTCUSDT,ETHUSDT); an absent or empty parameter means "no constraint", never "match
@@ -56,6 +56,7 @@ export default async function handler(req, res) {
       // api/*.js file because Vercel Hobby caps the project at 12 serverless functions and
       // it is already exactly at that limit — snapshots.js is the analytics/reporting home.
       //   GET ?analysis=1&group=<dim>[&compare=<dim>][&filters...] -> KPI block per bucket
+      //   GET ?analysis=1&calendar=day|week|month|year -> KPI block per calendar period
       //   GET ?analysis=meta -> available dimensions, filter option values, unavailable KPIs
       if (req.query?.analysis) {
         if (!isAdmin && !(await permsForRole(a.role)).includes('view_trades')) {
@@ -76,6 +77,13 @@ export default async function handler(req, res) {
         }
         const f = parseFilters(req.query);
         const trades = await fetchTrades(f);
+        // Calendar view: same KPI block, keyed by calendar period instead of by dimension.
+        //   GET ?analysis=1&calendar=day|week|month|year[&filters...]
+        if (req.query.calendar) {
+          const g = String(req.query.calendar);
+          if (!GRANULARITIES.includes(g)) return res.status(400).json({ error: 'unknown granularity' });
+          return res.status(200).json(bucketByPeriod(trades, g));
+        }
         const group = String(req.query.group || 'symbol');
         if (!DIMENSIONS[group]) return res.status(400).json({ error: 'unknown dimension' });
         const out = groupBy(trades, group);

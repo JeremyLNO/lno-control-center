@@ -183,6 +183,50 @@ export function computeKpis(trades) {
   };
 }
 
+// ---------------------------------------------------------------------------------------
+// Calendar bucketing — the same KPI block, keyed by calendar period instead of by dimension.
+// ---------------------------------------------------------------------------------------
+// ISO week: weeks start Monday and belong to the year containing their Thursday. Worth doing
+// properly rather than dividing the day-of-year by 7 — the naive version disagrees with every
+// calendar the desk actually uses during the first and last week of a year.
+function isoWeekKey(d) {
+  const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = x.getUTCDay() || 7;              // Sunday = 7, so Monday = 1
+  x.setUTCDate(x.getUTCDate() + 4 - day);      // move to this week's Thursday
+  const yearStart = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((x - yearStart) / 86400000 + 1) / 7);
+  return `${x.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+export const GRANULARITIES = ['day', 'week', 'month', 'year'];
+
+const periodKey = {
+  day: (d) => d.toISOString().slice(0, 10),
+  week: isoWeekKey,
+  month: (d) => d.toISOString().slice(0, 7),
+  year: (d) => String(d.getUTCFullYear()),
+};
+
+// A trade belongs to the period in which it CLOSED — that is when its result exists. Keys are
+// UTC throughout, matching how every other date in this system is stored and compared; a
+// local-time calendar would shift trades across midnight boundaries depending on who is
+// looking.
+export function bucketByPeriod(trades, granularity = 'day') {
+  const keyOf = periodKey[granularity];
+  if (!keyOf) throw new Error(`unknown granularity: ${granularity}`);
+  const buckets = new Map();
+  for (const t of trades) {
+    if (!t.closed_at) continue;
+    const k = keyOf(new Date(t.closed_at));
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(t);
+  }
+  const rows = [...buckets.entries()]
+    .map(([key, ts]) => ({ key, ...computeKpis(ts) }))
+    .sort((a, b) => (a.key < b.key ? -1 : 1));
+  return { granularity, rows, total: computeKpis(trades) };
+}
+
 // Group a trade set along one dimension and compute the full KPI block per bucket.
 // `total` is the same KPI block over the unsliced set, so the UI can show each bucket's
 // contribution without recomputing (and without the two disagreeing).
