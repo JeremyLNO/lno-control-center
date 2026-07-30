@@ -31,8 +31,12 @@ function AdminReports(){
   // Preview opens the stored email body in its own window. The window is opened SYNCHRONOUSLY
   // on the click and filled once the fetch resolves — opening it inside the promise would be
   // a pop-up not triggered by a user gesture, which browsers block.
+  //
+  // NO 'noopener' in the feature list: it makes window.open return null while still opening
+  // the window, so the handle is lost and the report is never written — an empty window every
+  // time. It buys nothing here anyway; the window loads our own document, not a foreign page.
   async function preview(rep){
-    const w=window.open('','_blank','noopener,width=680,height=900');
+    const w=window.open('','_blank','width=680,height=900');
     if(!w){ toast.error(t('reports.popupBlocked')); return; }
     w.document.write('<title>'+rep.kind+' — '+rep.periodLabel+'</title><body style="margin:0;font-family:sans-serif;color:#64748B;padding:24px">…</body>');
     try{
