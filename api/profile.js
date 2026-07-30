@@ -9,6 +9,24 @@ import { SUPPORTED_LANGS } from './_lib/constants.js';
 
 export default async function handler(req, res) {
   const a = requireAuth(req, res); if (!a) return;
+
+  // Colleague directory: the minimum needed to @mention someone or assign them a comment.
+  // Deliberately NOT the admin user list — no role, no phone, no login history, no status,
+  // just who exists and what to call them. Any signed-in user can see who their colleagues
+  // are; that is already visible on every comment they write.
+  if (req.method === 'GET' && req.query?.directory) {
+    const { rows } = await query(
+      `SELECT id, username, email, first_name, last_name, avatar FROM users
+       WHERE active ORDER BY username ASC`
+    );
+    return res.status(200).json({ users: rows.map(u => ({
+      id: u.id, username: u.username,
+      name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username,
+      handle: String(u.email || '').split('@')[0] || u.username,
+      avatar: u.avatar || null,
+    })) });
+  }
+
   if (req.method !== 'PATCH') return res.status(405).json({ error: 'method not allowed' });
   try {
     const body = req.body || {};

@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useCallback } = React;
 import {
   fmtDT, fmtAgo, Icon, Card, SectionTitle, Btn, Select, KpiCard, PageHead, Denied, Loader,
-  EmptyState, useApp, hasPerm, toast
+  EmptyState, useApp, hasPerm, toast, CommentThread, IncidentReview
 } from '../ui'
 
 /* ============================================================
@@ -73,7 +73,7 @@ function EvidenceValue({k,v,t}: any){
   return <span className="text-navy">{String(v)}</span>;
 }
 
-function AnomalyCard({a,t,canAck,onAck}: any){
+function AnomalyCard({a,t,canAck,onAck,open,onToggle}: any){
   const s=sevOf(a.severity);
   const ev=Object.entries(a.evidence||{}).filter(([k])=>!HIDDEN_EVIDENCE.has(k));
   const {summary,cause}=describe(a,t);
@@ -96,6 +96,7 @@ function AnomalyCard({a,t,canAck,onAck}: any){
         <div className="text-[11px] text-slate-400">{fmtDT(a.detectedAt)}</div>
         {canAck&&!a.ackedAt&&!a.resolvedAt&&
           <Btn variant="outline" size="sm" className="mt-2" onClick={()=>onAck(a.id)}><Icon name="check" className="w-3.5 h-3.5"/>{t('anomaly.ack')}</Btn>}
+        <button onClick={onToggle} className="block ml-auto mt-2 text-[11px] text-slate-400 hover:text-navy hover:underline">{t(open?'anomaly.hideDiscussion':'anomaly.discuss')}</button>
       </div>
     </div>
     {ev.length>0&&<div className="mt-3 pt-3 border-t border-slate-100">
@@ -106,6 +107,10 @@ function AnomalyCard({a,t,canAck,onAck}: any){
         </div>)}
       </div>
     </div>}
+    {open&&<div className="mt-3 grid gap-3">
+      <IncidentReview entityType="anomaly" entityId={String(a.id)}/>
+      <CommentThread entityType="anomaly" entityId={String(a.id)}/>
+    </div>}
   </Card>;
 }
 
@@ -115,6 +120,7 @@ export default function AnomaliesPage(){
   const [status,setStatus]=useState('open');
   const [severity,setSeverity]=useState('');
   const [busy,setBusy]=useState(false);
+  const [openThread,setOpenThread]=useState<number|null>(null);
   const allowed=hasPerm(user,'view_trades');
   const isAdmin=user?.role==='admin';
 
@@ -167,7 +173,8 @@ export default function AnomaliesPage(){
     {entries.length===0
       ? <EmptyState icon="check" title={t(status==='open'?'anomaly.none':'anomaly.noneFiltered')} hint={t('anomaly.noneHint')}/>
       : <div className="grid gap-3 mb-4">
-          {entries.map(a=><AnomalyCard key={a.id} a={a} t={t} canAck={isAdmin} onAck={ack}/>)}
+          {entries.map(a=><AnomalyCard key={a.id} a={a} t={t} canAck={isAdmin} onAck={ack}
+            open={openThread===a.id} onToggle={()=>setOpenThread(o=>o===a.id?null:a.id)}/>)}
         </div>}
 
     {data.undetectable&&<Card className="p-4">

@@ -248,6 +248,62 @@ export async function migrate() {
   // exempt so the history of past occurrences is kept.
   await ddl(`CREATE UNIQUE INDEX IF NOT EXISTS anomalies_open_idx ON anomalies (code, scope) WHERE resolved_at IS NULL`);
   await ddl(`CREATE INDEX IF NOT EXISTS anomalies_detected_idx ON anomalies (detected_at DESC)`);
+  // Internal discussion, attached to whatever is being discussed. (entity_type, entity_id) is
+  // deliberately a loose reference rather than a foreign key: a comment can hang off a
+  // position, a bot, an anomaly, a strategy or a calendar period, and several of those are
+  // synthetic ids that no single table owns.
+  await ddl(`CREATE TABLE IF NOT EXISTS comments (
+    id BIGSERIAL PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    parent_id BIGINT,
+    body TEXT NOT NULL,
+    category TEXT,
+    priority TEXT,
+    assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    author_id TEXT,
+    author_name TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    resolved_at TIMESTAMPTZ,
+    resolved_by TEXT
+  )`);
+  await ddl(`CREATE INDEX IF NOT EXISTS comments_entity_idx ON comments (entity_type, entity_id, created_at DESC)`);
+  await ddl(`CREATE INDEX IF NOT EXISTS comments_assignee_idx ON comments (assignee_id) WHERE status <> 'resolved'`);
+  // Structured incident review. Separate from `comments` because it is a document with
+  // required sections and a validation step, not a conversation — the discussion around it
+  // still happens in comments attached to the same entity.
+  await ddl(`CREATE TABLE IF NOT EXISTS incident_reviews (
+    id BIGSERIAL PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    problem TEXT DEFAULT '',
+    impact TEXT DEFAULT '',
+    root_cause TEXT DEFAULT '',
+    corrective_actions TEXT DEFAULT '',
+    severity TEXT NOT NULL DEFAULT 'medium',
+    status TEXT NOT NULL DEFAULT 'draft',
+    opened_by TEXT,
+    opened_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    validated_by TEXT,
+    validated_at TIMESTAMPTZ
+  )`);
+  await ddl(`CREATE INDEX IF NOT EXISTS incident_reviews_entity_idx ON incident_reviews (entity_type, entity_id)`);
+  // One row per person mentioned in a comment. Stored rather than re-parsed on read so a
+  // mention stays addressed to whoever it named even if the comment is later edited, and so
+  // "unread" is per-person state rather than something derived from the text.
+  await ddl(`CREATE TABLE IF NOT EXISTS mentions (
+    id BIGSERIAL PRIMARY KEY,
+    comment_id BIGINT NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`);
+  await ddl(`CREATE UNIQUE INDEX IF NOT EXISTS mentions_unique_idx ON mentions (comment_id, user_id)`);
+  await ddl(`CREATE INDEX IF NOT EXISTS mentions_unread_idx ON mentions (user_id) WHERE read_at IS NULL`);
   // Employee Fund: each employee's capital contribution, recorded as a number of "units"
   // (mutual-fund-style unitisation — see api/_lib/employeeFund.js) rather than a flat euro
   // amount, so joining after the fund has already gained/lost value is priced fairly.

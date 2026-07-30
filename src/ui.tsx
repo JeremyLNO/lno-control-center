@@ -36,6 +36,7 @@ const PERMISSIONS = [
   ['manage_whatsapp','Manage WhatsApp'],
   ['manage_funds','Manage funds'],
   ['manage_strategies','Manage strategy playbook'],
+  ['manage_comments','Comment & review incidents'],
 ];
 const ALL_PERMS = PERMISSIONS.map(p=>p[0]);
 const ROLE_PERMS = {
@@ -1189,6 +1190,16 @@ function GlobalSearch(){
   </div>;
 }
 
+// Where a mention's deep link lands. Mirrors entityLink() in api/_lib/comments.js — the
+// server builds the same targets for the email version of the same notification.
+const MENTION_ROUTES={
+  position:(id)=>'/position/'+id,
+  anomaly:()=>'/anomalies',
+  strategy:()=>'/playbook',
+  bot:()=>'/trades',
+  period:()=>'/calendar',
+};
+
 function Header(){
   const {user,navigate,logout,dataStatus,period,setPeriod,custom,setCustom,t}=useApp();
   const [bell,setBell]=useState(false); const [menu,setMenu]=useState(false);
@@ -1196,9 +1207,19 @@ function Header(){
   const [readIds,setReadIds]=useState<Set<any>>(()=>new Set(PREF.get('read_alerts',[])));
   const bref=useRef<any>(null), mref=useRef<any>(null);
   useEffect(()=>{ const h=e=>{ if(bref.current&&!bref.current.contains(e.target))setBell(false); if(mref.current&&!mref.current.contains(e.target))setMenu(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  const [mentions,setMentions]=useState<any[]>([]);
   const loadAlerts=()=>api('alerts').then(r=>setAlerts(r.alerts||[])).catch(()=>{});
-  useEffect(()=>{ loadAlerts(); const iv=setInterval(loadAlerts,60000); return ()=>clearInterval(iv); },[]);
-  const unread=alerts.filter(a=>!readIds.has(a.id)).length;
+  // Unlike alerts, whose read state is per-browser localStorage, a mention is addressed to a
+  // PERSON — so its unread state lives on the server and follows them to any device.
+  const loadMentions=()=>api('alerts?mentions=1').then(r=>setMentions(r.mentions||[])).catch(()=>{});
+  useEffect(()=>{ loadAlerts(); loadMentions(); const iv=setInterval(()=>{ loadAlerts(); loadMentions(); },60000); return ()=>clearInterval(iv); },[]);
+  const unread=alerts.filter(a=>!readIds.has(a.id)).length+mentions.length;
+  async function openMention(m){
+    try{ await api('alerts',{method:'POST',body:{action:'readMentions',ids:[m.id]}}); }catch(e){}
+    setBell(false); loadMentions();
+    navigate(MENTION_ROUTES[m.entityType] ? MENTION_ROUTES[m.entityType](m.entityId) : '/activity');
+  }
+  async function readAllMentions(){ try{ await api('alerts',{method:'POST',body:{action:'readMentions'}}); loadMentions(); }catch(e){} }
   async function ack(id){ try{ await api('alerts',{method:'POST',body:{id}}); loadAlerts(); }catch(e){ toast.error(e.message); } }
   function markRead(id){ setReadIds(s=>{ const n=new Set(s); n.add(id); PREF.set('read_alerts',[...n].slice(-300)); return n; }); }
   function markAllRead(){ setReadIds(s=>{ const n=new Set(s); alerts.forEach(a=>n.add(a.id)); PREF.set('read_alerts',[...n].slice(-300)); return n; }); }
@@ -1212,7 +1233,21 @@ function Header(){
     <div ref={bref} className="relative">
       <button onClick={()=>setBell(!bell)} className="relative p-2 rounded-lg hover:bg-slate-100"><Icon name="bell" className="w-5 h-5 text-slate-600"/>{unread>0&&<span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-danger text-white text-[10px] rounded-full grid place-items-center">{unread}</span>}</button>
       {bell&&<div className="absolute right-0 mt-1.5 w-80 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-40 fadein max-h-96 overflow-y-auto">
-        <div className="text-xs font-semibold text-navy px-2 py-1.5 flex items-center justify-between">{t('header.alerts')} {unread>0&&<button onClick={markAllRead} className="text-[11px] text-gold hover:underline font-normal">{t('header.markAllRead')}</button>}</div>
+        {mentions.length>0&&<div className="mb-1 pb-1 border-b border-slate-100">
+          <div className="text-xs font-semibold text-navy px-2 py-1.5 flex items-center justify-between">
+            {t('header.mentions')}
+            <button onClick={readAllMentions} className="text-[11px] text-gold hover:underline font-normal">{t('header.markAllRead')}</button>
+          </div>
+          {mentions.map(m=><button key={m.id} onClick={()=>openMention(m)} className="w-full text-left px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5">
+            <span className="mt-1 w-1.5 h-1.5 rounded-full shrink-0 bg-gold"/>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-navy font-medium leading-snug">{t('header.mentionedYou',{who:m.authorName||'—'})}</div>
+              <div className="text-[11px] text-slate-500 leading-snug line-clamp-2">{m.excerpt}</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">{m.entityType} · {fmtDT(m.createdAt)}</div>
+            </div>
+          </button>)}
+        </div>}
+        <div className="text-xs font-semibold text-navy px-2 py-1.5 flex items-center justify-between">{t('header.alerts')} {alerts.filter(a=>!readIds.has(a.id)).length>0&&<button onClick={markAllRead} className="text-[11px] text-gold hover:underline font-normal">{t('header.markAllRead')}</button>}</div>
         {alerts.length===0 && <div className="text-xs text-slate-400 px-2 py-4 text-center">{t('header.noAlerts')}</div>}
         {alerts.map(a=>{ const isRead=readIds.has(a.id); return <div key={a.id} className={`px-2 py-2 rounded-lg hover:bg-slate-50 flex gap-2.5 ${isRead?'opacity-60':''}`}>
           <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${a.ackedAt?'bg-success':'bg-danger'}`}/>
@@ -1468,6 +1503,253 @@ function AnalysisFilterBar({filters,meta}: any){
 }
 
 /* ============================================================
+   DISCUSSION — comments, @mentions, incident review
+   ============================================================ */
+// One component, mounted on whatever is being discussed: a position, an anomaly, a strategy.
+// Everything else in this app is machine-produced; this is the one place people write, and
+// it is where the *reason* behind a number lives — "we widened the stop in August and never
+// re-tested it" is something no detector will ever infer.
+
+const CATEGORIES=['observation','question','action','incident'];
+const PRIORITIES=['low','medium','high'];
+const C_STATUSES=['open','in_progress','resolved'];
+
+// The colleague directory, fetched once per session and shared by every thread on the page.
+// Mentioning someone is a common action and re-fetching the list per comment box would make
+// the autocomplete feel laggy for no reason.
+let _dirCache: any=null;
+function useDirectory(){
+  const {api}=useApp();
+  const [dir,setDir]=useState<any[]>(_dirCache||[]);
+  useEffect(()=>{ if(_dirCache) return;
+    api('profile?directory=1').then(r=>{ _dirCache=r.users||[]; setDir(_dirCache); }).catch(()=>{});
+  },[api]);
+  return dir;
+}
+
+// Render @handles as highlighted text. The body is stored as plain text and rendered as
+// plain text — no markdown, no HTML — so a comment can never inject markup into the page.
+function CommentBody({body,dir}: any){
+  const known=new Set((dir||[]).flatMap(u=>[u.username?.toLowerCase(),u.handle?.toLowerCase()]).filter(Boolean));
+  const parts=String(body).split(/(@[A-Za-z0-9._-]{2,64})/g);
+  return <p className="text-sm text-navy whitespace-pre-wrap break-words">
+    {parts.map((p,i)=>{
+      const m=p.match(/^@([A-Za-z0-9._-]{2,64})$/);
+      // An @word that matches nobody is just text — highlighting it would imply a
+      // notification that was never sent.
+      if(m&&known.has(m[1].toLowerCase().replace(/\.+$/,''))) return <span key={i} className="text-gold font-medium">{p}</span>;
+      return <span key={i}>{p}</span>;
+    })}
+  </p>;
+}
+
+// Textarea with @-autocomplete. Triggers on the token being typed at the caret, so it never
+// fires on an @ that is already part of a finished word.
+function MentionInput({value,onChange,dir,placeholder,rows=3}: any){
+  const ref=useRef<any>(null);
+  const [sug,setSug]=useState<any[]>([]);
+  const [tokenStart,setTokenStart]=useState(-1);
+  const scan=(text,caret)=>{
+    const upto=text.slice(0,caret);
+    const m=upto.match(/@([A-Za-z0-9._-]*)$/);
+    if(!m){ setSug([]); setTokenStart(-1); return; }
+    const q=m[1].toLowerCase();
+    setTokenStart(caret-m[0].length);
+    setSug((dir||[]).filter(u=>!q||u.username.toLowerCase().includes(q)||u.handle.toLowerCase().includes(q)||u.name.toLowerCase().includes(q)).slice(0,6));
+  };
+  const pick=(u)=>{
+    const el=ref.current; if(!el||tokenStart<0) return;
+    const caret=el.selectionStart;
+    const next=value.slice(0,tokenStart)+'@'+u.handle+' '+value.slice(caret);
+    onChange(next); setSug([]); setTokenStart(-1);
+    requestAnimationFrame(()=>{ el.focus(); const pos=tokenStart+u.handle.length+2; el.setSelectionRange(pos,pos); });
+  };
+  return <div className="relative">
+    <textarea ref={ref} rows={rows} value={value} placeholder={placeholder}
+      onChange={e=>{ onChange(e.target.value); scan(e.target.value,e.target.selectionStart); }}
+      onKeyDown={e=>{ if(e.key==='Escape'){ setSug([]); setTokenStart(-1); } }}
+      onBlur={()=>setTimeout(()=>setSug([]),150)}
+      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40"/>
+    {sug.length>0&&<div className="absolute left-2 bottom-full mb-1 w-64 bg-white rounded-lg shadow-xl border border-slate-200 p-1 z-40 fadein">
+      {sug.map(u=><button key={u.id} onMouseDown={e=>e.preventDefault()} onClick={()=>pick(u)}
+        className="w-full text-left px-2 py-1.5 rounded-md hover:bg-slate-50 text-sm flex items-center gap-2">
+        <span className="text-navy font-medium">{u.name}</span>
+        <span className="text-xs text-slate-400">@{u.handle}</span>
+      </button>)}
+    </div>}
+  </div>;
+}
+
+function Chip({children,tone='slate'}: any){
+  const tones={slate:'bg-slate-100 text-slate-600',gold:'bg-gold/15 text-[#8a6d20]',
+    danger:'bg-danger/10 text-danger',warn:'bg-warn/10 text-amber-600',success:'bg-success/10 text-success'};
+  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${tones[tone]||tones.slate}`}>{children}</span>;
+}
+
+function CommentThread({entityType,entityId,title}: any){
+  const {api,user,t}=useApp();
+  const dir=useDirectory();
+  const [data,setData]=useState<any>(null);
+  const [body,setBody]=useState('');
+  const [category,setCategory]=useState('observation');
+  const [priority,setPriority]=useState('');
+  const [assignee,setAssignee]=useState('');
+  const [busy,setBusy]=useState(false);
+
+  const load=useCallback(()=>{
+    api(`alerts?comments=1&entityType=${entityType}&entityId=${encodeURIComponent(entityId)}`)
+      .then(setData).catch(()=>setData({comments:[],canWrite:false}));
+  },[api,entityType,entityId]);
+  useEffect(()=>{ if(entityId) load(); },[entityId,load]);
+
+  const post=async()=>{
+    if(!body.trim()) return;
+    setBusy(true);
+    try{
+      const r=await api('alerts',{method:'POST',body:{action:'addComment',entityType,entityId,body,category,priority:priority||undefined,assigneeId:assignee||undefined}});
+      setBody(''); setPriority(''); setAssignee('');
+      if(r.mentioned?.length) toast.success(t('comments.notified',{who:r.mentioned.map(m=>'@'+m).join(', ')}));
+      load();
+    }catch(e: any){ toast.error(e.message); }
+    finally{ setBusy(false); }
+  };
+  const setStatus=async(id,status)=>{
+    try{ await api('alerts',{method:'POST',body:{action:'updateComment',id,status}}); load(); }
+    catch(e: any){ toast.error(e.message); }
+  };
+  const remove=async(id)=>{
+    try{ await api('alerts',{method:'POST',body:{action:'deleteComment',id}}); load(); }
+    catch(e: any){ toast.error(e.message); }
+  };
+
+  if(!data) return null;
+  const comments=data.comments||[];
+
+  return <Card className="p-4">
+    <SectionTitle right={<span className="text-xs text-slate-400">{t('comments.count',{n:comments.length})}</span>}>
+      {title||t('comments.title')}
+    </SectionTitle>
+
+    {comments.length===0&&<p className="text-sm text-slate-400 italic mb-3">{t('comments.empty')}</p>}
+    <div className="grid gap-3 mb-4">
+      {comments.map(c=><div key={c.id} className={`p-3 rounded-lg border ${c.status==='resolved'?'border-slate-100 bg-slate-50/60 opacity-70':'border-slate-200'}`}>
+        <div className="flex flex-wrap items-center gap-1.5 mb-1">
+          <span className="text-sm font-semibold text-navy">{c.authorName||'—'}</span>
+          <span className="text-[11px] text-slate-400">{fmtDT(c.createdAt)}</span>
+          {c.category&&<Chip tone={c.category==='incident'?'danger':'slate'}>{t('comments.cat.'+c.category)}</Chip>}
+          {c.priority&&<Chip tone={c.priority==='high'?'danger':c.priority==='medium'?'warn':'slate'}>{t('comments.prio.'+c.priority)}</Chip>}
+          {c.assigneeName&&<Chip tone="gold">→ {c.assigneeName}</Chip>}
+          <Chip tone={c.status==='resolved'?'success':c.status==='in_progress'?'warn':'slate'}>{t('comments.status.'+c.status)}</Chip>
+        </div>
+        <CommentBody body={c.body} dir={dir}/>
+        {data.canWrite&&<div className="flex items-center gap-2 mt-2">
+          {C_STATUSES.filter(s=>s!==c.status).map(s=>
+            <button key={s} onClick={()=>setStatus(c.id,s)} className="text-[11px] text-slate-400 hover:text-navy hover:underline">{t('comments.markAs.'+s)}</button>)}
+          {(user.role==='admin'||c.authorId===user.id)&&
+            <button onClick={()=>remove(c.id)} className="text-[11px] text-slate-300 hover:text-danger hover:underline ml-auto">{t('common.delete')}</button>}
+        </div>}
+      </div>)}
+    </div>
+
+    {data.canWrite
+      ? <div className="grid gap-2">
+          <MentionInput value={body} onChange={setBody} dir={dir} placeholder={t('comments.placeholder')}/>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={category} onChange={setCategory} className="w-40"
+              options={CATEGORIES.map(c=>({value:c,label:t('comments.cat.'+c)}))}/>
+            <Select value={priority} onChange={setPriority} className="w-36"
+              options={[{value:'',label:t('comments.noPriority')},...PRIORITIES.map(p=>({value:p,label:t('comments.prio.'+p)}))]}/>
+            <Select value={assignee} onChange={setAssignee} className="w-44"
+              options={[{value:'',label:t('comments.noAssignee')},...dir.map(u=>({value:u.id,label:u.name}))]}/>
+            <Btn onClick={post} disabled={busy||!body.trim()} className="ml-auto">{t('comments.post')}</Btn>
+          </div>
+        </div>
+      : <p className="text-xs text-slate-400 italic">{t('comments.readOnly')}</p>}
+  </Card>;
+}
+
+// Structured post-mortem. Separate from the thread above because it is a document with
+// required sections and a validation step, not a conversation — the discussion around it
+// still happens in the comments attached to the same entity.
+function IncidentReview({entityType,entityId}: any){
+  const {api,t}=useApp();
+  const [data,setData]=useState<any>(null);
+  const [draft,setDraft]=useState<any>(null);
+  const [busy,setBusy]=useState(false);
+
+  const load=useCallback(()=>{
+    api(`alerts?reviews=1&entityType=${entityType}&entityId=${encodeURIComponent(entityId)}`)
+      .then(setData).catch(()=>setData({reviews:[],canWrite:false}));
+  },[api,entityType,entityId]);
+  useEffect(()=>{ if(entityId) load(); },[entityId,load]);
+
+  const save=async(extra={})=>{
+    setBusy(true);
+    try{
+      await api('alerts',{method:'POST',body:{action:'saveReview',entityType,entityId,...draft,...extra}});
+      setDraft(null); load(); toast.success(t('review.saved'));
+    }catch(e: any){ toast.error(e.message); }
+    finally{ setBusy(false); }
+  };
+
+  if(!data) return null;
+  const reviews=data.reviews||[];
+  const FIELDS=[['problem','review.problem'],['impact','review.impact'],['rootCause','review.rootCause'],['correctiveActions','review.actions']];
+
+  return <Card className="p-4">
+    <SectionTitle right={data.canWrite&&!draft&&
+      <Btn variant="outline" size="sm" onClick={()=>setDraft({title:'',severity:'medium',problem:'',impact:'',rootCause:'',correctiveActions:''})}>
+        <Icon name="plus" className="w-3.5 h-3.5"/>{t('review.open')}</Btn>}>
+      {t('review.title')}
+    </SectionTitle>
+
+    {reviews.length===0&&!draft&&<p className="text-sm text-slate-400 italic">{t('review.none')}</p>}
+
+    <div className="grid gap-3">
+      {reviews.map(rv=><div key={rv.id} className="p-3 rounded-lg border border-slate-200">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <span className="text-sm font-semibold text-navy">{rv.title}</span>
+          <Chip tone={rv.severity==='critical'||rv.severity==='high'?'danger':rv.severity==='medium'?'warn':'slate'}>{t('review.sev.'+rv.severity)}</Chip>
+          <Chip tone={rv.status==='validated'?'success':rv.status==='in_review'?'warn':'slate'}>{t('review.st.'+rv.status)}</Chip>
+          <span className="text-[11px] text-slate-400">{rv.openedBy} · {fmtDT(rv.openedAt)}</span>
+          {rv.validatedAt&&<span className="text-[11px] text-success">✓ {t('review.validatedBy',{who:rv.validatedBy})} · {fmtDT(rv.validatedAt)}</span>}
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          {FIELDS.map(([k,label])=><div key={k}>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{t(label)}</div>
+            <p className="text-sm text-navy whitespace-pre-wrap">{rv[k]||<span className="text-slate-400 italic">{t('review.notFilled')}</span>}</p>
+          </div>)}
+        </div>
+        {data.canWrite&&<div className="flex items-center gap-2 mt-2">
+          <button onClick={()=>setDraft({...rv})} className="text-[11px] text-slate-400 hover:text-navy hover:underline">{t('common.edit')}</button>
+          {/* A review can be signed off and un-signed: a post-mortem that turns out wrong
+              must be reopenable, and the server clears the validation stamp when it is. */}
+          {rv.status!=='validated'
+            ? <button onClick={()=>{setDraft({...rv}); save({id:rv.id,status:'validated'});}} className="text-[11px] text-success hover:underline">{t('review.validate')}</button>
+            : <button onClick={()=>{setDraft({...rv}); save({id:rv.id,status:'in_review'});}} className="text-[11px] text-slate-400 hover:underline">{t('review.reopen')}</button>}
+        </div>}
+      </div>)}
+    </div>
+
+    {draft&&<div className="mt-3 p-3 rounded-lg border border-gold/40 bg-gold/[.03] grid gap-2">
+      <div className="flex gap-2">
+        <Input value={draft.title} onChange={e=>setDraft({...draft,title:e.target.value})} placeholder={t('review.titlePlaceholder')}/>
+        <Select value={draft.severity} onChange={v=>setDraft({...draft,severity:v})} className="w-40"
+          options={['low','medium','high','critical'].map(s=>({value:s,label:t('review.sev.'+s)}))}/>
+      </div>
+      {FIELDS.map(([k,label])=><Field key={k} label={t(label)}>
+        <textarea rows={2} value={draft[k]||''} onChange={e=>setDraft({...draft,[k]:e.target.value})}
+          className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-gold/40"/>
+      </Field>)}
+      <div className="flex justify-end gap-2">
+        <Btn variant="ghost" onClick={()=>setDraft(null)}>{t('common.cancel')}</Btn>
+        <Btn onClick={()=>save()} disabled={busy||!draft.title?.trim()}>{t('common.save')}</Btn>
+      </div>
+    </div>}
+  </Card>;
+}
+
+/* ============================================================
    PASSWORD POLICY (shared: Admin·Users + Profile)
    ============================================================ */
 // Labels are i18n keys (translated at each call site via t()), not display text.
@@ -1483,5 +1765,6 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 
 export {
   FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AvatarPickerModal, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, StatusStrip, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk,
-  useAnalysisFilters, AnalysisFilterBar, MultiSelect, filtersToQuery, DOW_KEYS
+  useAnalysisFilters, AnalysisFilterBar, MultiSelect, filtersToQuery, DOW_KEYS,
+  CommentThread, IncidentReview, useDirectory, MentionInput
 };

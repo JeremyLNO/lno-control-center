@@ -277,3 +277,17 @@ export async function sendWeeklyReportEmail(to, rv) {
     html,
   });
 }
+
+// "X mentioned you" — the notification that makes @handles worth writing. Deliberately short:
+// its whole job is to carry the excerpt and a link straight to the comment in its context,
+// not to reproduce the discussion in an inbox.
+export async function sendMentionEmail(to, { authorName, excerpt, link, entityLabel }) {
+  const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
+  const html = alertEmailHtml(
+    `${escapeHtml(authorName || 'Someone')} mentioned you`,
+    `<div style="color:#64748B;font-size:12px;margin-bottom:6px">${escapeHtml(entityLabel || '')}</div>
+     <blockquote style="margin:0;padding:10px 14px;background:#F8F7F4;border-left:3px solid ${GOLD};border-radius:0 8px 8px 0;color:#334155;font-size:13.5px;white-space:pre-wrap">${escapeHtml(excerpt || '')}</blockquote>
+     <a href="${link}" style="display:inline-block;margin-top:12px;color:${GOLD};font-weight:600;font-size:13px">Open the comment →</a>`
+  );
+  await client().emails.send({ from, to, subject: `${authorName || 'Someone'} mentioned you in LNO Control Center`, html });
+}

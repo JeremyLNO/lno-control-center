@@ -7,7 +7,7 @@
 export const PERMISSIONS = [
   'view_activity','view_realtime','view_trades',
   'view_reports_daily','view_reports_weekly','view_reports_monthly','view_exchanges','export_data',
-  'view_audit','manage_exchanges','manage_whatsapp','manage_funds','manage_strategies',
+  'view_audit','manage_exchanges','manage_whatsapp','manage_funds','manage_strategies','manage_comments',
 ];
 export const ROLE_PERMS = {
   admin: PERMISSIONS.slice(),

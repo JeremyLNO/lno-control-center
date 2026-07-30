@@ -3,7 +3,7 @@ const { useState, useEffect, useMemo, useCallback } = React;
 import {
   fmtSigned, fmtNum, fmtPctPlain, fmtDT, fmtDate, clsPnl, Icon, Card, SectionTitle, Btn, Badge,
   StatusPill, Select, Field, Input, Modal, KpiCard, PageHead, Denied, Loader, EmptyState,
-  useApp, hasPerm, toast
+  useApp, hasPerm, toast, CommentThread
 } from '../ui'
 
 /* ============================================================
@@ -101,6 +101,7 @@ export default function PlaybookPage(){
             <ExpectationsCard s={sel} t={t}/>
             <DeclarationCard s={sel} t={t}/>
             <VersionsCard s={sel} t={t}/>
+            <CommentThread entityType="strategy" entityId={sel.id}/>
           </div>}
         </div>}
 

@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useMemo } = React;
 import {
   fmtSigned, fmtUSD, fmtNum, fmtPrice, fmtDT, fmtSeconds, clsPnl, Icon, Card, SectionTitle, Btn,
-  Badge, KpiCard, PageHead, Denied, Loader, EmptyState, SideTag, useApp, hasPerm, useAnalysisFilters
+  Badge, KpiCard, PageHead, Denied, Loader, EmptyState, SideTag, useApp, hasPerm, CommentThread
 } from '../ui'
 
 /* ============================================================
@@ -182,6 +182,8 @@ export default function PositionPage(){
         </div>)}
       </div>
     </Card>}
+
+    <div className="mb-4"><CommentThread entityType="position" entityId={d.id}/></div>
 
     <Card className="p-4">
       <SectionTitle>{t('analysis.notInstrumented')}</SectionTitle>

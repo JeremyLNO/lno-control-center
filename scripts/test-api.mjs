@@ -747,6 +747,75 @@ const wkRow = (await db.query("SELECT kind,status FROM reports WHERE kind='weekl
 ok('the archived weekly report is auto-verified (internal-only)', wkRow && wkRow.status === 'verified', wkRow);
 await db.query("DELETE FROM trades WHERE symbol LIKE 'WK%'");
 
+// ---------------------------------------------------------------------------------------
+// Discussion layer: comments, @mentions, incident review (api/_lib/comments.js).
+// ---------------------------------------------------------------------------------------
+const { extractHandles } = await import('../api/_lib/comments.js');
+ok('handles are extracted from a comment body',
+  JSON.stringify(extractHandles('hi @sophie.ops and @marc.view, see @sophie.ops again').sort()) === JSON.stringify(['marc.view', 'sophie.ops']),
+  extractHandles('hi @sophie.ops and @marc.view, see @sophie.ops again'));
+// A trailing full stop belongs to the sentence, not to the handle.
+ok('a handle at the end of a sentence keeps its punctuation out', extractHandles('ping @marc.view.')[0] === 'marc.view', extractHandles('ping @marc.view.'));
+
+r = await call(alerts, { method: 'POST', headers: authH, body: {
+  action: 'addComment', entityType: 'position', entityId: 'binance:BTCUSDT:1',
+  body: 'Widened the stop here, @sophie.ops can you re-check the sizing?', category: 'question', priority: 'high' } });
+ok('a comment is posted and its mention resolved', r.status === 200 && r.body.id && r.body.mentioned.includes('sophie.ops'), r.body);
+const commentId = r.body.id;
+// An @word matching nobody is text, not a broken mention: no row, no notification.
+r = await call(alerts, { method: 'POST', headers: authH, body: {
+  action: 'addComment', entityType: 'position', entityId: 'binance:BTCUSDT:1', body: 'cc @nobody.at.all' } });
+ok('an @handle matching no user creates no mention', r.status === 200 && r.body.mentioned.length === 0, r.body);
+
+r = await call(alerts, { method: 'GET', headers: authH, query: { comments: '1', entityType: 'position', entityId: 'binance:BTCUSDT:1' } });
+ok('the thread reads back with its metadata', r.status === 200 && r.body.comments.length === 2 && r.body.comments[0].category === 'question' && r.body.comments[0].priority === 'high', r.body.comments);
+ok('comments carry their resolved mentions', r.body.comments[0].mentions.some(m => m.username === 'sophie.ops'), r.body.comments[0].mentions);
+
+// The mention lands in the MENTIONED user's inbox, not the author's.
+let sophieLogin = await call(auth, { method: 'POST', body: { action: 'login', email: 'sophie.ops@lno.company', password: 'admin' } });
+const sophieH = { authorization: 'Bearer ' + sophieLogin.body.token };
+r = await call(alerts, { method: 'GET', headers: sophieH, query: { mentions: '1' } });
+ok('the mentioned user sees it in their inbox', r.status === 200 && r.body.mentions.length === 1 && r.body.mentions[0].commentId === commentId, r.body.mentions);
+ok('the mention carries what a deep link needs', r.body.mentions[0].entityType === 'position' && r.body.mentions[0].entityId === 'binance:BTCUSDT:1', r.body.mentions[0]);
+r = await call(alerts, { method: 'GET', headers: authH, query: { mentions: '1' } });
+ok('the author does not get a mention notification for their own comment', r.body.mentions.length === 0, r.body.mentions);
+
+r = await call(alerts, { method: 'POST', headers: sophieH, body: { action: 'readMentions' } });
+ok('mentions can be marked read', r.status === 200 && r.body.unread === 0, r.body);
+r = await call(alerts, { method: 'GET', headers: sophieH, query: { mentions: '1' } });
+ok('...and drop out of the unread inbox', r.body.mentions.length === 0, r.body.mentions);
+
+// Resolution is stamped server-side, so "who closed this" is never the client's claim.
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'updateComment', id: commentId, status: 'resolved' } });
+ok('a comment can be resolved', r.status === 200, r.body);
+r = await call(alerts, { method: 'GET', headers: authH, query: { comments: '1', entityType: 'position', entityId: 'binance:BTCUSDT:1' } });
+const resolved = r.body.comments.find(c => c.id === commentId);
+ok('resolution records who and when, server-side', resolved.status === 'resolved' && !!resolved.resolvedAt && !!resolved.resolvedBy, resolved);
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'updateComment', id: commentId, status: 'open' } });
+r = await call(alerts, { method: 'GET', headers: authH, query: { comments: '1', entityType: 'position', entityId: 'binance:BTCUSDT:1' } });
+ok('reopening clears the resolution stamp', r.body.comments.find(c => c.id === commentId).resolvedAt === null, r.body.comments.find(c => c.id === commentId));
+
+// Incident review: a document with a validation step, not a conversation.
+r = await call(alerts, { method: 'POST', headers: authH, body: {
+  action: 'saveReview', entityType: 'anomaly', entityId: '1', title: 'SOLUSDT drawdown',
+  problem: 'PF collapsed', impact: '-400 over 3 days', rootCause: 'stop widened without retest',
+  correctiveActions: 'revert to 4x ATR', severity: 'high' } });
+ok('an incident review is opened as a draft', r.status === 200 && r.body.review.status === 'draft' && r.body.review.severity === 'high', r.body.review);
+const reviewId = r.body.review.id;
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'saveReview', id: reviewId, status: 'validated' } });
+ok('validating stamps who signed it off', r.body.review.status === 'validated' && !!r.body.review.validatedBy && !!r.body.review.validatedAt, r.body.review);
+// A post-mortem that turns out wrong must be reopenable, and reopening must un-sign it.
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'saveReview', id: reviewId, status: 'in_review' } });
+ok('reopening a review clears its validation', r.body.review.status === 'in_review' && r.body.review.validatedBy === null && r.body.review.validatedAt === null, r.body.review);
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'saveReview', entityType: 'anomaly', entityId: '2' } });
+ok('a review without a title is rejected -> 400', r.status === 400, r.body);
+
+// The colleague directory is readable by any signed-in user, but exposes nothing sensitive.
+r = await call(profile, { method: 'GET', headers: sophieH, query: { directory: '1' } });
+ok('any signed-in user can read the colleague directory', r.status === 200 && r.body.users.length >= 2, r.body.users?.length);
+ok('the directory exposes no role, phone or login data',
+  Object.keys(r.body.users[0]).every(k => ['id', 'username', 'name', 'handle', 'avatar'].includes(k)), Object.keys(r.body.users[0]));
+
 r = await call(bots, { method: 'GET', headers: authH });
 const adaBot = r.body.bots.find(b => b.symbol === 'ADAUSDT');
 ok('a detected pair becomes an unassigned bot id "exchange:symbol"', !!adaBot && adaBot.id === 'binance:ADAUSDT' && adaBot.fundId === null && adaBot.side === 'LONG', adaBot);
@@ -1113,6 +1182,19 @@ r = await call(bots, { method: 'GET', headers: opH, query: { playbook: '1' } });
 ok('view_trades is enough to READ the playbook', r.status === 200, r.status);
 r = await call(bots, { method: 'POST', headers: opH, body: { action: 'createStrategy', name: 'nope' } });
 ok('...but not to edit it without manage_strategies -> 403', r.status === 403, r.status);
+// Reading a thread follows the same gate as the data it hangs off; WRITING needs its own
+// permission, so a read-only analyst cannot annotate the record.
+r = await call(alerts, { method: 'GET', headers: opH, query: { comments: '1', entityType: 'position', entityId: 'x' } });
+ok('view_trades is enough to READ a discussion', r.status === 200 && r.body.canWrite === false, { status: r.status, canWrite: r.body?.canWrite });
+r = await call(alerts, { method: 'POST', headers: opH, body: { action: 'addComment', entityType: 'position', entityId: 'x', body: 'nope' } });
+ok('...but posting without manage_comments -> 403', r.status === 403, r.status);
+await setPerms({ operator: ['view_trades', 'manage_comments'] });
+r = await call(alerts, { method: 'POST', headers: opH, body: { action: 'addComment', entityType: 'position', entityId: 'x', body: 'ok now' } });
+ok('manage_comments lets a non-admin post', r.status === 200, r.status);
+// Reading your own mentions is not a shared-state write and needs no permission at all.
+await setPerms({ operator: [] });
+r = await call(alerts, { method: 'GET', headers: opH, query: { mentions: '1' } });
+ok('any signed-in user can read their own mentions, with no permission', r.status === 200, r.status);
 await setPerms({ operator: ['view_trades', 'manage_strategies'] });
 r = await call(bots, { method: 'POST', headers: opH, body: { action: 'createStrategy', name: 'Operator strategy' } });
 ok('manage_strategies lets a non-admin edit the playbook', r.status === 200, r.status);
