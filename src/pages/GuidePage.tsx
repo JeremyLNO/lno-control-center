@@ -128,7 +128,9 @@ export default function GuidePage(){
       </div>
     </Card>)}
 
-    <PermissionMatrix/>
+    {/* The rights table is a map of who can do what across the whole desk — org-structure
+        information, not something a viewer needs to use the product. Admins only. */}
+    {user.role==='admin'&&<PermissionMatrix/>}
   </div>;
 }
 
