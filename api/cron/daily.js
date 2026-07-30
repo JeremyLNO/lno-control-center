@@ -17,6 +17,7 @@ import { reportText, breachAlertText, dormantAlertText, dailyDigestText, verifyR
 import { syncExchanges } from '../_lib/sync.js';
 import { recordDailyFundSnapshot } from '../_lib/employeeFund.js';
 import { buildMonthlyPdf, buildWeeklyPdf, buildDailyPdf } from '../_lib/report.js';
+import { buildLiveActivityState, pushLiveActivity } from '../_lib/liveActivity.js';
 import { sendDailyReportEmail, sendWeeklyReportEmail, sendVerifyReminderEmail, dailyReportHtml, weeklyReportHtml, monthlyReportHtml } from '../_lib/mailer.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
@@ -124,6 +125,13 @@ export default async function handler(req, res) {
       await query(`INSERT INTO app_config (key,value) VALUES ('dormantAlerted',$1::jsonb)
          ON CONFLICT (key) DO UPDATE SET value=$1::jsonb`, [JSON.stringify(nextMap)]);
     }
+
+    // 3c) iOS Live Activity — pushed on EVERY run, including ?mode=alerts. That is the point:
+    // the Lock Screen card is the one surface meant to track the book in near-real-time, and
+    // the 5-minute alerts cron is the only thing running that often. pushLiveActivity() skips
+    // itself when nothing material changed, so the rate limit is spent on real movement.
+    try { sent.push({ type: 'live-activity', ...(await pushLiveActivity(buildLiveActivityState(port.bots, series.map(s => s.equity)))) }); }
+    catch (e) { sent.push({ type: 'live-activity', error: String(e.message || e) }); }
 
     // 4) reports — global + per-fund, grouped by fund. Skipped entirely in ?mode=alerts so a
     // frequent trigger can never re-send the daily/weekly/monthly reports — only the real

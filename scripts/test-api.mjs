@@ -105,6 +105,7 @@ let binancePositions = [
   { symbol: 'XRPUSDT', positionAmt: '-2000', entryPrice: '0.62', markPrice: '0.60',  unRealizedProfit: '40', leverage: '3',  notional: '-1200' },
   { symbol: 'BTCUSDT', positionAmt: '0',     entryPrice: '0',    markPrice: '67000', unRealizedProfit: '0',  leverage: '10', notional: '0' },
 ];
+const oneSignalCalls = [];   // Live Activity pushes the cron made
 let binanceFail = false; // when true, Binance returns the classic -2015 (key/IP/permissions) error
 let walletBalance = '120000'; // mutable so tests can simulate a real capital addition between syncs
 globalThis.fetch = async (url, opts) => {
@@ -123,6 +124,7 @@ globalThis.fetch = async (url, opts) => {
     }
     return { ok: true, status: 200, json: async () => ({}) };
   }
+  if (u.includes('api.onesignal.com')) { oneSignalCalls.push(JSON.parse(opts.body)); return { ok: true, status: 200, text: async () => '{"id":"la_1"}' }; }
   if (u.includes('textmebot.com')) { const uu = new URL(u); sentMessages.push({ text: uu.searchParams.get('text') || '', to: uu.searchParams.get('recipient') || '' }); return { ok: true, status: 200, text: async () => 'Success! Message Sent.' }; }
   if (u.includes('api.resend.com')) {
     const payload = JSON.parse(opts.body);
@@ -875,6 +877,51 @@ ok('the monthly HTML preview carries the detailed review, not just the headline'
 
 await db.query("DELETE FROM trades WHERE symbol LIKE 'MO%'");
 await db.query('DELETE FROM funds WHERE id=$1', [moFund]);
+
+// ---------------------------------------------------------------------------------------
+// iOS Live Activity push (api/_lib/liveActivity.js). The payload must match the Swift
+// ContentState key for key — ActivityKit silently drops anything that doesn't.
+// ---------------------------------------------------------------------------------------
+const { buildLiveActivityState, pushLiveActivity } = await import('../api/_lib/liveActivity.js');
+const laBots = [
+  { status: 'open', side: 'LONG',  unrealized_pnl: '100', liquidation_price: '50', mark: '100' }, // 50% away
+  { status: 'open', side: 'SHORT', unrealized_pnl: '-30', liquidation_price: '82', mark: '100' }, // 18% -> warn
+  { status: 'closed', side: 'LONG', unrealized_pnl: '999', liquidation_price: '10', mark: '100' },
+];
+let la = buildLiveActivityState(laBots, [10, 20, 30]);
+ok('live activity state counts only OPEN positions', la.openCount === 2 && la.longCount === 1 && la.shortCount === 1, la);
+ok('live activity state sums unrealized PnL', la.unrealizedPnl === 70, la.unrealizedPnl);
+ok('live activity risk is the WORST band across the book', la.risk === 'warn', la.risk);
+ok('live activity state carries the equity trail', JSON.stringify(la.spark) === JSON.stringify([10, 20, 30]), la.spark);
+// The struct is a contract: an extra or renamed key is dropped on the device, silently.
+ok('live activity payload has exactly the ContentState keys',
+  JSON.stringify(Object.keys(la).sort()) === JSON.stringify(['longCount','openCount','risk','shortCount','spark','unrealizedPnl','updatedAt']),
+  Object.keys(la));
+
+// Unconfigured must be a no-op, not a crash: the key lives only in production.
+delete process.env.ONESIGNAL_APP_ID; delete process.env.ONESIGNAL_REST_API_KEY;
+ok('no push without credentials', (await pushLiveActivity(la)).skipped === 'not configured');
+
+process.env.ONESIGNAL_APP_ID = 'app-test'; process.env.ONESIGNAL_REST_API_KEY = 'key-test';
+oneSignalCalls.length = 0;
+await db.query("DELETE FROM app_config WHERE key='liveActivitySig'");
+let laRes = await pushLiveActivity(la);
+ok('a changed book is pushed to OneSignal', laRes.pushed === true && oneSignalCalls.length === 1, { laRes, calls: oneSignalCalls.length });
+ok('the push addresses the shared activity as an update',
+  oneSignalCalls[0].event === 'update' && oneSignalCalls[0].event_updates.openCount === 2, oneSignalCalls[0]);
+
+// Apple rate-limits Live Activity updates and this cron runs every 5 minutes: re-sending an
+// identical card would burn that budget on nothing. updatedAt alone must not defeat the dedup.
+const laAgain = { ...buildLiveActivityState(laBots, [10, 20, 30]), updatedAt: la.updatedAt + 600 };
+ok('an unchanged book is NOT pushed again', (await pushLiveActivity(laAgain)).skipped === 'unchanged' && oneSignalCalls.length === 1, oneSignalCalls.length);
+
+const laMoved = buildLiveActivityState([...laBots, { status: 'open', side: 'LONG', unrealized_pnl: '5', mark: '100' }], [10, 20, 30]);
+ok('a real change IS pushed', (await pushLiveActivity(laMoved)).pushed === true && oneSignalCalls.length === 2, oneSignalCalls.length);
+
+// Nothing open = no card to update; the app ends the activity instead of showing an empty one.
+ok('an empty book is not pushed', (await pushLiveActivity(buildLiveActivityState([], []))).skipped === 'no open positions');
+delete process.env.ONESIGNAL_APP_ID; delete process.env.ONESIGNAL_REST_API_KEY;
+await db.query("DELETE FROM app_config WHERE key='liveActivitySig'");
 
 // ---------------------------------------------------------------------------------------
 // Discussion layer: comments, @mentions, incident review (api/_lib/comments.js).
