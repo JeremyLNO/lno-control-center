@@ -22,6 +22,10 @@ jobs:
     steps:
       - name: Trigger alert check
         run: |
-          curl -sf -X POST "https://cc.lno.company/api/cron/daily?mode=alerts" \
+          # The body was discarded, which made every silent no-op invisible: a missing env
+          # var read exactly like a healthy run. Print the per-channel outcomes instead —
+          # they carry no secrets, only what each channel did.
+          body=$(curl -sf -X POST "https://cc.lno.company/api/cron/daily?mode=alerts" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -o /dev/null -w "status=%{http_code}\n"
+            -w "\nstatus=%{http_code}")
+          echo "$body"
