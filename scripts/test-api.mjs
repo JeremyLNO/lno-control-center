@@ -228,6 +228,12 @@ ok('WhatsApp log ?q filters server-side (no matches)', r.status === 200 && r.bod
 // global daily-PnL threshold breach (pnlDayThreshold set very high above) + weekly/monthly via force
 sentMessages.length = 0;
 r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'all' } });
+// A desk with no exchange connected and no equity reports 0, which reads as -100% off the
+// peak — a drawdown alert manufactured by missing data. It must be suppressed; the daily-PnL
+// threshold, which no absent-data state can trip on its own, must stay armed.
+ok('no drawdown alert when there is no exchange and no equity to measure',
+  !r.body.breaches.some(b => b.kind === 'drawdown') && r.body.sent.some(x => x.type === 'breach' && x.skipped),
+  { breaches: r.body.breaches, sent: r.body.sent.filter(x => x.type === 'breach') });
 ok('global daily-PnL threshold breach detected', r.body.breaches.some(b => b.kind === 'pnlDay'), r.body.breaches);
 ok('weekly + monthly reports sent (force=all)', r.body.sent.some(s => s.type === 'weekly') && r.body.sent.some(s => s.type === 'monthly'), r.body.sent.map(s => s.type));
 // monthly PDF is built + archived (sent as a text summary; the PDF stays downloadable)

@@ -72,11 +72,28 @@ export default async function handler(req, res) {
     // 3) threshold alerts (global portfolio): drawdown from history, daily PnL from the sync.
     // Structured (not pre-formatted English) so breachAlertText() can render them per language;
     // breachSummaries stays English — it's only ever stored in the admin-only alerts.summary column.
+    const sent0 = [];   // notes recorded before `sent` exists, merged into it below
     const breaches = [];
     const breachSummaries = [];
     const ddLimit = Math.abs(cfg.drawdownPct ?? 10);
     const pnlLimit = cfg.pnlDayThreshold ?? -5000;
-    if (m.maxDrawdownPct <= -ddLimit) {
+    // A desk with NO exchange connected AND no equity to show reports 0, which every
+    // threshold reads as a total loss — a -100% drawdown alert caused by missing data rather
+    // than by any move in the market. Silence is the honest answer there: we do not know the
+    // equity, so we cannot say a limit was breached. Losing the connection is itself already
+    // alerted on, separately, as an api_error (see sync.js), so nothing goes unreported.
+    //
+    // BOTH conditions, not just the connection: equity can legitimately come from the
+    // database while no exchange happens to be reachable this minute, and a real breach in
+    // that state still deserves an alert.
+    //
+    // Scoped to DRAWDOWN alone, because that is the threshold the artefact manufactures: a
+    // history that ends at 0 is -100% off its peak whatever the peak was. The daily-PnL
+    // threshold is not affected the same way — with no data the day's PnL is 0, which does
+    // not cross a negative limit — so it stays armed.
+    const equityKnown = !(synced && synced.connected === 0 && !port.equity);
+    if (!equityKnown) sent0.push({ type: 'breach', skipped: 'drawdown unknown: no exchange connected and no equity' });
+    if (equityKnown && m.maxDrawdownPct <= -ddLimit) {
       breaches.push({ kind: 'drawdown', pct: m.maxDrawdownPct, limit: ddLimit });
       breachSummaries.push(`Portfolio: drawdown ${m.maxDrawdownPct.toFixed(1)}% (limit -${ddLimit}%)`);
     }
@@ -85,7 +102,7 @@ export default async function handler(req, res) {
       breachSummaries.push(`Portfolio: daily PnL ${fmt(port.pnlDay)} (limit ${fmt(pnlLimit)})`);
     }
 
-    const sent = [];
+    const sent = [...sent0];
     // Edge-triggered dedup: the alerts-only cron fires every ~10 minutes (see
     // .github/workflows/alert-check.yml), so without this both breach and dormant-bot
     // alerts would re-send the exact same WhatsApp/email every single run for as long as
