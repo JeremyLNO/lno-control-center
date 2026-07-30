@@ -16,7 +16,10 @@ import {
 // can produce. The PERMISSIONS TABLE at the end is NOT: it is derived from the same constants
 // the app enforces with, so it can never drift into describing rights the app doesn't grant.
 
-type Feature = { icon: string; key: string; path?: string; perm?: string | string[] | null };
+// perm: a permission (or list) | null = being signed in is enough | undefined = admin only.
+// `allow` is the escape hatch for the one gate that is not a permission at all — see the
+// employee fund below.
+type Feature = { icon: string; key: string; path?: string; perm?: string | string[] | null; allow?: (u: any) => boolean };
 type Group = { key: string; features: Feature[] };
 
 const GROUPS: Group[] = [
@@ -42,7 +45,10 @@ const GROUPS: Group[] = [
   { key: 'run', features: [
     { icon: 'link', key: 'exchanges', path: '/admin/exchanges', perm: 'view_exchanges' },
     { icon: 'layers', key: 'funds', path: '/funds', perm: 'view_trades' },
-    { icon: 'dollar', key: 'equity', path: '/equity', perm: null },
+    // The employee fund is staff-only — shareholders are external investors, not staff — and
+    // that rule is a ROLE check in the sidebar, not a permission. Mirrored here so the guide
+    // greys it out for them instead of advertising a page they cannot open.
+    { icon: 'dollar', key: 'equity', path: '/equity', perm: null, allow: (u) => u.role !== 'shareholder' },
     { icon: 'users', key: 'users', path: '/admin/users', perm: undefined },
     { icon: 'shield', key: 'rules', path: '/admin/rules', perm: undefined },
     { icon: 'filetext', key: 'audit', path: '/admin/audit', perm: 'view_audit' },
@@ -83,6 +89,7 @@ export default function GuidePage(){
   },[user]);
 
   const allowed=(f: Feature)=>{
+    if(f.allow) return f.allow(user);           // a gate that isn't a permission
     if(f.perm===null) return true;              // signed in is enough
     if(f.perm===undefined) return user.role==='admin';
     return hasPerm(user,f.perm);
