@@ -38,6 +38,43 @@ export const DEFAULT_ANOMALY_CONFIG = {
 // stays wired for the next gap.
 export const UNDETECTABLE = {};
 
+// Editable range for each threshold. A detector tuned to 0 would fire on every trade and a
+// detector tuned to 10000 would never fire at all — either way it stops being a signal, so
+// the bounds are enforced here rather than trusted from the form.
+export const ANOMALY_LIMITS = {
+  recentDays:           { min: 3,  max: 90,   unit: 'days' },
+  baselineDays:         { min: 7,  max: 365,  unit: 'days' },
+  minTrades:            { min: 3,  max: 200,  unit: 'trades' },
+  pfDropPct:            { min: 5,  max: 95,   unit: '%' },
+  ddRisePct:            { min: 10, max: 500,  unit: '%' },
+  lossConcentrationPct: { min: 20, max: 100,  unit: '%' },
+  freqChangePct:        { min: 20, max: 1000, unit: '%' },
+  dirDivergencePct:     { min: 10, max: 100,  unit: 'pts' },
+  latencyMs:            { min: 200, max: 60000, unit: 'ms' },
+  dormantHours:         { min: 2,  max: 720,  unit: 'h' },
+  slippageRisePct:      { min: 10, max: 1000, unit: '%' },
+  cancelRatePct:        { min: 10, max: 100,  unit: '%' },
+};
+
+export async function saveAnomalyConfig(patch = {}) {
+  const current = await getAnomalyConfig();
+  const next = { ...current };
+  for (const [k, lim] of Object.entries(ANOMALY_LIMITS)) {
+    if (patch[k] == null || patch[k] === '') continue;
+    const n = Number(patch[k]);
+    if (!Number.isFinite(n)) continue;
+    next[k] = Math.min(lim.max, Math.max(lim.min, n));
+  }
+  // Stored as a DIFF against the defaults, not as a full copy: a threshold the desk never
+  // touched should keep tracking the default if that default is ever revised, instead of
+  // being frozen at whatever it happened to be the day someone opened this form.
+  const diff = {};
+  for (const [k, v] of Object.entries(next)) if (v !== DEFAULT_ANOMALY_CONFIG[k]) diff[k] = v;
+  await query(`INSERT INTO app_config (key,value) VALUES ('anomalyConfig',$1::jsonb)
+               ON CONFLICT (key) DO UPDATE SET value=$1::jsonb`, [JSON.stringify(diff)]);
+  return next;
+}
+
 export async function getAnomalyConfig() {
   const { rows } = await query("SELECT value FROM app_config WHERE key='anomalyConfig'");
   return { ...DEFAULT_ANOMALY_CONFIG, ...(rows[0]?.value || {}) };

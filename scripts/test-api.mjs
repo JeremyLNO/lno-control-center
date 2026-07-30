@@ -528,11 +528,58 @@ ok('an unreachable exchange degrades the chart instead of failing the page', Arr
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', trade: 'binance:NOPEUSDT:1' } });
 ok('an unknown position -> 404', r.status === 404, r.status);
 
+// ---------------------------------------------------------------------------------------
+// MAE/MFE backfill + anomaly threshold configuration.
+// ---------------------------------------------------------------------------------------
+const { backfillExcursions } = await import('../api/_lib/tradeDetail.js');
+// The harness has no exchange reachable, so every klines call fails — which is the case that
+// matters: a backfill that cannot price anything must report that honestly and leave the
+// backlog intact, not mark rows as done.
+const beforeBackfill = (await db.query('SELECT count(*)::int AS n FROM trades WHERE closed_at IS NOT NULL AND (mae IS NULL OR mfe IS NULL)')).rows[0].n;
+const bf = await backfillExcursions({ limit: 5 });
+ok('the backfill reports what it could and could not price', typeof bf.priced === 'number' && typeof bf.failed === 'number' && typeof bf.remaining === 'number', bf);
+ok('an unreachable exchange leaves the backlog intact rather than marking rows done', bf.remaining === beforeBackfill, { before: beforeBackfill, after: bf.remaining });
+
+// Excursion averages must rest only on the trades that HAVE the measurement, and the KPI
+// block must say what share of the set that is.
+await db.query("DELETE FROM trades WHERE symbol='EXCUSDT'");
+for (const [id, net, mae, mfe] of [[7301, 100, -40, 120], [7302, -50, -90, 20], [7303, 30, null, null]]) {
+  await db.query(
+    `INSERT INTO trades (exchange,symbol,open_trade_id,close_trade_id,direction,qty,entry_price,exit_price,
+       gross_pnl,commission,funding,net_pnl,opened_at,closed_at,duration_s,entry_hour,entry_dow,fill_count,leverage,mae,mfe)
+     VALUES ('binance','EXCUSDT',$1,$1,'LONG',1,100,110,$2,0,0,$2,'2026-06-10T10:00:00Z','2026-06-10T11:00:00Z',3600,10,3,2,5,$3,$4)`,
+    [id, net, mae, mfe]);
+}
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'symbol', symbol: 'EXCUSDT', from: '2026-06-01', to: '2026-06-30' } });
+const exTot = r.body.total;
+// (-40 + -90) / 2 = -65 over the two priced trades, NOT /3 which would dilute it to -43.
+ok('excursion averages skip the unpriced trades instead of diluting toward zero',
+  exTot.avgMae === -65 && exTot.avgMfe === 70, { mae: exTot.avgMae, mfe: exTot.avgMfe });
+ok('the KPI block reports how much of the set the excursion rests on',
+  Math.abs(exTot.excursionCoverage - 2 / 3) < 1e-9, exTot.excursionCoverage);
+await db.query("DELETE FROM trades WHERE symbol='EXCUSDT'");
+
+// Thresholds: bounded server-side, stored as a diff, and re-running detection on save.
+r = await call(alerts, { method: 'GET', headers: authH, query: { anomalies: '1' } });
+ok('the findings carry the current thresholds and their bounds',
+  r.status === 200 && r.body.config.recentDays > 0 && r.body.limits.recentDays.min > 0 && r.body.canConfigure === true, { cfg: r.body.config?.recentDays, lim: r.body.limits?.recentDays });
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'saveAnomalyConfig', config: { pfDropPct: 50, minTrades: 12 } } });
+ok('thresholds save and detection re-runs in the same call', r.status === 200 && r.body.config.pfDropPct === 50 && typeof r.body.created === 'number', r.body.config);
+// A value outside the editable range would make a detector fire always or never — clamped,
+// not accepted.
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'saveAnomalyConfig', config: { pfDropPct: 9999, minTrades: -5 } } });
+ok('out-of-range thresholds are clamped, not accepted', r.body.config.pfDropPct === 95 && r.body.config.minTrades === 3, r.body.config);
+// Stored as a DIFF: an untouched threshold must keep tracking its default.
+const stored = (await db.query("SELECT value FROM app_config WHERE key='anomalyConfig'")).rows[0].value;
+ok('only the thresholds that differ from the defaults are persisted',
+  !('recentDays' in stored) && 'pfDropPct' in stored, stored);
+await db.query("DELETE FROM app_config WHERE key='anomalyConfig'");
+
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'nonsense' } });
 ok('an unknown dimension is rejected -> 400', r.status === 400, r.status);
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: 'meta' } });
 ok('analysis meta exposes dimensions, filter options and the not-instrumented list',
-  r.status === 200 && r.body.dimensions.some(d => d.key === 'leverage') && Array.isArray(r.body.options.symbol) && !!r.body.unavailable.mae_mfe, r.body.unavailable);
+  r.status === 200 && r.body.dimensions.some(d => d.key === 'leverage') && Array.isArray(r.body.options.symbol) && !!r.body.unavailable, r.body.unavailable);
 await db.query("DELETE FROM trades WHERE symbol LIKE 'AN%USDT'");
 
 // ---------------------------------------------------------------------------------------
@@ -900,7 +947,8 @@ ok('a market-style order shows no intended price rather than zero',
 // Every declared gap on this page is now measured.
 ok('the position page no longer declares any uninstrumented metric', Object.keys(r.body.unavailable).length === 0, r.body.unavailable);
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: 'meta' } });
-ok('slippage is no longer listed as unavailable in the analysis engine', !r.body.unavailable.slippage && !!r.body.unavailable.mae_mfe, r.body.unavailable);
+// MAE/MFE was the last entry; it left the list once the backfill started pricing the history.
+ok('the analysis engine declares nothing uninstrumented any more', Object.keys(r.body.unavailable).length === 0, r.body.unavailable);
 
 await db.query("DELETE FROM orders WHERE symbol='ORDUSDT'");
 await db.query("DELETE FROM trades WHERE symbol='ORDUSDT'");
@@ -1280,6 +1328,8 @@ ok('...but posting without manage_comments -> 403', r.status === 403, r.status);
 await setPerms({ operator: ['view_trades', 'manage_comments'] });
 r = await call(alerts, { method: 'POST', headers: opH, body: { action: 'addComment', entityType: 'position', entityId: 'x', body: 'ok now' } });
 ok('manage_comments lets a non-admin post', r.status === 200, r.status);
+r = await call(alerts, { method: 'POST', headers: opH, body: { action: 'saveAnomalyConfig', config: { pfDropPct: 20 } } });
+ok('changing the anomaly thresholds stays admin-only', r.status === 401 || r.status === 403, r.status);
 // Reading your own mentions is not a shared-state write and needs no permission at all.
 await setPerms({ operator: [] });
 r = await call(alerts, { method: 'GET', headers: opH, query: { mentions: '1' } });

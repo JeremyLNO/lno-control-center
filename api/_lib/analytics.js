@@ -60,15 +60,14 @@ export const DIMENSIONS = {
   regime:    { label: 'dim.regime',    of: t => t.regime || 'unclassified' },
 };
 
-// Metrics not yet fed, declared rather than quietly omitted so the UI can render them as
-// "not instrumented" instead of a plausible-looking zero.
+// Metrics not yet fed. Empty: everything the analysis model promises is now measured from
+// live Binance data. Kept as an export so the UI's "not instrumented" block stays wired for
+// the next gap rather than being deleted and re-added.
 //
-// Only one left: MAE/MFE is computed per position from Binance klines but is not backfilled
-// across the whole history, so it cannot be sliced here yet. Slippage moved OFF this list
-// once the orders endpoint was synced.
-export const UNAVAILABLE = {
-  mae_mfe: 'computed per position from Binance klines on the position page; not backfilled across the whole history, so it cannot be sliced here yet',
-};
+// MAE/MFE are the newest arrivals — computed from klines and backfilled in batches by the
+// daily cron (see backfillExcursions). While that backlog drains they are averaged over the
+// trades that HAVE them, never over all of them.
+export const UNAVAILABLE = {};
 
 // ---------------------------------------------------------------------------------------
 // Filters — one contract shared by every feature (analysis, calendar, playbook, report).
@@ -121,6 +120,8 @@ export async function fetchTrades(f = {}) {
     net_pnl: Number(r.net_pnl), gross_pnl: Number(r.gross_pnl),
     commission: Number(r.commission), funding: Number(r.funding),
     slippage: r.slippage == null ? null : Number(r.slippage),
+    mae: r.mae == null ? null : Number(r.mae),
+    mfe: r.mfe == null ? null : Number(r.mfe),
     r_multiple: r.r_multiple == null ? null : Number(r.r_multiple),
     qty: Number(r.qty), leverage: r.leverage == null ? null : Number(r.leverage),
     duration_s: r.duration_s == null ? null : Number(r.duration_s),
@@ -186,6 +187,11 @@ export function computeKpis(trades) {
     // slippage it really had.
     slippage: (() => { const v = closed.map(t => t.slippage).filter(x => x != null); return v.length ? sum(v) : null; })(),
     avgRMultiple: (() => { const v = closed.map(t => t.r_multiple).filter(x => x != null); return v.length ? sum(v) / v.length : null; })(),
+    avgMae: (() => { const v = closed.map(t => t.mae).filter(x => x != null); return v.length ? sum(v) / v.length : null; })(),
+    avgMfe: (() => { const v = closed.map(t => t.mfe).filter(x => x != null); return v.length ? sum(v) / v.length : null; })(),
+    // How much of the set the excursion averages above actually rest on — an average over
+    // 3 of 400 trades is not a statistic, and the UI needs to be able to say so.
+    excursionCoverage: (() => { const n = closed.filter(t => t.mae != null).length; return closed.length ? n / closed.length : null; })(),
     tradesPerDay: spanDays ? closed.length / spanDays : null,
   };
 }

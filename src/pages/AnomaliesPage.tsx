@@ -2,7 +2,7 @@ import React from 'react'
 const { useState, useEffect, useCallback } = React;
 import {
   fmtDT, fmtAgo, Icon, Card, SectionTitle, Btn, Select, KpiCard, PageHead, Denied, Loader,
-  EmptyState, useApp, hasPerm, toast, CommentThread, IncidentReview
+  EmptyState, Field, Input, Modal, useApp, hasPerm, toast, CommentThread, IncidentReview
 } from '../ui'
 
 /* ============================================================
@@ -121,6 +121,7 @@ export default function AnomaliesPage(){
   const [severity,setSeverity]=useState('');
   const [busy,setBusy]=useState(false);
   const [openThread,setOpenThread]=useState<number|null>(null);
+  const [tuning,setTuning]=useState(false);
   const allowed=hasPerm(user,'view_trades');
   const isAdmin=user?.role==='admin';
 
@@ -151,7 +152,10 @@ export default function AnomaliesPage(){
 
   return <div className="fadein">
     <PageHead title={t('anomaly.title')} subtitle={t('anomaly.subtitle')}
-      actions={isAdmin&&<Btn onClick={runNow} disabled={busy}><Icon name="refresh" className="w-4 h-4"/>{t('anomaly.runNow')}</Btn>}/>
+      actions={isAdmin&&<div className="flex items-center gap-2">
+        {data.canConfigure&&<Btn variant="outline" onClick={()=>setTuning(true)}><Icon name="filter" className="w-4 h-4"/>{t('anomaly.thresholds')}</Btn>}
+        <Btn onClick={runNow} disabled={busy}><Icon name="refresh" className="w-4 h-4"/>{t('anomaly.runNow')}</Btn>
+      </div>}/>
 
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
       <KpiCard label={t('anomaly.critical')} value={<span className={crit?'text-danger':''}>{crit}</span>} icon="triangle" accent={crit?'#EF4444':undefined}/>
@@ -177,6 +181,8 @@ export default function AnomaliesPage(){
             open={openThread===a.id} onToggle={()=>setOpenThread(o=>o===a.id?null:a.id)}/>)}
         </div>}
 
+    {tuning&&<ThresholdModal data={data} onClose={()=>setTuning(false)} onSaved={()=>{setTuning(false);load();}}/>}
+
     {data.undetectable&&Object.keys(data.undetectable).length>0&&<Card className="p-4">
       <SectionTitle>{t('anomaly.undetectable')}</SectionTitle>
       <p className="text-sm text-slate-500 mb-3">{t('anomaly.undetectableHint')}</p>
@@ -190,4 +196,57 @@ export default function AnomaliesPage(){
       </div>
     </Card>}
   </div>;
+}
+
+/// Editing what counts as an anomaly.
+///
+/// Saving re-runs detection immediately: the whole point of moving a threshold is to see what
+/// it now catches, and waiting a day for the cron to tell you would make tuning guesswork.
+/// Bounds come from the server (ANOMALY_LIMITS) rather than being duplicated here, so the
+/// form and the validation can't drift.
+function ThresholdModal({data,onClose,onSaved}: any){
+  const {api,t}=useApp();
+  const [cfg,setCfg]=useState<any>({...data.config});
+  const [busy,setBusy]=useState(false);
+  const limits=data.limits||{};
+  const defaults=data.defaults||{};
+  const dirty=Object.keys(limits).some(k=>Number(cfg[k])!==Number(data.config[k]));
+
+  const save=async()=>{
+    setBusy(true);
+    try{
+      const r=await api('alerts',{method:'POST',body:{action:'saveAnomalyConfig',config:cfg}});
+      toast.success(t('anomaly.thresholdsSaved',{n:r.created,r:r.resolved}));
+      onSaved();
+    }catch(e: any){ toast.error(e.message); }
+    finally{ setBusy(false); }
+  };
+
+  return <Modal open wide onClose={onClose} title={t('anomaly.thresholds')}>
+    <div className="p-5">
+      <p className="text-sm text-slate-500 mb-4">{t('anomaly.thresholdsHint')}</p>
+      <div className="grid sm:grid-cols-2 gap-3 max-h-[55vh] overflow-y-auto pr-1">
+        {Object.entries(limits).map(([k,lim]: any)=>{
+          const changed=Number(cfg[k])!==Number(defaults[k]);
+          return <Field key={k} label={t('anomaly.cfg.'+k)}
+            hint={`${lim.min}–${lim.max} ${lim.unit}${changed?` · ${t('anomaly.default',{v:defaults[k]})}`:''}`}>
+            <Input type="number" min={lim.min} max={lim.max} value={cfg[k]??''}
+              className={changed?'border-gold/60':''}
+              onChange={e=>setCfg({...cfg,[k]:e.target.value})}/>
+          </Field>;
+        })}
+      </div>
+    </div>
+    <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-slate-100">
+      {/* Reset writes the defaults back rather than clearing the row, so the effect is
+          visible in the form before saving. */}
+      <button onClick={()=>setCfg({...defaults})} className="text-xs text-slate-400 hover:text-navy hover:underline">
+        {t('anomaly.resetDefaults')}
+      </button>
+      <div className="flex gap-2">
+        <Btn variant="ghost" onClick={onClose}>{t('common.cancel')}</Btn>
+        <Btn onClick={save} disabled={busy||!dirty}>{busy?t('common.save'):t('anomaly.saveAndRerun')}</Btn>
+      </div>
+    </div>
+  </Modal>;
 }

@@ -25,6 +25,8 @@ function buildCols(t: any, dim: string){ return [
   {key:'maxDrawdown',label:t('kpi.maxDrawdown'),align:'right', v:r=>r.maxDrawdown,  cell:r=><span className="tnum text-danger">{r.maxDrawdown?fmtSigned(r.maxDrawdown):'—'}</span>},
   {key:'fees',      label:t('kpi.fees'),        align:'right', v:r=>r.fees,         cell:r=><span className="tnum text-slate-500">{fmtUSD(r.fees)}</span>},
   {key:'funding',   label:t('kpi.funding'),     align:'right', v:r=>r.funding,      cell:r=><span className={`tnum ${clsPnl(r.funding)}`}>{fmtSigned(r.funding)}</span>},
+  {key:'avgMae',      label:t('kpi.avgMae'),      align:'right', v:r=>r.avgMae??0,  cell:r=><span className="tnum text-danger">{r.avgMae==null?'—':fmtSigned(r.avgMae)}</span>},
+  {key:'avgMfe',      label:t('kpi.avgMfe'),      align:'right', v:r=>r.avgMfe??0,  cell:r=><span className="tnum text-success">{r.avgMfe==null?'—':fmtSigned(r.avgMfe)}</span>},
   {key:'avgDurationS',label:t('kpi.avgDuration'),align:'right',v:r=>r.avgDurationS??0,cell:r=><span className="tnum text-slate-500">{r.avgDurationS==null?'—':fmtSeconds(r.avgDurationS)}</span>},
 ]; }
 
@@ -99,6 +101,8 @@ export default function AnalysisPage(){
             options={[{value:'',label:t('analysis.none')},...dimOpts.filter(o=>o.value!==group)]}/>
         </div>
         {meta?.span?.trades>0&&<span className="text-xs text-slate-400 ml-auto">{t('analysis.span',{n:meta.span.trades})}</span>}
+        {tot?.excursionCoverage!=null&&tot.excursionCoverage<0.95&&
+          <span className="text-xs text-amber-600">{t('analysis.coverage',{n:Math.round(tot.excursionCoverage*100)})}</span>}
       </div>
     </Card>
 

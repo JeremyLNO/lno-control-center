@@ -186,3 +186,35 @@ export async function getTradeDetail(key) {
     unavailable: TRADE_UNAVAILABLE,
   };
 }
+
+// Price the trades nobody has opened yet.
+//
+// MAE/MFE are computed on first view of a position, which is fine for reading one trade but
+// leaves most of the history unpriced — and an average over "the trades someone happened to
+// click" is not a statistic. This walks the un-priced backlog so the pair becomes sliceable
+// like every other KPI.
+//
+// Bounded per run ON PURPOSE: one klines call per trade against a rate-limited public
+// endpoint, inside a serverless invocation with its own wall clock. The daily cron calls this
+// with a small batch and the backlog drains over successive days rather than one run trying
+// to price ten thousand trades and timing out with nothing to show.
+export async function backfillExcursions({ limit = 25 } = {}) {
+  const { rows } = await query(
+    `SELECT * FROM trades
+     WHERE closed_at IS NOT NULL AND (mae IS NULL OR mfe IS NULL)
+     ORDER BY closed_at DESC LIMIT $1`, [limit]
+  );
+  let priced = 0, failed = 0;
+  for (const t of rows) {
+    try {
+      // priceContext caches onto the row itself, so this is the same path the position page
+      // takes — one implementation, no second way for the numbers to be computed.
+      const { excursion } = await priceContext(t);
+      if (excursion) priced++; else failed++;
+    } catch (e) { failed++; }
+  }
+  const { rows: left } = await query(
+    'SELECT count(*)::int AS n FROM trades WHERE closed_at IS NOT NULL AND (mae IS NULL OR mfe IS NULL)'
+  );
+  return { priced, failed, remaining: left[0].n };
+}

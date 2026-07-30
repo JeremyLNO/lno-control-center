@@ -22,6 +22,7 @@ import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
 import { runDetection } from '../_lib/anomalies.js';
 import { buildWeeklyReview } from '../_lib/weeklyReport.js';
+import { backfillExcursions } from '../_lib/tradeDetail.js';
 
 const REPORTS_URL = 'https://cc.lno.company/#/admin/reports?status=not_verified';
 
@@ -239,6 +240,14 @@ export default async function handler(req, res) {
     if (!alertsOnly) {
       try { sent.push({ type: 'anomalies', ...(await runDetection()) }); }
       catch (e) { sent.push({ type: 'anomalies', error: String(e.message || e) }); }
+    }
+
+    // 4c) Price a slice of the MAE/MFE backlog. Bounded per run: one klines call per trade
+    // against a rate-limited public endpoint, so the backlog drains over days rather than
+    // one invocation trying to price everything and timing out with nothing committed.
+    if (!alertsOnly) {
+      try { sent.push({ type: 'excursion-backfill', ...(await backfillExcursions({ limit: 25 })) }); }
+      catch (e) { sent.push({ type: 'excursion-backfill', error: String(e.message || e) }); }
     }
 
     // 5) 8am verification reminder (item 15) — runs in EITHER mode (so the frequent
