@@ -65,7 +65,7 @@ export const DIMENSIONS = {
 // instrumented" instead of showing a plausible-looking zero. See docs/DATA-GAPS.md.
 export const UNAVAILABLE = {
   slippage:  'no signal/intended price is recorded — only executed fill prices',
-  mae_mfe:   'requires intra-trade price history (klines) — not yet backfilled',
+  mae_mfe:   'computed per position from klines on the position page; not backfilled across the whole history, so it cannot be sliced here yet',
   latency:   'only exchange sync latency is measured, not order round-trip latency',
   backtest:  'no backtest results are imported to compare live behaviour against',
 };

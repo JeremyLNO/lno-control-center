@@ -130,3 +130,19 @@ async function listenKeyRequest(key, method) {
 }
 export async function createListenKey(key) { return (await listenKeyRequest(key, 'POST')).listenKey; }
 export async function keepAliveListenKey(key) { await listenKeyRequest(key, 'PUT'); }
+
+// Public klines (no key needed — market data, not account data). Used to reconstruct what the
+// price actually did DURING a closed trade, which is the only way to compute MAE/MFE: the
+// account endpoints report where we entered and exited, never how far the position ran
+// against us or in our favour in between.
+export async function getKlines({ symbol, interval = '5m', startTime, endTime, limit = 500 }) {
+  const qs = new URLSearchParams({ symbol, interval, limit: String(limit) });
+  if (startTime) qs.set('startTime', String(startTime));
+  if (endTime) qs.set('endTime', String(endTime));
+  const opts = { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) };
+  const d = await proxyDispatcher(); if (d) opts.dispatcher = d;
+  const r = await fetch(`${FAPI}/fapi/v1/klines?${qs}`, opts);
+  if (!r.ok) throw new Error(`binance klines ${r.status}`);
+  const rows = await r.json();
+  return (rows || []).map(k => ({ t: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]) }));
+}

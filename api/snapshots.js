@@ -23,6 +23,7 @@ import { dailyDigestText } from './_lib/notifyText.js';
 import { sendDailyReportEmail } from './_lib/mailer.js';
 import { permsForRole } from './_lib/rolePerms.js';
 import { DIMENSIONS, UNAVAILABLE, GRANULARITIES, fetchTrades, groupBy, bucketByPeriod } from './_lib/analytics.js';
+import { getTradeDetail } from './_lib/tradeDetail.js';
 
 // Query-string -> filter object for the analysis engine. List filters arrive comma-separated
 // (?symbol=BTCUSDT,ETHUSDT); an absent or empty parameter means "no constraint", never "match
@@ -57,6 +58,8 @@ export default async function handler(req, res) {
       // it is already exactly at that limit — snapshots.js is the analytics/reporting home.
       //   GET ?analysis=1&group=<dim>[&compare=<dim>][&filters...] -> KPI block per bucket
       //   GET ?analysis=1&calendar=day|week|month|year -> KPI block per calendar period
+      //   GET ?analysis=1&list=1[&limit&offset] -> paginated closed round trips
+      //   GET ?analysis=1&trade=<exchange:symbol:openTradeId> -> one position, in full
       //   GET ?analysis=meta -> available dimensions, filter option values, unavailable KPIs
       if (req.query?.analysis) {
         if (!isAdmin && !(await permsForRole(a.role)).includes('view_trades')) {
@@ -75,8 +78,34 @@ export default async function handler(req, res) {
             span: { from: span[0]?.a || null, to: span[0]?.b || null, trades: span[0]?.n || 0 },
           });
         }
+        // One position, in full: fills, funding, declared intent, MAE/MFE, linked alerts.
+        // The single place to audit a trade's whole life cycle.
+        if (req.query.trade) {
+          const detail = await getTradeDetail(String(req.query.trade));
+          if (!detail) return res.status(404).json({ error: 'trade not found' });
+          return res.status(200).json(detail);
+        }
         const f = parseFilters(req.query);
         const trades = await fetchTrades(f);
+        // Paginated list of round trips, newest first — the index that leads into the detail
+        // page. Paged server-side at 50 like every other table in the app.
+        if (req.query.list) {
+          const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+          const offset = Math.max(Number(req.query.offset) || 0, 0);
+          const page = [...trades].reverse().slice(offset, offset + limit);
+          return res.status(200).json({
+            total: trades.length,
+            trades: page.map(t => ({
+              id: `${t.exchange}:${t.symbol}:${t.open_trade_id}`,
+              symbol: t.symbol, direction: t.direction, qty: t.qty,
+              entryPrice: t.entry_price == null ? null : Number(t.entry_price),
+              exitPrice: t.exit_price == null ? null : Number(t.exit_price),
+              netPnl: t.net_pnl, grossPnl: t.gross_pnl, commission: t.commission, funding: t.funding,
+              openedAt: t.opened_at, closedAt: t.closed_at, durationS: t.duration_s,
+              leverage: t.leverage, version: t.version_label || null, fillCount: t.fill_count,
+            })),
+          });
+        }
         // Calendar view: same KPI block, keyed by calendar period instead of by dimension.
         //   GET ?analysis=1&calendar=day|week|month|year[&filters...]
         if (req.query.calendar) {

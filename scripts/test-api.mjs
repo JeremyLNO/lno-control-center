@@ -489,6 +489,42 @@ await db.query("DELETE FROM trades WHERE open_trade_id=9101");
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', calendar: 'fortnight' } });
 ok('an unknown granularity is rejected -> 400', r.status === 400, r.status);
 
+// Trade list + per-position detail (api/_lib/tradeDetail.js).
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', list: '1', from: '2026-06-01', to: '2026-06-30' } });
+ok('the round-trip list is paginated newest-first', r.status === 200 && r.body.total === 5 && r.body.trades[0].closedAt >= r.body.trades[4].closedAt, r.body.trades.map(x => x.id));
+const tradeKey = r.body.trades[0].id;
+ok('each listed trade carries an addressable id', /^binance:AN[AB]USDT:\d+$/.test(tradeKey), tradeKey);
+
+const { parseTradeKey, excursions } = await import('../api/_lib/tradeDetail.js');
+// The id is exchange:symbol:openTradeId — split from the RIGHT, since a symbol could in
+// principle contain a colon while the numeric id never does.
+ok('a trade key parses back into its parts',
+  JSON.stringify(parseTradeKey('binance:BTCUSDT:42')) === JSON.stringify({ exchange: 'binance', symbol: 'BTCUSDT', openTradeId: 42 }), parseTradeKey('binance:BTCUSDT:42'));
+ok('a malformed trade key is rejected rather than guessed at', parseTradeKey('nonsense') === null && parseTradeKey('a:b:notanumber') === null, [parseTradeKey('nonsense'), parseTradeKey('a:b:notanumber')]);
+
+// MAE/MFE: a LONG entered at 100 that dipped to 90 and peaked at 130, 2 units.
+// MAE = (90-100)*2 = -20 (worst it was ever down), MFE = (130-100)*2 = +60.
+const exLong = excursions({ direction: 'LONG', entryPrice: 100, qty: 2, candles: [{ high: 110, low: 95 }, { high: 130, low: 90 }] });
+ok('MAE/MFE measure the worst and best excursion, not the outcome', exLong.mae === -20 && exLong.mfe === 60, exLong);
+// The same prices on a SHORT invert: the dip is the profit and the peak is the damage.
+const exShort = excursions({ direction: 'SHORT', entryPrice: 100, qty: 2, candles: [{ high: 110, low: 95 }, { high: 130, low: 90 }] });
+ok('MAE/MFE invert for a SHORT', exShort.mae === -60 && exShort.mfe === 20, exShort);
+ok('excursions with no candles are null, not zero', excursions({ direction: 'LONG', entryPrice: 100, qty: 1, candles: [] }) === null, 'null expected');
+// A position that never traded below its entry was never down: MAE is 0, not a positive
+// number that would read as a loss of that size.
+const exNeverDown = excursions({ direction: 'LONG', entryPrice: 100, qty: 1, candles: [{ high: 120, low: 105 }] });
+ok('an adverse excursion is clamped at zero, never positive', exNeverDown.mae === 0 && exNeverDown.mfe === 20, exNeverDown);
+
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', trade: tradeKey } });
+ok('the position detail resolves', r.status === 200 && r.body.id === tradeKey && r.body.symbol && r.body.direction, r.body && { id: r.body.id, sym: r.body.symbol });
+ok('the detail carries the full cost breakdown', r.status === 200 && 'grossPnl' in r.body && 'commission' in r.body && 'funding' in r.body && 'netPnl' in r.body, Object.keys(r.body || {}));
+ok('the detail declares what is not instrumented', !!r.body.unavailable?.slippage && !!r.body.unavailable?.r_multiple, r.body.unavailable);
+// The exchange is unreachable from the test harness, so the chart degrades to empty rather
+// than failing the request — the page must survive a venue outage.
+ok('an unreachable exchange degrades the chart instead of failing the page', Array.isArray(r.body.candles), r.body.priceError || r.body.candles);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', trade: 'binance:NOPEUSDT:1' } });
+ok('an unknown position -> 404', r.status === 404, r.status);
+
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'nonsense' } });
 ok('an unknown dimension is rejected -> 400', r.status === 400, r.status);
 r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: 'meta' } });

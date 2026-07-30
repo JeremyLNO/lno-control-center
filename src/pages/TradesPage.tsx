@@ -1,7 +1,7 @@
 import React from 'react'
 const { useState, useEffect, useMemo, useRef, useCallback, useId, createContext, useContext } = React;
 import {
-  fmtUSD, fmtSigned, fmtNum, fmtPctPlain, clsPnl, fmtPrice, fmtAgo, baseOf, PREF, toast, Icon, Card, SectionTitle, Btn, Badge, StatusPill,
+  fmtUSD, fmtSigned, fmtNum, fmtPctPlain, clsPnl, fmtPrice, fmtAgo, fmtDT, fmtSeconds, baseOf, PREF, toast, Icon, Card, SectionTitle, Btn, Badge, StatusPill,
   Select, ExportMenu, Donut, KpiCard, FUND_PALETTE, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, PageHead, Denied, SortHeader, sortRows, EmptyState, SideTag,
   PositionDetailOverlay
 } from '../ui'
@@ -237,8 +237,70 @@ function TradesPage(){
       </Card>
       </div>
     </div>
+    <ClosedTradesCard/>
     <PositionDetailOverlay bot={detailBot} onClose={()=>setDetailBot(null)}/>
   </div>;
+}
+
+/* ============================================================
+   CLOSED ROUND TRIPS
+   ============================================================ */
+// The table above lists BOTS — one row per (exchange, symbol) pair, showing where each stands
+// right now. This one lists TRADES: completed round trips reconstructed from real fills. They
+// answer different questions ("what am I holding" vs "what did we actually do"), which is why
+// they are two tables rather than a filter on one, and each row opens the full audit page.
+function ClosedTradesCard(){
+  const {api,t,navigate}=useApp();
+  const [data,setData]=useState<any>(null);
+  const [offset,setOffset]=useState(0);
+  const PAGE=50;
+  useEffect(()=>{
+    api(`snapshots?analysis=1&list=1&limit=${PAGE}&offset=${offset}`).then(setData).catch(()=>setData({trades:[],total:0}));
+  },[api,offset]);
+  if(!data) return null;
+  if(!data.total) return null;
+  const from=offset+1, to=Math.min(offset+PAGE,data.total);
+  return <Card className="overflow-hidden mb-4">
+    <div className="px-4 pt-4"><SectionTitle right={<span className="text-xs text-slate-400">{t('positions.roundTripsHint')}</span>}>{t('positions.roundTrips')}</SectionTitle></div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-xs"><tr className="bg-white border-b border-slate-200 text-slate-500">
+          <th className="px-3 py-2 text-left font-medium">{t('position.closed')}</th>
+          <th className="px-3 py-2 text-left font-medium">{t('activity.symbol')}</th>
+          <th className="px-3 py-2 text-left font-medium">{t('activity.side')}</th>
+          <th className="px-3 py-2 text-right font-medium">{t('live.entry')}</th>
+          <th className="px-3 py-2 text-right font-medium">{t('position.avgExit')}</th>
+          <th className="px-3 py-2 text-right font-medium">{t('kpi.netPnl')}</th>
+          <th className="px-3 py-2 text-right font-medium">{t('kpi.fees')}</th>
+          <th className="px-3 py-2 text-right font-medium">{t('position.duration')}</th>
+          <th className="px-3 py-2 text-left font-medium">{t('dim.version')}</th>
+          <th className="px-3 py-2"/>
+        </tr></thead>
+        <tbody>
+          {data.trades.map(tr=><tr key={tr.id} onClick={()=>navigate('/position/'+tr.id)}
+            className="border-b border-slate-50 hover:bg-slate-50/60 cursor-pointer">
+            <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{fmtDT(tr.closedAt)}</td>
+            <td className="px-3 py-2 font-mono text-xs text-navy">{tr.symbol}</td>
+            <td className="px-3 py-2"><SideTag side={tr.direction}/></td>
+            <td className="px-3 py-2 text-right tnum text-slate-500">{fmtPrice(tr.entryPrice)}</td>
+            <td className="px-3 py-2 text-right tnum text-slate-500">{tr.exitPrice==null?'—':fmtPrice(tr.exitPrice)}</td>
+            <td className={`px-3 py-2 text-right tnum font-semibold ${clsPnl(tr.netPnl)}`}>{fmtSigned(tr.netPnl)}</td>
+            <td className="px-3 py-2 text-right tnum text-slate-400">{fmtNum(tr.commission,2)}</td>
+            <td className="px-3 py-2 text-right tnum text-slate-500">{tr.durationS==null?'—':fmtSeconds(tr.durationS)}</td>
+            <td className="px-3 py-2 text-xs text-slate-500">{tr.version||<span className="text-slate-300">—</span>}</td>
+            <td className="px-3 py-2 text-right"><Icon name="chevright" className="w-4 h-4 text-slate-300"/></td>
+          </tr>)}
+        </tbody>
+      </table>
+    </div>
+    {data.total>PAGE&&<div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 text-xs text-slate-500">
+      <span>{t('common.pageRange',{from,to,total:data.total})}</span>
+      <div className="flex items-center gap-2">
+        <Btn variant="ghost" size="sm" disabled={offset===0} onClick={()=>setOffset(o=>Math.max(0,o-PAGE))}><Icon name="chevleft" className="w-4 h-4"/>{t('common.prev')}</Btn>
+        <Btn variant="ghost" size="sm" disabled={offset+PAGE>=data.total} onClick={()=>setOffset(o=>o+PAGE)}>{t('common.next')}<Icon name="chevright" className="w-4 h-4"/></Btn>
+      </div>
+    </div>}
+  </Card>;
 }
 
 export { TradesPage };

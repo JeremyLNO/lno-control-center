@@ -218,6 +218,12 @@ export async function migrate() {
   // declared version stay unattributed rather than being forced onto the oldest one.
   await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_id TEXT`);
   await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_version_id BIGINT`);
+  // Maximum adverse / favourable excursion, in currency. Reconstructed from public klines on
+  // first view of a trade (see api/_lib/tradeDetail.js) and cached here — no account endpoint
+  // reports how far a position ran against you between entry and exit, so this is the only
+  // way to tell a trade that went straight to +50 from one that was -400 underwater first.
+  await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS mae DOUBLE PRECISION`);
+  await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS mfe DOUBLE PRECISION`);
   // Detected behavioural anomalies (see api/_lib/anomalies.js). Distinct from `alerts`:
   // an alert is a threshold being crossed right now (drawdown breach, exchange down), an
   // anomaly is a PATTERN in how a bot is behaving — its profit factor collapsing, its losses
