@@ -7,6 +7,9 @@
 //   GET ?attribution=1           -> per-bot/per-fund trade attribution (admin — BotsPage only)
 //   GET ?costs=1                 -> per-bot/per-fund funding/fee drag  (admin — BotsPage only)
 //   GET ?fills=1                 -> most recent executed trades         (view_realtime)
+//   GET ?playbook=1[&strategy=]  -> strategy playbook + version history  (view_trades)
+//   POST {action:'createStrategy'|'updateStrategy'|'deployVersion'|'reattribute'}
+//                                -> playbook edits            (admin, or 'manage_strategies')
 //   GET ?listenKey=1             -> mint/reuse a Binance user-data-stream listenKey,
 //                                    for the browser to open its own real-time WebSocket (admin)
 //   POST {action:'sync'}         -> run the position sync now  (admin, or 'manage_exchanges')
@@ -19,6 +22,8 @@ import { syncExchanges } from './_lib/sync.js';
 import { getAttribution, getCostAnalytics } from './_lib/attribution.js';
 import { createListenKey, keepAliveListenKey } from './_lib/binance.js';
 import { permsForRole } from './_lib/rolePerms.js';
+import { audit } from './_lib/audit.js';
+import { getPlaybook, createStrategy, updateStrategy, deployVersion, attributeTrades, evaluateExpectations, pubStrategy, pubVersion } from './_lib/strategies.js';
 
 // The one Binance connection whose user-data stream we relay — a listenKey is 1:1 with a
 // single API key, so with multiple exchange rows configured we pick the first usable one
@@ -56,6 +61,19 @@ export default async function handler(req, res) {
           realizedPnl: Number(r.realized_pnl), commission: Number(r.commission), occurredAt: r.occurred_at,
         })) });
       }
+      // Strategy playbook. Folded into this endpoint rather than a new api/*.js file (Vercel
+      // Hobby's 12-function cap is already reached) — and bots are what a strategy is attached
+      // to, so this is its natural home.
+      //   GET ?playbook=1[&strategy=<id>] -> strategies + version timeline + realised KPIs
+      if (req.query?.playbook) {
+        // Reading the playbook needs the same right as reading trade data: it is documentation
+        // of what the bots do, not a privileged setting. Editing is gated separately on POST.
+        if (!(await has('view_trades'))) return res.status(403).json({ error: 'forbidden' });
+        const pb = await getPlaybook(req.query.strategy || null);
+        return res.status(200).json({
+          strategies: pb.strategies.map(s => ({ ...s, expectations: evaluateExpectations(s.expectedKpis, s.overall) })),
+        });
+      }
       if (req.query?.listenKey) {
         const adm = requireAdmin(req, res); if (!adm) return;
         const apiKey = await primaryBinanceApiKey();
@@ -74,6 +92,40 @@ export default async function handler(req, res) {
         const a = requireAuth(req, res); if (!a) return;
         if (a.role !== 'admin' && !(await permsForRole(a.role)).includes('manage_exchanges')) return res.status(403).json({ error: 'forbidden' });
         return res.status(200).json({ ok: true, ...(await syncExchanges()) });
+      }
+      // Playbook mutations: admin, or a role holding 'manage_strategies'. Deliberately a
+      // separate right from 'manage_exchanges' — declaring what a bot is allowed to trade and
+      // what risk it may take is a trading-desk decision, not an infrastructure one.
+      const PLAYBOOK_ACTIONS = new Set(['createStrategy', 'updateStrategy', 'deployVersion', 'reattribute']);
+      if (PLAYBOOK_ACTIONS.has(req.body?.action)) {
+        const auth = requireAuth(req, res); if (!auth) return;
+        if (auth.role !== 'admin' && !(await permsForRole(auth.role)).includes('manage_strategies')) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        try {
+          if (req.body.action === 'createStrategy') {
+            const s = await createStrategy(req.body);
+            await audit(req, auth, 'strategy.create', s.id, { name: s.name, botId: s.bot_id });
+            return res.status(200).json({ strategy: pubStrategy(s) });
+          }
+          if (req.body.action === 'updateStrategy') {
+            if (!req.body.id) return res.status(400).json({ error: 'id required' });
+            const s = await updateStrategy(req.body.id, req.body);
+            if (!s) return res.status(404).json({ error: 'strategy not found' });
+            // Re-attribute: changing which bot a strategy covers changes which trades are its.
+            if (req.body.botId !== undefined) await attributeTrades();
+            await audit(req, auth, 'strategy.update', s.id, { name: s.name });
+            return res.status(200).json({ strategy: pubStrategy(s) });
+          }
+          if (req.body.action === 'deployVersion') {
+            const v = await deployVersion(req.body.strategyId, { ...req.body, by: auth.username || auth.id });
+            await audit(req, auth, 'strategy.deploy', req.body.strategyId, { label: v.label, deployedAt: v.deployed_at });
+            return res.status(200).json({ version: pubVersion(v) });
+          }
+          return res.status(200).json(await attributeTrades());
+        } catch (e) {
+          return res.status(400).json({ error: String(e.message || e) });
+        }
       }
       const a = requireAdmin(req, res); if (!a) return;
       if (req.body?.action === 'listenKeyKeepAlive') {

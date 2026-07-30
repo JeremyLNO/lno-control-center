@@ -468,6 +468,92 @@ ok('analysis meta exposes dimensions, filter options and the not-instrumented li
   r.status === 200 && r.body.dimensions.some(d => d.key === 'leverage') && Array.isArray(r.body.options.symbol) && !!r.body.unavailable.slippage, r.body);
 await db.query("DELETE FROM trades WHERE symbol LIKE 'AN%USDT'");
 
+// ---------------------------------------------------------------------------------------
+// Strategy playbook + version attribution (api/_lib/strategies.js).
+// Three trades on the same bot, spread over three months; two versions deployed between
+// them. Each trade must land on the version that was live when it OPENED.
+// ---------------------------------------------------------------------------------------
+await db.query("DELETE FROM trades WHERE symbol='PBKUSDT'");
+await db.query("DELETE FROM strategies WHERE id LIKE 'pb-test%'");
+const pbTrade = (id, day, net) => db.query(
+  `INSERT INTO trades (exchange,symbol,open_trade_id,close_trade_id,direction,qty,entry_price,exit_price,
+     gross_pnl,commission,funding,net_pnl,opened_at,closed_at,duration_s,entry_hour,entry_dow,fill_count,leverage)
+   VALUES ('binance','PBKUSDT',$1,$1,'LONG',1,100,110,$2,0,0,$2,$3::timestamptz,$3::timestamptz + interval '1 hour',3600,10,1,2,5)`,
+  [id, net, day]
+);
+await pbTrade(7001, '2026-01-15T10:00:00Z', 100);   // before any version -> unattributed
+await pbTrade(7002, '2026-03-15T10:00:00Z', -40);   // v1 window
+await pbTrade(7003, '2026-05-15T10:00:00Z', 250);   // v2 window
+
+r = await call(bots, { method: 'POST', headers: authH, body: { action: 'createStrategy', name: 'PB Test', botId: 'binance:PBKUSDT', expectedKpis: { minProfitFactor: 1.5, minWinRate: 60 } } });
+ok('a strategy can be created with declared expectations', r.status === 200 && r.body.strategy.id && r.body.strategy.expectedKpis.minProfitFactor === 1.5, r.body);
+const pbId = r.body.strategy.id;
+
+r = await call(bots, { method: 'POST', headers: authH, body: { action: 'deployVersion', strategyId: pbId, label: 'v1', at: '2026-02-01T00:00:00Z', changes: 'first' } });
+ok('deploying a version records it', r.status === 200 && r.body.version.label === 'v1', r.body);
+r = await call(bots, { method: 'POST', headers: authH, body: { action: 'deployVersion', strategyId: pbId, label: 'v2', at: '2026-04-01T00:00:00Z', changes: 'wider stop' } });
+ok('deploying again retires the previous version', r.status === 200 && r.body.version.label === 'v2', r.body);
+let vrows = (await db.query('SELECT label, retired_at FROM strategy_versions WHERE strategy_id=$1 ORDER BY deployed_at', [pbId])).rows;
+ok('the version timeline has no gap and no overlap',
+  vrows[0].label === 'v1' && vrows[0].retired_at && new Date(vrows[0].retired_at).toISOString().startsWith('2026-04-01') && vrows[1].retired_at === null, vrows);
+
+const attributed = (await db.query(
+  `SELECT t.open_trade_id, v.label FROM trades t LEFT JOIN strategy_versions v ON v.id=t.strategy_version_id
+   WHERE t.symbol='PBKUSDT' ORDER BY t.open_trade_id`)).rows;
+ok('each trade is attributed to the version live when it OPENED',
+  attributed[1].label === 'v1' && attributed[2].label === 'v2', attributed);
+// A trade that predates every declared version is left unattributed rather than being
+// forced onto the oldest one — the desk genuinely does not know what produced it.
+ok('a trade predating every version stays unattributed', attributed[0].label === null, attributed[0]);
+
+r = await call(bots, { method: 'GET', headers: authH, query: { playbook: '1', strategy: pbId } });
+const pb = r.body.strategies[0];
+ok('the playbook returns per-version realised KPIs',
+  r.status === 200 && pb.versions.find(v => v.label === 'v1').actual.netPnl === -40 && pb.versions.find(v => v.label === 'v2').actual.netPnl === 250, pb.versions.map(v => ({ v: v.label, n: v.actual.netPnl })));
+// Only attributed trades count towards the strategy: the unattributed +100 must be excluded,
+// otherwise a strategy would be credited with results from before it was documented.
+ok('strategy totals exclude unattributed trades', pb.overall.netPnl === 210 && pb.overall.trades === 2, pb.overall);
+// Max drawdown folds a CUMULATIVE curve, so it is order-dependent: -40 then +250 gives -40,
+// while +250 then -40 gives -40 too — but a longer unordered sequence does not. Asserting it
+// twice across a mutation catches the missing ORDER BY that made it drift between page loads.
+const dd1 = pb.overall.maxDrawdown;
+await call(bots, { method: 'POST', headers: authH, body: { action: 'reattribute' } });
+const dd2 = (await call(bots, { method: 'GET', headers: authH, query: { playbook: '1', strategy: pbId } })).body.strategies[0].overall.maxDrawdown;
+ok('max drawdown is stable across reads (trades are folded in chronological order)', dd1 === dd2 && dd1 === -40, { dd1, dd2 });
+// Declared 1.5 profit factor / 60% win rate vs an actual 250/40 = 6.25 and 50%.
+const expPF = pb.expectations.find(e => e.key === 'minProfitFactor');
+const expWR = pb.expectations.find(e => e.key === 'minWinRate');
+ok('expectations are judged against the realised KPIs', expPF.status === 'met' && expWR.status === 'missed', pb.expectations);
+
+// Backdating a correction must move history, not just future trades.
+r = await call(bots, { method: 'POST', headers: authH, body: { action: 'deployVersion', strategyId: pbId, label: 'v0', at: '2026-01-01T00:00:00Z', changes: 'backdated' } });
+const afterBackdate = (await db.query(
+  `SELECT v.label FROM trades t LEFT JOIN strategy_versions v ON v.id=t.strategy_version_id
+   WHERE t.symbol='PBKUSDT' AND t.open_trade_id=7001`)).rows[0];
+ok('backdating a deployment re-attributes historical trades', afterBackdate.label === 'v0', afterBackdate);
+// Inserting a version BEFORE the existing ones must reseal the whole timeline, not just close
+// the currently-open one: otherwise v0 would run forever, overlap v1/v2, and attribution would
+// silently pick one of the matching versions at random.
+const sealed = (await db.query('SELECT label, deployed_at, retired_at FROM strategy_versions WHERE strategy_id=$1 ORDER BY deployed_at', [pbId])).rows;
+ok('a backdated version does not overlap the versions that follow it',
+  sealed.every((v, i) => i === sealed.length - 1
+    ? v.retired_at === null
+    : v.retired_at && new Date(v.retired_at).getTime() === new Date(sealed[i + 1].deployed_at).getTime()),
+  sealed.map(v => ({ v: v.label, from: v.deployed_at, to: v.retired_at })));
+const stillSplit = (await db.query(
+  `SELECT v.label, count(*)::int AS n FROM trades t LEFT JOIN strategy_versions v ON v.id=t.strategy_version_id
+   WHERE t.symbol='PBKUSDT' GROUP BY v.label ORDER BY v.label`)).rows;
+ok('trades stay spread across the resealed timeline, not collapsed onto one version',
+  stillSplit.length === 3 && stillSplit.every(r => r.n === 1), stillSplit);
+
+// The 'version' dimension on the Analysis page resolves through the same attribution.
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'version', symbol: 'PBKUSDT', from: '2026-01-01', to: '2026-12-31' } });
+ok('the analysis engine can group by strategy version',
+  r.status === 200 && r.body.rows.some(x => x.key === 'v2' && x.netPnl === 250), r.body.rows);
+
+await db.query("DELETE FROM strategies WHERE id LIKE 'pb-test%' OR name='Operator strategy'");
+await db.query("DELETE FROM trades WHERE symbol='PBKUSDT'");
+
 r = await call(bots, { method: 'GET', headers: authH });
 const adaBot = r.body.bots.find(b => b.symbol === 'ADAUSDT');
 ok('a detected pair becomes an unassigned bot id "exchange:symbol"', !!adaBot && adaBot.id === 'binance:ADAUSDT' && adaBot.fundId === null && adaBot.side === 'LONG', adaBot);
@@ -824,6 +910,20 @@ r = await call(bots, { method: 'GET', headers: opH });
 ok('a role with none of view_activity/view_realtime/view_trades cannot list bots -> 403', r.status === 403, r.status);
 r = await call(bots, { method: 'GET', headers: opH, query: { fills: '1' } });
 ok('...nor read fills without view_realtime -> 403', r.status === 403, r.status);
+// Playbook RBAC. The surrounding block deliberately strips the operator role down, so each
+// case sets exactly the permissions it is asserting on rather than inheriting whatever the
+// previous test left behind.
+r = await call(bots, { method: 'GET', headers: opH, query: { playbook: '1' } });
+ok('reading the playbook without view_trades -> 403', r.status === 403, r.status);
+await setPerms({ operator: ['view_trades'] });
+r = await call(bots, { method: 'GET', headers: opH, query: { playbook: '1' } });
+ok('view_trades is enough to READ the playbook', r.status === 200, r.status);
+r = await call(bots, { method: 'POST', headers: opH, body: { action: 'createStrategy', name: 'nope' } });
+ok('...but not to edit it without manage_strategies -> 403', r.status === 403, r.status);
+await setPerms({ operator: ['view_trades', 'manage_strategies'] });
+r = await call(bots, { method: 'POST', headers: opH, body: { action: 'createStrategy', name: 'Operator strategy' } });
+ok('manage_strategies lets a non-admin edit the playbook', r.status === 200, r.status);
+await restorePerms();
 await restorePerms();
 r = await call(bots, { method: 'GET', headers: opH });
 ok('restored: operator can list bots again', r.status === 200, r.status);

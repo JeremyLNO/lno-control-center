@@ -75,35 +75,47 @@ export const UNAVAILABLE = {
 // ---------------------------------------------------------------------------------------
 const LIST_FILTERS = { symbol: 'symbol', direction: 'direction', exchange: 'exchange', fund: 'fund_id' };
 
+// Columns are emitted already qualified with the `trades` alias used by fetchTrades below.
+// The query joins strategy_versions, so a bare `symbol` or `label` would be ambiguous — and
+// prefixing them afterwards with a regex over the finished SQL is the kind of thing that
+// works until a filter value happens to contain a column name.
+const T = 't.';
+
 export function buildWhere(f = {}) {
   const w = ['1=1'];
   const p = [];
-  const add = (sql, val) => { p.push(val); w.push(sql.replace('?', `$${p.length}`)); };
+  const add = (sql, val) => { p.push(val); w.push(T + sql.replace('?', `$${p.length}`)); };
 
   // `from`/`to` filter on when a trade CLOSED — a trade belongs to the period in which its
   // result was realised, which is what every PnL figure in the app is keyed on. Still-open
   // trades have no result yet and are excluded from any bounded window.
   if (f.from) add('closed_at >= ?', f.from);
   if (f.to) add('closed_at < (?::date + interval \'1 day\')', f.to);
-  if (!f.includeOpen) w.push('closed_at IS NOT NULL');
+  if (!f.includeOpen) w.push(`${T}closed_at IS NOT NULL`);
 
   for (const [key, col] of Object.entries(LIST_FILTERS)) {
     const v = f[key];
-    if (Array.isArray(v) && v.length) { p.push(v); w.push(`${col} = ANY($${p.length})`); }
+    if (Array.isArray(v) && v.length) { p.push(v); w.push(`${T}${col} = ANY($${p.length})`); }
   }
   if (f.minDuration != null) add('duration_s >= ?', Number(f.minDuration));
   if (f.maxDuration != null) add('duration_s <= ?', Number(f.maxDuration));
   if (f.minLeverage != null) add('leverage >= ?', Number(f.minLeverage));
   if (f.maxLeverage != null) add('leverage <= ?', Number(f.maxLeverage));
-  if (Array.isArray(f.hour) && f.hour.length) { p.push(f.hour.map(Number)); w.push(`entry_hour = ANY($${p.length})`); }
-  if (Array.isArray(f.dow) && f.dow.length) { p.push(f.dow.map(Number)); w.push(`entry_dow = ANY($${p.length})`); }
+  if (Array.isArray(f.hour) && f.hour.length) { p.push(f.hour.map(Number)); w.push(`${T}entry_hour = ANY($${p.length})`); }
+  if (Array.isArray(f.dow) && f.dow.length) { p.push(f.dow.map(Number)); w.push(`${T}entry_dow = ANY($${p.length})`); }
+  if (Array.isArray(f.strategy) && f.strategy.length) { p.push(f.strategy); w.push(`${T}strategy_id = ANY($${p.length})`); }
 
   return { sql: w.join(' AND '), params: p };
 }
 
 export async function fetchTrades(f = {}) {
   const { sql, params } = buildWhere(f);
-  const { rows } = await query(`SELECT * FROM trades WHERE ${sql} ORDER BY COALESCE(closed_at, opened_at) ASC`, params);
+  // The version LABEL (not just its id) travels with the row so the 'version' dimension
+  // groups on something a human recognises without a second lookup per bucket.
+  const { rows } = await query(`SELECT t.*, v.label AS version_label FROM trades t
+     LEFT JOIN strategy_versions v ON v.id = t.strategy_version_id
+     WHERE ${sql}
+     ORDER BY COALESCE(t.closed_at, t.opened_at) ASC`, params);
   return rows.map(r => ({
     ...r,
     net_pnl: Number(r.net_pnl), gross_pnl: Number(r.gross_pnl),

@@ -10,6 +10,7 @@ import { notify, getUsersByRole, rolesForType, getOpenWAConfig } from './notify.
 import { apiErrorText } from './notifyText.js';
 import { sendApiErrorEmail } from './mailer.js';
 import { rebuildTrades } from './trades.js';
+import { attributeTrades } from './strategies.js';
 
 const INCOME_TYPES = new Set(['REALIZED_PNL', 'FUNDING_FEE', 'COMMISSION']);
 
@@ -134,7 +135,7 @@ export async function syncExchanges() {
   // analytics surface reads. Runs after the fills loop above so a position that just closed is
   // materialised as a completed trade in the same pass. Incremental and idempotent; best-effort
   // because a reconstruction failure must not cost us the position sync itself.
-  try { await rebuildTrades(); }
+  try { await rebuildTrades(); await attributeTrades(); }
   catch (e) { /* best-effort — analytics can be rebuilt on the next sync */ }
 
   // any previously-open Binance bot no longer reported is now flat

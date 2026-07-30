@@ -17,3 +17,4 @@ export { StatusPage } from './StatusPage';
 export { AdminReports } from './AdminReports';
 export { AuditPage } from './AuditPage';
 export { default as AnalysisPage } from './AnalysisPage';
+export { default as PlaybookPage } from './PlaybookPage';

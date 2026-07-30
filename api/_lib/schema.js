@@ -177,6 +177,47 @@ export async function migrate() {
   )`);
   await ddl(`CREATE INDEX IF NOT EXISTS trades_closed_idx ON trades (closed_at DESC)`);
   await ddl(`CREATE INDEX IF NOT EXISTS trades_symbol_idx ON trades (symbol)`);
+  // Strategy playbook: the DECLARED intent behind a bot — what it is supposed to do, on what,
+  // within what limits. None of this can be derived from exchange data (the exchange only
+  // reports what happened, never what was intended), so it is operator-authored and is the
+  // reference a live result gets judged against.
+  await ddl(`CREATE TABLE IF NOT EXISTS strategies (
+    id TEXT PRIMARY KEY,
+    bot_id TEXT,
+    name TEXT NOT NULL,
+    objective TEXT DEFAULT '',
+    entry_rules TEXT DEFAULT '',
+    exit_rules TEXT DEFAULT '',
+    allowed_symbols JSONB NOT NULL DEFAULT '[]'::jsonb,
+    allowed_timeframes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    risk_limits JSONB NOT NULL DEFAULT '{}'::jsonb,
+    params JSONB NOT NULL DEFAULT '{}'::jsonb,
+    disable_conditions TEXT DEFAULT '',
+    expected_kpis JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+  )`);
+  // One row per deployed revision of a strategy's code/parameters. [deployed_at, retired_at)
+  // are kept NON-OVERLAPPING by the deploy path (deploying retires the previous version at the
+  // same instant), which is what makes attributing a trade to exactly one version unambiguous.
+  await ddl(`CREATE TABLE IF NOT EXISTS strategy_versions (
+    id BIGSERIAL PRIMARY KEY,
+    strategy_id TEXT NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    deployed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    retired_at TIMESTAMPTZ,
+    changes TEXT DEFAULT '',
+    params JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`);
+  await ddl(`CREATE INDEX IF NOT EXISTS strategy_versions_win_idx ON strategy_versions (strategy_id, deployed_at DESC)`);
+  // Attribution of a reconstructed trade to the version that was live when it OPENED (not when
+  // it closed — the entry is what the strategy decided). Nullable: trades predating any
+  // declared version stay unattributed rather than being forced onto the oldest one.
+  await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_id TEXT`);
+  await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_version_id BIGINT`);
   // Employee Fund: each employee's capital contribution, recorded as a number of "units"
   // (mutual-fund-style unitisation — see api/_lib/employeeFund.js) rather than a flat euro
   // amount, so joining after the fund has already gained/lost value is priced fairly.

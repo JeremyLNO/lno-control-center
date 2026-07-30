@@ -35,6 +35,7 @@ const PERMISSIONS = [
   ['manage_exchanges','Manage exchanges'],
   ['manage_whatsapp','Manage WhatsApp'],
   ['manage_funds','Manage funds'],
+  ['manage_strategies','Manage strategy playbook'],
 ];
 const ALL_PERMS = PERMISSIONS.map(p=>p[0]);
 const ROLE_PERMS = {
@@ -1050,6 +1051,7 @@ const MAIN_NAV=[
 ];
 const TOOLS_NAV: Array<[string,string,string,string,string|string[]]>=[
   ['activity','nav.analysis','/analysis','nav.analysis','view_trades'],
+  ['shield','nav.playbook','/playbook','nav.playbook','view_trades'],
   ['layers','nav.funds','/funds','nav.funds','view_trades'],
   ['link','nav.exchanges','/admin/exchanges','nav.exchanges','view_exchanges'],
   ['database','nav.status','/status','nav.status.short','view_activity'],
