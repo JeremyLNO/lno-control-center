@@ -554,6 +554,79 @@ ok('the analysis engine can group by strategy version',
 await db.query("DELETE FROM strategies WHERE id LIKE 'pb-test%' OR name='Operator strategy'");
 await db.query("DELETE FROM trades WHERE symbol='PBKUSDT'");
 
+// ---------------------------------------------------------------------------------------
+// Anomaly detection (api/_lib/anomalies.js).
+// Seeded so each detector has a case it MUST fire on and the totals are hand-checkable.
+// Baseline window = 42 days ending 14 days ago; recent window = last 14 days.
+// ---------------------------------------------------------------------------------------
+await db.query("DELETE FROM anomalies");
+await db.query("DELETE FROM trades WHERE symbol LIKE 'AN%'");
+let anId = 8000;
+// `daysAgo` is relative to now so the rows always land in the right window, whenever the
+// suite runs — a fixed date would silently stop triggering as time passes.
+const anTrade = (symbol, dir, net, daysAgo) => db.query(
+  `INSERT INTO trades (exchange,symbol,open_trade_id,close_trade_id,direction,qty,entry_price,exit_price,
+     gross_pnl,commission,funding,net_pnl,opened_at,closed_at,duration_s,entry_hour,entry_dow,fill_count,leverage)
+   VALUES ('binance',$1,$2,$2,$3,1,100,110,$4,0,0,$4, now() - ($5||' days')::interval, now() - ($5||' days')::interval + interval '1 hour',
+     3600,10,1,2,5)`,
+  [symbol, ++anId, dir, net, String(daysAgo)]
+);
+// ANWIN: healthy baseline (PF 3.0), collapsing recent window (PF 0.25) -> profit_factor_drop.
+for (let i = 0; i < 12; i++) await anTrade('ANWIN', 'LONG', i % 3 === 0 ? -100 : 150, 20 + i);
+for (let i = 0; i < 12; i++) await anTrade('ANWIN', 'LONG', i % 4 === 0 ? 50 : -100, i % 13);
+// ANDIR: long side works, short side does not -> long_short_drift.
+for (let i = 0; i < 10; i++) await anTrade('ANDIR', 'LONG', 80, i % 13);
+for (let i = 0; i < 10; i++) await anTrade('ANDIR', 'SHORT', -90, i % 13);
+for (let i = 0; i < 10; i++) await anTrade('ANDIR', 'LONG', 40, 20 + i);
+// ANQUIET: traded steadily, then stopped entirely -> trade_frequency (critical).
+for (let i = 0; i < 15; i++) await anTrade('ANQUIET', 'LONG', 20, 20 + i);
+
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'detectAnomalies' } });
+ok('detection runs and reports what it created', r.status === 200 && typeof r.body.created === 'number' && r.body.created > 0, r.body);
+
+r = await call(alerts, { method: 'GET', headers: authH, query: { anomalies: '1', status: 'open' } });
+const byCode = (c, scopePart) => r.body.entries.find(a => a.code === c && (!scopePart || a.scope.includes(scopePart)));
+ok('profit factor collapse is detected', !!byCode('profit_factor_drop', 'ANWIN'), r.body.entries.map(a => a.code + '@' + a.scope));
+ok('a long/short divergence is detected', !!byCode('long_short_drift', 'ANDIR'), r.body.entries.map(a => a.code + '@' + a.scope));
+const quiet = byCode('trade_frequency', 'ANQUIET');
+ok('a bot that stopped trading is flagged critical', !!quiet && quiet.severity === 'critical', quiet);
+
+// Each finding must carry the numbers that produced it — a detector whose reasoning cannot
+// be checked gets ignored after its first false positive.
+const pfFinding = byCode('profit_factor_drop', 'ANWIN');
+ok('a finding carries a probable cause and its evidence',
+  !!pfFinding.cause && pfFinding.evidence.recentPF != null && pfFinding.evidence.baselinePF != null
+  && pfFinding.evidence.baselinePF > pfFinding.evidence.recentPF, pfFinding);
+// The collapsed window is outright losing, so this is the critical variant, not a warning.
+ok('a profit factor below 1 is critical, not a warning', pfFinding.severity === 'critical', pfFinding.severity);
+
+// Re-running must refresh the same finding, never stack duplicates — the detectors run daily.
+const before = (await db.query('SELECT count(*)::int AS n FROM anomalies WHERE resolved_at IS NULL')).rows[0].n;
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'detectAnomalies' } });
+const after = (await db.query('SELECT count(*)::int AS n FROM anomalies WHERE resolved_at IS NULL')).rows[0].n;
+ok('re-running refreshes findings instead of duplicating them', before === after && r.body.created === 0 && r.body.refreshed > 0, { before, after, ...r.body });
+
+// A condition that stops being true must close itself, or the page becomes a list of
+// everything that ever went wrong rather than what is wrong now.
+await db.query("DELETE FROM trades WHERE symbol='ANDIR'");
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'detectAnomalies' } });
+ok('a finding that no longer holds is auto-resolved', r.body.resolved > 0, r.body);
+r = await call(alerts, { method: 'GET', headers: authH, query: { anomalies: '1', status: 'open' } });
+ok('...and disappears from the open list', !r.body.entries.some(a => a.scope.includes('ANDIR')), r.body.entries.map(a => a.scope));
+r = await call(alerts, { method: 'GET', headers: authH, query: { anomalies: '1', status: 'resolved' } });
+ok('...but is still readable in the resolved history', r.body.entries.some(a => a.scope.includes('ANDIR')), r.body.entries.map(a => a.scope));
+
+const openOne = (await call(alerts, { method: 'GET', headers: authH, query: { anomalies: '1' } })).body.entries[0];
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'ackAnomaly', id: openOne.id } });
+ok('an anomaly can be acknowledged', r.status === 200 && !!r.body.anomaly.ackedAt, r.body.anomaly);
+r = await call(alerts, { method: 'GET', headers: authH, query: { anomalies: '1', severity: 'critical' } });
+ok('severity filters server-side', r.status === 200 && r.body.entries.every(a => a.severity === 'critical'), r.body.entries.map(a => a.severity));
+r = await call(alerts, { method: 'GET', headers: authH, query: { anomalies: '1' } });
+ok('the undetectable list is exposed alongside the findings', !!r.body.undetectable.slippage_rise, r.body.undetectable);
+
+await db.query("DELETE FROM trades WHERE symbol LIKE 'AN%'");
+await db.query("DELETE FROM anomalies");
+
 r = await call(bots, { method: 'GET', headers: authH });
 const adaBot = r.body.bots.find(b => b.symbol === 'ADAUSDT');
 ok('a detected pair becomes an unassigned bot id "exchange:symbol"', !!adaBot && adaBot.id === 'binance:ADAUSDT' && adaBot.fundId === null && adaBot.side === 'LONG', adaBot);

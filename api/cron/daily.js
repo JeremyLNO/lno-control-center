@@ -20,6 +20,7 @@ import { buildMonthlyPdf, buildDailyPdf } from '../_lib/report.js';
 import { sendDailyReportEmail, sendVerifyReminderEmail } from '../_lib/mailer.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
+import { runDetection } from '../_lib/anomalies.js';
 
 const REPORTS_URL = 'https://cc.lno.company/#/admin/reports?status=not_verified';
 
@@ -194,6 +195,14 @@ export default async function handler(req, res) {
           sent.push({ type: 'monthly-pdf', archived: true, bytes: b64.length });
         } catch (e) { sent.push({ type: 'monthly-pdf', error: String(e.message || e) }); }
       }
+    }
+
+    // 4b) Behavioural anomaly detection — runs once a day with the full pass, not on the
+    // every-5-minute alerts-only cron: these detectors compare multi-week windows, so running
+    // them more often produces the same findings at a much higher cost.
+    if (!alertsOnly) {
+      try { sent.push({ type: 'anomalies', ...(await runDetection()) }); }
+      catch (e) { sent.push({ type: 'anomalies', error: String(e.message || e) }); }
     }
 
     // 5) 8am verification reminder (item 15) — runs in EITHER mode (so the frequent

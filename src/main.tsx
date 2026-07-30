@@ -9,7 +9,7 @@ import {
 } from './ui'
 import {
   ActivityPage, RealtimePage, TradesPage, AdminUsers, RulesPage, AdminExchanges, AdminOpenWA,
-  AnalysisPage, PlaybookPage, FundsPage, BotsPage, ProfilePage, MyEquityPage, EmployeeFundPage, SupportPage, PricesPage, StatusPage, AdminReports, AuditPage
+  AnalysisPage, PlaybookPage, AnomaliesPage, FundsPage, BotsPage, ProfilePage, MyEquityPage, EmployeeFundPage, SupportPage, PricesPage, StatusPage, AdminReports, AuditPage
 } from './pages/index'
 
 /* ============================================================
@@ -206,6 +206,7 @@ function Shell(){
   else if(a==='trades') page=<TradesPage/>;
   else if(a==='analysis') page=<AnalysisPage/>;
   else if(a==='playbook') page=<PlaybookPage/>;
+  else if(a==='anomalies') page=<AnomaliesPage/>;
   else if(a==='funds') page=<FundsPage/>;
   else if(a==='status') page=<StatusPage/>;
   else if(a==='admin'&&b==='bots') page=<BotsPage/>;

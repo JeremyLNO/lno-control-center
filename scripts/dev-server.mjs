@@ -79,7 +79,12 @@ await db.query(`INSERT INTO income_events (tran_id,exchange,symbol,income_type,i
       // pnl varies in sign and size by symbol/day so the buckets actually differ
       const pnl = Math.round((Math.sin(d * 0.9 + k * 2.1) * 180 + Math.cos(d * 0.3) * 60) * (long ? 1 : 0.6) * 100) / 100;
       const exit = entry + (long ? pnl / qty : -pnl / qty);
-      const open = new Date(Date.UTC(2026, 4, 1, hour, 5) + (d - 1) * 86400000).toISOString();
+      // Anchored on TODAY, not a fixed calendar date: the window-comparing anomaly detectors
+      // (and anything else reading "the last 14 days") would otherwise report every bot as
+      // having stopped trading, purely because the fixture aged.
+      const dayStart = new Date(Date.now() - (76 - d) * 86400000);
+      dayStart.setUTCHours(hour, 5, 0, 0);
+      const open = dayStart.toISOString();
       const close = new Date(Date.parse(open) + durS * 1000).toISOString();
       const fee = Math.abs(qty * entry) * 0.0004;
       vals.push(`('binance','${sym}',${++id},'${long ? 'BUY' : 'SELL'}',${qty},${entry},0,${fee.toFixed(4)},'${open}')`);

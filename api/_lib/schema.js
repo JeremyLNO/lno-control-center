@@ -218,6 +218,30 @@ export async function migrate() {
   // declared version stay unattributed rather than being forced onto the oldest one.
   await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_id TEXT`);
   await ddl(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS strategy_version_id BIGINT`);
+  // Detected behavioural anomalies (see api/_lib/anomalies.js). Distinct from `alerts`:
+  // an alert is a threshold being crossed right now (drawdown breach, exchange down), an
+  // anomaly is a PATTERN in how a bot is behaving — its profit factor collapsing, its losses
+  // concentrating on one asset, its trade frequency drifting. Each carries the evidence that
+  // triggered it so a reader can judge the finding instead of trusting it.
+  await ddl(`CREATE TABLE IF NOT EXISTS anomalies (
+    id BIGSERIAL PRIMARY KEY,
+    code TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'warning',
+    summary TEXT NOT NULL,
+    cause TEXT DEFAULT '',
+    evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
+    detected_at TIMESTAMPTZ DEFAULT now(),
+    last_seen_at TIMESTAMPTZ DEFAULT now(),
+    resolved_at TIMESTAMPTZ,
+    acked_at TIMESTAMPTZ,
+    acked_by TEXT
+  )`);
+  // One OPEN anomaly per (code, scope): a condition that is still true must refresh the
+  // existing finding rather than pile up a new row on every detection pass. Resolved rows are
+  // exempt so the history of past occurrences is kept.
+  await ddl(`CREATE UNIQUE INDEX IF NOT EXISTS anomalies_open_idx ON anomalies (code, scope) WHERE resolved_at IS NULL`);
+  await ddl(`CREATE INDEX IF NOT EXISTS anomalies_detected_idx ON anomalies (detected_at DESC)`);
   // Employee Fund: each employee's capital contribution, recorded as a number of "units"
   // (mutual-fund-style unitisation — see api/_lib/employeeFund.js) rather than a flat euro
   // amount, so joining after the fund has already gained/lost value is priced fairly.

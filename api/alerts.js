@@ -9,11 +9,30 @@
 //   `total` in the response is the full matching count (ignoring limit/offset), for "N of M".
 import { query } from './_lib/db.js';
 import { requireAuth, requireAdmin } from './_lib/auth.js';
+import { permsForRole } from './_lib/rolePerms.js';
+import { listAnomalies, ackAnomaly, runDetection } from './_lib/anomalies.js';
 
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const a = requireAuth(req, res); if (!a) return;
+
+      // Detected behavioural anomalies (see api/_lib/anomalies.js). Folded into this endpoint
+      // rather than a new api/*.js file — Vercel Hobby's 12-function cap is already reached,
+      // and an anomaly is the pattern-level sibling of the alerts served here.
+      //   GET ?anomalies=1[&status=open|resolved|all][&severity=][&code=][&limit&offset]
+      if (req.query?.anomalies) {
+        if (a.role !== 'admin' && !(await permsForRole(a.role)).includes('view_trades')) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        return res.status(200).json(await listAnomalies({
+          status: ['open', 'resolved', 'all'].includes(req.query.status) ? req.query.status : 'open',
+          severity: ['critical', 'warning', 'info'].includes(req.query.severity) ? req.query.severity : null,
+          code: req.query.code || null,
+          limit: Math.min(Math.max(Number(req.query.limit) || 50, 1), 200),
+          offset: Math.max(Number(req.query.offset) || 0, 0),
+        }));
+      }
       // limit=30 (default) for the Live/Activity "recent incidents" widgets; the System
       // Status page's full history table pages through 50 at a time via ?limit=50&offset=N.
       const limit = Math.min(Math.max(Number(req.query?.limit) || 30, 1), 500);
@@ -39,6 +58,15 @@ export default async function handler(req, res) {
     }
     if (req.method === 'POST') {
       const a = requireAdmin(req, res); if (!a) return;
+      // Run the detectors on demand. They also run from the daily cron; this is the 'check
+      // now' button, and the path the tests exercise.
+      if (req.body?.action === 'detectAnomalies') return res.status(200).json(await runDetection());
+      if (req.body?.action === 'ackAnomaly') {
+        if (!req.body.id) return res.status(400).json({ error: 'id required' });
+        const an = await ackAnomaly(req.body.id, a.username || 'admin');
+        if (!an) return res.status(404).json({ error: 'anomaly not found' });
+        return res.status(200).json({ anomaly: an });
+      }
       const id = req.body?.id; if (!id) return res.status(400).json({ error: 'id required' });
       await query('UPDATE alerts SET acked_at=now(), acked_by=$1 WHERE id=$2 AND acked_at IS NULL', [a.username || 'admin', id]);
       return res.status(200).json({ ok: true });

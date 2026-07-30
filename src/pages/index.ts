@@ -18,3 +18,4 @@ export { AdminReports } from './AdminReports';
 export { AuditPage } from './AuditPage';
 export { default as AnalysisPage } from './AnalysisPage';
 export { default as PlaybookPage } from './PlaybookPage';
+export { default as AnomaliesPage } from './AnomaliesPage';
