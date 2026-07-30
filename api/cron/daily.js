@@ -16,11 +16,12 @@ import { getOpenWAConfig, notify, getUsersByRole, rolesForType, rolesWithReportA
 import { reportText, breachAlertText, dormantAlertText, dailyDigestText, verifyReminderText } from '../_lib/notifyText.js';
 import { syncExchanges } from '../_lib/sync.js';
 import { recordDailyFundSnapshot } from '../_lib/employeeFund.js';
-import { buildMonthlyPdf, buildDailyPdf } from '../_lib/report.js';
-import { sendDailyReportEmail, sendVerifyReminderEmail } from '../_lib/mailer.js';
+import { buildMonthlyPdf, buildWeeklyPdf, buildDailyPdf } from '../_lib/report.js';
+import { sendDailyReportEmail, sendWeeklyReportEmail, sendVerifyReminderEmail } from '../_lib/mailer.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
 import { runDetection } from '../_lib/anomalies.js';
+import { buildWeeklyReview } from '../_lib/weeklyReport.js';
 
 const REPORTS_URL = 'https://cc.lno.company/#/admin/reports?status=not_verified';
 
@@ -180,6 +181,38 @@ export default async function handler(req, res) {
       const force = req.query?.force;
       const dt = new Date();
       if (dt.getUTCDay() === 1 || force === 'weekly' || force === 'all') {
+        // Three channels, same underlying week, each matched to what it is good at: a PDF
+        // archived for the record, the full review in the email body, and a short digest on
+        // WhatsApp. Until now the weekly existed only as that WhatsApp line — no archive, no
+        // email, and none of the comparison/attribution the daily report cannot provide.
+        let review = null;
+        try { review = await buildWeeklyReview(); }
+        catch (e) { sent.push({ type: 'weekly-review', error: String(e.message || e) }); }
+
+        try {
+          const weekPositions = port.bots.filter(b => b.status === 'open').map(b => ({ symbol: b.symbol, side: b.side, unrealizedPnl: Number(b.unrealized_pnl || 0), notional: Number(b.notional || 0) }));
+          const b64 = await buildWeeklyPdf({
+            equity: port.equity, pnl7: pnlOver(7), openPnl: port.openPnl, exposure: port.exposure,
+            funds: port.funds, positions: weekPositions, dateLabel: review ? review.weekLabel : today,
+            series: eqv.slice(-7), review,
+          });
+          // Auto-verified like the daily: internal-only, no shareholder is waiting on it.
+          await query("INSERT INTO reports (kind,period_label,equity,pnl,pdf_base64,status,verified_by,verified_at) VALUES ('weekly',$1,$2,$3,$4,'verified','system',now())",
+            [review ? review.weekLabel : today, Math.round(port.equity), Math.round(pnlOver(7)), b64]);
+          sent.push({ type: 'weekly-pdf', archived: true, bytes: b64.length });
+        } catch (e) { sent.push({ type: 'weekly-pdf', error: String(e.message || e) }); }
+
+        if (review) {
+          try {
+            // Same permission gate as the daily email: being internal isn't enough, the role
+            // must actually hold view_reports_weekly (see rolesWithReportAccess).
+            const emailRoles = await rolesWithReportAccess(['admin', 'operator', 'viewer'], 'weekly');
+            const recipients = await getUsersByRole(emailRoles);
+            for (const r of recipients) await sendWeeklyReportEmail(r.email, review).catch(() => {});
+            sent.push({ type: 'weekly-email', recipients: recipients.length });
+          } catch (e) { sent.push({ type: 'weekly-email', error: String(e.message || e) }); }
+        }
+
         sent.push({ type: 'weekly', ...(await notify((lang) => reportText(lang, 'weekly', port, { pnl: pnlOver(7), pct: pctOver(7), labelKey: 'period7d' }), { type: 'weekly' })) });
       }
       if (dt.getUTCDate() === 1 || force === 'monthly' || force === 'all') {

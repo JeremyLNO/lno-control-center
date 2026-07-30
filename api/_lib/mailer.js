@@ -190,3 +190,90 @@ export async function sendVerifyReminderEmail(to, reportNames, link) {
   const html = alertEmailHtml('📋 Reports awaiting verification', `<ul style="margin:8px 0;padding-left:18px">${list}</ul><a href="${link}" style="display:inline-block;margin-top:8px;color:${GOLD};font-weight:600">Review now →</a>`);
   await client().emails.send({ from, to, subject: `${reportNames.length} report${reportNames.length === 1 ? '' : 's'} awaiting verification`, html });
 }
+
+// Weekly review email. Unlike the daily report (a snapshot of the account), this is the
+// analysis of the week that ended: the result read against the previous week and the recent
+// average, who moved it, and what a person has to look at. Sent as HTML in the body, same as
+// the daily one — the PDF is archived separately in Reports.
+export async function sendWeeklyReportEmail(to, rv) {
+  const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
+  const p = rv.portfolio;
+  const up = (p.netPnl || 0) >= 0;
+  const colorOf = (n) => (n >= 0 ? '#059669' : '#DC2626');
+
+  // "No comparable week" is a real state — a desk two weeks old has nothing to compare
+  // against — and saying so beats printing a percentage derived from a zero baseline.
+  const vsPrev = p.vsPrevPct == null
+    ? 'no comparable previous week'
+    : `${p.vsPrevPct >= 0 ? '+' : ''}${p.vsPrevPct}% vs last week (${fSigned(p.prevNetPnl)})`;
+  const vsAvg = p.vsAvgPct == null ? '' : ` · ${p.vsAvgPct >= 0 ? '+' : ''}${p.vsAvgPct}% vs 4-week average`;
+
+  const stat = (label, value, color) => `<tr>
+    <td style="padding:6px 0;color:#64748B;font-size:13px">${escapeHtml(label)}</td>
+    <td style="padding:6px 0;text-align:right;font-family:monospace;font-weight:600;color:${color || NAVY};font-size:13px">${escapeHtml(String(value))}</td></tr>`;
+
+  const botRows = (rows, sign) => rows.map(b => `<div style="display:flex;justify-content:space-between;font-size:13px;margin:5px 0">
+      <span style="font-family:monospace;color:#334155">${escapeHtml(b.symbol)}</span>
+      <span style="font-family:monospace;font-weight:600;color:${colorOf(sign)}">${fSigned(b.netPnl)} <span style="color:#94A3B8;font-weight:400">(${b.trades})</span></span>
+    </div>`).join('') || `<div style="color:#94A3B8;font-size:13px">None</div>`;
+
+  const section = (title, body) => `<div style="margin-top:22px">
+    <div style="font-size:13px;font-weight:700;color:${NAVY};margin-bottom:6px">${escapeHtml(title)}</div>${body}</div>`;
+
+  const listOr = (items, empty) => items.length
+    ? `<ul style="margin:4px 0;padding-left:18px;color:#334155;font-size:13px">${items.map(i => `<li style="margin:3px 0">${i}</li>`).join('')}</ul>`
+    : `<div style="color:#94A3B8;font-size:13px">${escapeHtml(empty)}</div>`;
+
+  const reviewText = {
+    critical_anomaly: (i) => `Critical anomaly on <code>${escapeHtml(i.scope)}</code> — ${escapeHtml(i.detail)}`,
+    expectation_missed: (i) => `${escapeHtml(i.detail)} missed ${i.metrics.map(m => `${escapeHtml(m.metric)} (${m.actual} vs ${m.target})`).join(', ')}`,
+    undocumented_bot: (i) => `${escapeHtml(i.detail)} traded ${i.trades}× with no strategy declared — nothing to judge it against`,
+    fee_drag: (i) => `Fees are ${i.feeShare}% of gross profit (${fUSD(i.fees)} of ${fUSD(i.gross)})`,
+  };
+
+  const html = `<div style="background:#F8F7F4;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+    <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px">
+      <img src="https://cc.lno.company/logo.svg" alt="LNO Control Center" width="100" style="height:auto;display:block;margin:0 0 8px"/>
+      <div style="font-size:18px;font-weight:700;color:${NAVY}">Weekly Review — ${escapeHtml(rv.weekLabel)}</div>
+
+      <div style="margin-top:18px;padding:20px;background:#F8F7F4;border-radius:10px;text-align:center">
+        <div style="font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:.04em">Net PnL</div>
+        <div style="font-size:30px;font-weight:800;color:${colorOf(p.netPnl)};font-family:monospace;margin-top:2px">${fSigned(p.netPnl)}</div>
+        <div style="font-size:12px;color:#64748B;margin-top:4px">${escapeHtml(vsPrev + vsAvg)}</div>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;margin-top:14px">
+        ${stat('Trades', `${p.trades} (${p.prevTrades} last week)`)}
+        ${stat('Win rate', p.winRate == null ? '—' : `${p.winRate}%`)}
+        ${stat('Profit factor', p.profitFactor == null ? 'n/a' : p.profitFactor)}
+        ${stat('Expectancy / trade', fSigned(p.expectancy || 0), colorOf(p.expectancy || 0))}
+        ${stat('Max drawdown', fSigned(p.maxDrawdown), '#DC2626')}
+        ${stat('Fees / funding', `${fUSD(p.fees)} / ${fSigned(p.funding)}`)}
+      </table>
+
+      ${section('Top contributors', botRows(rv.contributors, 1))}
+      ${section('Biggest detractors', botRows(rv.detractors, -1))}
+      ${section('Significant losses', listOr(rv.significantLosses.map(t =>
+        `<code>${escapeHtml(t.symbol)}</code> ${escapeHtml(t.direction)} <b style="color:#DC2626">${fSigned(t.netPnl)}</b>`), 'None this week'))}
+      ${section(`Anomalies detected (${rv.anomalies.length})`, listOr(rv.anomalies.slice(0, 8).map(a =>
+        `<b style="color:${a.severity === 'critical' ? '#DC2626' : '#B45309'}">[${escapeHtml(a.severity)}]</b> ${escapeHtml(a.summary)}${a.resolved ? ' <i style="color:#94A3B8">(resolved)</i>' : ''}`), 'None'))}
+      ${section(`Technical incidents (${rv.incidents.length})`, listOr(rv.incidents.slice(0, 8).map(i =>
+        `${escapeHtml(i.summary)}${i.resolved ? ' <i style="color:#94A3B8">(resolved)</i>' : ' <b style="color:#DC2626">(ongoing)</b>'}`), 'None'))}
+
+      <div style="margin-top:22px;padding:14px;border:1px solid #E7EAF0;border-radius:10px">
+        <div style="font-size:13px;font-weight:700;color:${NAVY};margin-bottom:6px">Needs human review</div>
+        ${listOr(rv.review.map(i => (reviewText[i.kind] || (() => escapeHtml(i.kind)))(i)), 'Nothing flagged this week.')}
+        <div style="margin-top:8px;font-size:11px;color:#94A3B8">Observations only — no action is inferred from these numbers.</div>
+      </div>
+
+      <a href="https://cc.lno.company/#/analysis" style="display:inline-block;margin-top:18px;color:${GOLD};font-weight:600;font-size:13px">Open the analysis →</a>
+      <div style="margin-top:20px;font-size:11px;color:#94A3B8">LNO Trading Systems — internal use only</div>
+    </div>
+  </div>`;
+
+  await client().emails.send({
+    from, to,
+    subject: `Weekly review — ${fSigned(p.netPnl)} (${rv.weekLabel})`,
+    html,
+  });
+}

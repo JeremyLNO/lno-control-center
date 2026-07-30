@@ -6,6 +6,19 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 const grp  = (n) => Math.round(Math.abs(n)).toLocaleString('en-US').replace(/,/g, ' ');
 const fUSD = (n) => grp(n) + ' USDT';
 const fmt  = (n) => (n >= 0 ? '+' : '-') + grp(n) + ' USDT';
+// pdf-lib's standard fonts are WinAnsi-encoded and THROW on anything outside it — an arrow,
+// a curly quote, an emoji in a bot name. Any string that came from the database or from an
+// operator passes through here first: a plain hyphen beats a report that fails to generate.
+// WinAnsi is a superset of Latin-1, so accented characters are KEPT: a French strategy name
+// must not lose its accents on the way into a PDF. Only the few typographic characters
+// outside the encoding are transliterated; anything still unencodable is dropped.
+const ascii = (s) => String(s == null ? '' : s)
+  .replace(/\u2192/g, '->').replace(/\u2190/g, '<-')
+  .replace(/[\u2012-\u2015\u2212]/g, '-')
+  .replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"')
+  // \x20-\x7E is ASCII, \xA0-\xFF the Latin-1 range WinAnsi shares; the CP1252 extras this
+  // file actually emits (en/em dash, ellipsis) are listed explicitly.
+  .replace(/[^\x20-\x7E\xA0-\xFF\u2013\u2014\u2026]/g, '');
 
 // Equity line chart drawn as vector primitives (no embedded image, no new dependency) — pdf-lib's
 // coordinate origin is bottom-left with y growing upward, same convention the rest of this file
@@ -82,7 +95,7 @@ export async function buildMonthlyPdf(d) {
   const at = (s, x, size, f, color) => page.drawText(String(s), { x, y, size, font: f || font, color: color || navy });
 
   at('LNO', 40, 28, bold, gold); at('Monthly Report', 96, 22, bold, navy);
-  y -= 18; at(d.dateLabel || '', 40, 11, font, slate);
+  y -= 18; at(ascii(d.dateLabel), 40, 11, font, slate);
   y -= 22; page.drawLine({ start: { x: 40, y }, end: { x: 555, y }, thickness: 1, color: rgb(0.9, 0.9, 0.92) });
 
   const row = (label, val, color) => { y -= 26; at(label, 40, 12, font, slate); at(val, 300, 14, bold, color || navy); };
@@ -107,7 +120,27 @@ export async function buildMonthlyPdf(d) {
   return Buffer.from(await doc.save()).toString('base64');
 }
 
-// d: { equity, pnl7, openPnl, exposure, funds, positions, dateLabel, series }
+// Human-readable line for one "needs a decision" item. The review section is the part of the
+// weekly report a person actually acts on, so each line states the observation and its
+// numbers — never a recommendation, since nothing here knows the desk's intent.
+function reviewLine(item) {
+  switch (item.kind) {
+    case 'critical_anomaly':
+      return `Critical anomaly on ${item.scope}: ${item.detail}`;
+    case 'expectation_missed':
+      return `${item.detail} missed ${item.metrics.map(m => `${m.metric} (${m.actual} vs ${m.target})`).join(', ')}`;
+    case 'undocumented_bot':
+      return `${item.detail} traded ${item.trades}x with no strategy declared — no expected KPI to judge it against`;
+    case 'fee_drag':
+      return `Fees are ${item.feeShare}% of gross profit (${fUSD(item.fees)} of ${fUSD(item.gross)})`;
+    default:
+      return item.detail || item.kind;
+  }
+}
+
+// d: { equity, pnl7, openPnl, exposure, funds, positions, dateLabel, series, review? }
+// `review` is the structured weekly analysis from api/_lib/weeklyReport.js. Optional: without
+// it this still renders the same one-page snapshot it always did.
 export async function buildWeeklyPdf(d) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]); // A4
@@ -119,7 +152,7 @@ export async function buildWeeklyPdf(d) {
   const at = (s, x, size, f, color) => page.drawText(String(s), { x, y, size, font: f || font, color: color || navy });
 
   at('LNO', 40, 28, bold, gold); at('Weekly Report', 96, 22, bold, navy);
-  y -= 18; at(d.dateLabel || '', 40, 11, font, slate);
+  y -= 18; at(ascii(d.dateLabel), 40, 11, font, slate);
   y -= 22; page.drawLine({ start: { x: 40, y }, end: { x: 555, y }, thickness: 1, color: rgb(0.9, 0.9, 0.92) });
 
   const row = (label, val, color) => { y -= 26; at(label, 40, 12, font, slate); at(val, 300, 14, bold, color || navy); };
@@ -137,6 +170,70 @@ export async function buildWeeklyPdf(d) {
 
   y -= 18; at('Funds', 40, 13, bold, navy);
   y -= 6; y = drawFundBars(page, { x: 40, yTop: y, width: 515, funds: d.funds, font, slate, green, red });
+
+  // ------------------------------------------------------------------------------------
+  // Weekly review. Everything above is a snapshot of the account right now; this is the
+  // analysis of the week that just ended, which is what the report exists for.
+  // ------------------------------------------------------------------------------------
+  const rv = d.review;
+  if (rv) {
+    let pg = page;
+    // pdf-lib has no flow layout: text drawn below y=60 lands in the footer or off-page, so
+    // each section checks for room and starts a new sheet when it runs out.
+    const ensure = (need) => {
+      if (y - need > 60) return;
+      pg = doc.addPage([595, 842]);
+      pg.drawText('LNO Trading Systems — Internal Use Only', { x: 40, y: 40, size: 9, font, color: slate });
+      y = 800;
+    };
+    const put = (s, x, size, f, color) => pg.drawText(String(s), { x, y, size, font: f || font, color: color || navy });
+    // Reserve the heading AND room for a few of its lines: a section title stranded at the
+    // bottom of a page with its content overleaf is worse than a slightly emptier page.
+    const heading = (label) => { ensure(80); y -= 24; put(label, 40, 13, bold, navy); y -= 4;
+      pg.drawLine({ start: { x: 40, y }, end: { x: 555, y }, thickness: 0.5, color: rgb(0.9, 0.9, 0.92) }); };
+    const safe = ascii;
+    const line = (s, indent = 40, size = 9.5, color = slate) => { ensure(16); y -= 13; put(safe(s).slice(0, 110), indent, size, font, color); };
+
+    const p = rv.portfolio;
+    heading('Week in review — ' + safe(rv.weekLabel));
+    y -= 6;
+    const cmp = (label, val, sub) => { ensure(20); y -= 17;
+      put(label, 40, 10, font, slate);
+      put(val, 260, 11, bold, typeof val === 'string' && val.startsWith('-') ? red : navy);
+      if (sub) put(sub, 380, 9.5, font, slate); };
+    cmp('Net PnL', fmt(p.netPnl), p.vsPrevPct == null ? 'no comparable previous week'
+      : `${p.vsPrevPct >= 0 ? '+' : ''}${p.vsPrevPct}% vs last week (${fmt(p.prevNetPnl)})`);
+    cmp('vs 4-week average', fmt(p.avgWeeklyNetPnl), p.vsAvgPct == null ? '-' : `${p.vsAvgPct >= 0 ? '+' : ''}${p.vsAvgPct}%`);
+    cmp('Trades', String(p.trades), `${p.prevTrades} last week - ${p.tradesPerDay ?? 0}/day`);
+    cmp('Win rate', p.winRate == null ? '-' : p.winRate + '%', p.prevWinRate == null ? '-' : `${p.prevWinRate}% last week`);
+    cmp('Profit factor', p.profitFactor == null ? 'n/a' : String(p.profitFactor), `expectancy ${fmt(p.expectancy || 0)}`);
+    cmp('Max drawdown', fmt(p.maxDrawdown), `fees ${fUSD(p.fees)} - funding ${fmt(p.funding)}`);
+
+    if (rv.contributors.length || rv.detractors.length) {
+      heading('PnL contributors');
+      for (const b of rv.contributors) line(`+ ${b.symbol}  ${fmt(b.netPnl)}  (${b.trades} trades, win ${b.winRate ?? '-'}%)`, 40, 9.5, green);
+      for (const b of rv.detractors) line(`- ${b.symbol}  ${fmt(b.netPnl)}  (${b.trades} trades, win ${b.winRate ?? '-'}%)`, 40, 9.5, red);
+    }
+    if (rv.significantLosses.length) {
+      heading('Significant losses');
+      // closed_at arrives as a Date from the pg driver but as an ISO string from JSON, and
+      // String(aDate) gives "Wed Jul 29 2026 16:00:00 GMT+0200 (…)" — normalise both to the
+      // same ISO minute the rest of the report uses.
+      const at16 = (v) => new Date(v).toISOString().slice(0, 16).replace('T', ' ');
+      for (const t of rv.significantLosses) line(`${t.symbol} ${t.direction}  ${fmt(t.netPnl)}  closed ${at16(t.closedAt)}`, 40, 9.5, red);
+    }
+    if (rv.anomalies.length) {
+      heading(`Anomalies detected (${rv.anomalies.length})`);
+      for (const a of rv.anomalies.slice(0, 10)) line(`[${a.severity}] ${a.summary}${a.resolved ? ' (resolved)' : ''}`, 40, 9.5, a.severity === 'critical' ? red : slate);
+    }
+    if (rv.incidents.length) {
+      heading(`Technical incidents (${rv.incidents.length})`);
+      for (const i of rv.incidents.slice(0, 10)) line(`${i.summary}${i.resolved ? ' (resolved)' : ' (ongoing)'}`, 40, 9.5, i.resolved ? slate : red);
+    }
+    heading('Needs human review');
+    if (!rv.review.length) line('Nothing flagged this week.', 40, 9.5, slate);
+    else for (const item of rv.review.slice(0, 12)) line('- ' + reviewLine(item), 40, 9.5, navy);
+  }
 
   page.drawText('LNO Trading Systems — Internal Use Only', { x: 40, y: 40, size: 9, font, color: slate });
   return Buffer.from(await doc.save()).toString('base64');
@@ -156,7 +253,7 @@ export async function buildDailyPdf(d) {
   const at = (s, x, size, f, color) => page.drawText(String(s), { x, y, size, font: f || font, color: color || navy });
 
   at('LNO', 40, 28, bold, gold); at('Daily Report', 96, 22, bold, navy);
-  y -= 18; at(d.dateLabel || '', 40, 11, font, slate);
+  y -= 18; at(ascii(d.dateLabel), 40, 11, font, slate);
   y -= 22; page.drawLine({ start: { x: 40, y }, end: { x: 555, y }, thickness: 1, color: rgb(0.9, 0.9, 0.92) });
 
   const row = (label, val, color) => { y -= 26; at(label, 40, 12, font, slate); at(val, 300, 14, bold, color || navy); };

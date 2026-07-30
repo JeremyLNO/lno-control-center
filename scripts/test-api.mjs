@@ -655,6 +655,62 @@ ok('the undetectable list is exposed alongside the findings', !!r.body.undetecta
 await db.query("DELETE FROM trades WHERE symbol LIKE 'AN%'");
 await db.query("DELETE FROM anomalies");
 
+// ---------------------------------------------------------------------------------------
+// Weekly review (api/_lib/weeklyReport.js). Seeded across three windows so the comparison
+// against the previous week and against the 4-week baseline both have real values.
+// ---------------------------------------------------------------------------------------
+await db.query("DELETE FROM trades WHERE symbol LIKE 'WK%'");
+const { buildWeeklyReview } = await import('../api/_lib/weeklyReport.js');
+let wkId = 6000;
+const wkTrade = (symbol, net, daysAgo) => db.query(
+  `INSERT INTO trades (exchange,symbol,open_trade_id,close_trade_id,direction,qty,entry_price,exit_price,
+     gross_pnl,commission,funding,net_pnl,opened_at,closed_at,duration_s,entry_hour,entry_dow,fill_count,leverage)
+   VALUES ('binance',$1,$2,$2,'LONG',1,100,110,$3,0,0,$3, now() - ($4||' days')::interval, now() - ($4||' days')::interval + interval '1 hour',
+     3600,10,1,2,5)`, [symbol, ++wkId, net, String(daysAgo)]
+);
+// This week: +100 -300 on WKAAA, +50 on WKBBB -> net -150
+await wkTrade('WKAAA', 100, 2); await wkTrade('WKAAA', -300, 3); await wkTrade('WKBBB', 50, 4);
+// Last week: +200 net
+await wkTrade('WKAAA', 200, 10);
+// The four weeks before that: +400 total -> a 100/week baseline
+await wkTrade('WKAAA', 400, 20);
+
+let rv = await buildWeeklyReview();
+ok('weekly review reports the week net PnL', rv.portfolio.netPnl === -150 && rv.portfolio.trades === 3, rv.portfolio);
+ok('weekly review compares against the previous week',
+  rv.portfolio.prevNetPnl === 200 && rv.portfolio.vsPrevPct === -175, { prev: rv.portfolio.prevNetPnl, pct: rv.portfolio.vsPrevPct });
+// The baseline covers 4 weeks (+400) so a like-for-like weekly average is +100.
+ok('weekly review compares against the 4-week average', rv.portfolio.avgWeeklyNetPnl === 100, rv.portfolio.avgWeeklyNetPnl);
+ok('weekly review attributes PnL per bot',
+  rv.bots.find(b => b.symbol === 'WKAAA')?.netPnl === -200 && rv.bots.find(b => b.symbol === 'WKBBB')?.netPnl === 50, rv.bots);
+ok('weekly review separates contributors from detractors',
+  rv.contributors.some(b => b.symbol === 'WKBBB') && rv.detractors.some(b => b.symbol === 'WKAAA'), { c: rv.contributors.map(b => b.symbol), d: rv.detractors.map(b => b.symbol) });
+ok('weekly review lists the individual losing trades', rv.significantLosses[0]?.netPnl === -300, rv.significantLosses);
+// A bot trading with no strategy declared is a governance gap the review must surface.
+ok('a bot trading with no declared strategy is flagged for review',
+  rv.review.some(i => i.kind === 'undocumented_bot' && i.detail === 'WKAAA'), rv.review);
+
+// A desk with no history has nothing to compare against; that must read as "no comparable
+// week", never as a percentage computed from a zero baseline.
+await db.query("DELETE FROM trades WHERE symbol LIKE 'WK%' AND closed_at < now() - interval '7 days'");
+rv = await buildWeeklyReview();
+ok('with no previous week, the comparison is null rather than a fabricated percentage',
+  rv.portfolio.vsPrevPct === null && rv.portfolio.prevNetPnl === 0, rv.portfolio);
+
+const { buildWeeklyPdf: bwp } = await import('../api/_lib/report.js');
+const wkPdf = await bwp({ equity: 1e6, pnl7: -150, openPnl: 0, exposure: 0, funds: [], positions: [], dateLabel: rv.weekLabel, series: [1, 2, 3], review: rv });
+ok('the weekly PDF renders with the review attached', Buffer.from(wkPdf, 'base64').slice(0, 5).toString() === '%PDF-', wkPdf.slice(0, 8));
+
+// End-to-end through the cron: archived as a report row, and emailed to the roles holding
+// view_reports_weekly (the same gate the daily email uses).
+sentMessages.length = 0;
+r = await call(cronDaily, { method: 'POST', headers: authH, query: { force: 'weekly' } });
+ok('the weekly cron archives a weekly PDF', r.body.sent.some(s => s.type === 'weekly-pdf' && s.archived && s.bytes > 0), r.body.sent.filter(s => String(s.type).startsWith('weekly')));
+ok('the weekly cron emails the review', r.body.sent.some(s => s.type === 'weekly-email' && s.recipients > 0), r.body.sent.filter(s => String(s.type).startsWith('weekly')));
+const wkRow = (await db.query("SELECT kind,status FROM reports WHERE kind='weekly' ORDER BY created_at DESC LIMIT 1")).rows[0];
+ok('the archived weekly report is auto-verified (internal-only)', wkRow && wkRow.status === 'verified', wkRow);
+await db.query("DELETE FROM trades WHERE symbol LIKE 'WK%'");
+
 r = await call(bots, { method: 'GET', headers: authH });
 const adaBot = r.body.bots.find(b => b.symbol === 'ADAUSDT');
 ok('a detected pair becomes an unassigned bot id "exchange:symbol"', !!adaBot && adaBot.id === 'binance:ADAUSDT' && adaBot.fundId === null && adaBot.side === 'LONG', adaBot);
