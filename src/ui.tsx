@@ -1035,6 +1035,10 @@ function Login(){
           <button type="button" onClick={()=>{setMode('otp-email');setOtpCode('');setErr('');setOtpStatus('idle');}} className="w-full text-center text-xs text-slate-400 hover:text-navy pt-1">{t('login.changeEmail')}</button>
         </>}
       </div>
+      {/* Language, below the card. Signed out there is no account to read a preference from,
+          so this is the only place someone who doesn't read English can switch before
+          reading anything — including the Google hint and the code-entry instructions. */}
+      <LangSwitcher className="justify-center mt-5"/>
     </div>
   </div>;
 }
