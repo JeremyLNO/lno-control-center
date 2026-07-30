@@ -1049,6 +1049,7 @@ const MAIN_NAV=[
   ['trendup','nav.prices','/prices','nav.prices','view_activity'],
 ];
 const TOOLS_NAV: Array<[string,string,string,string,string|string[]]>=[
+  ['activity','nav.analysis','/analysis','nav.analysis','view_trades'],
   ['layers','nav.funds','/funds','nav.funds','view_trades'],
   ['link','nav.exchanges','/admin/exchanges','nav.exchanges','view_exchanges'],
   ['database','nav.status','/status','nav.status.short','view_activity'],
@@ -1381,6 +1382,88 @@ function OnboardingCard(){
 
 
 /* ============================================================
+   SHARED ANALYSIS FILTERS (Analysis, Calendar, Playbook, Weekly report)
+   ============================================================ */
+// One filter contract for every analytics surface. The state shape mirrors the server's
+// parseFilters() in api/snapshots.js exactly, so a filter added here needs no translation
+// layer — and two pages showing "BTCUSDT, LONG, last 30 days" can never mean different sets.
+// Persisted so moving between the analysis pages carries the current slice along.
+const EMPTY_FILTERS={from:'',to:'',symbol:[],direction:[],fund:[],exchange:[],hour:[],dow:[]};
+const ANALYSIS_FILTER_KEY='analysis_filters_v1';
+
+function filtersToQuery(f: any){
+  const p=new URLSearchParams();
+  for(const [k,v] of Object.entries(f||{})){
+    if(Array.isArray(v)){ if(v.length) p.set(k,v.join(',')); }
+    else if(v!=null&&v!=='') p.set(k,String(v));
+  }
+  return p.toString();
+}
+// Number of constraints actually narrowing the set — drives the "N active" chip and whether
+// Reset is offered. A date bound counts as one, each populated list as one (not per value).
+function activeFilterCount(f: any){
+  let n=0;
+  for(const [k,v] of Object.entries(f||{})){
+    if(k==='from'||k==='to'){ if(v) n++; }
+    else if(Array.isArray(v)&&v.length) n++;
+  }
+  return n;
+}
+function useAnalysisFilters(){
+  const [f,setF]=useState(()=>({...EMPTY_FILTERS,...PREF.get(ANALYSIS_FILTER_KEY,{})}));
+  useEffect(()=>{ PREF.set(ANALYSIS_FILTER_KEY,f); },[f]);
+  const qs=useMemo(()=>filtersToQuery(f),[f]);
+  const set=useCallback((k,v)=>setF(prev=>({...prev,[k]:v})),[]);
+  const toggle=useCallback((k,v)=>setF(prev=>{ const cur=prev[k]||[]; return {...prev,[k]:cur.includes(v)?cur.filter(x=>x!==v):[...cur,v]}; }),[]);
+  return {f,setF,set,toggle,qs,count:activeFilterCount(f),reset:()=>setF({...EMPTY_FILTERS})};
+}
+
+// Multi-value picker. Closed state shows the count, not the values — a filter bar that
+// reflows every time a selection changes is hard to aim at.
+function MultiSelect({label,options,value,onToggle,className=''}: any){
+  const {t}=useApp();
+  const [open,setOpen]=useState(false); const ref=useRef<any>(null);
+  useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  const sel=value||[];
+  return <div ref={ref} className={`relative ${className}`}>
+    <button onClick={()=>setOpen(o=>!o)} className={`w-full flex items-center justify-between gap-2 bg-white border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40 ${sel.length?'border-gold/60 text-navy':'border-slate-300 text-slate-500'}`}>
+      <span className="truncate">{label}{sel.length>0&&<span className="ml-1.5 text-[11px] font-semibold text-gold">{sel.length}</span>}</span>
+      <Icon name="chevdown" className="w-4 h-4 text-slate-400 shrink-0"/>
+    </button>
+    {open&&<div className="absolute left-0 mt-1 min-w-full w-max max-w-xs bg-white rounded-lg shadow-xl border border-slate-200 p-2 z-40 fadein max-h-64 overflow-y-auto">
+      {(!options||options.length===0)&&<div className="text-xs text-slate-400 px-1 py-2">{t('analysis.noOptions')}</div>}
+      {(options||[]).map(o=>{ const val=typeof o==='string'?o:o.value; const lab=typeof o==='string'?o:o.label;
+        return <label key={val} className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-slate-50 text-sm cursor-pointer text-navy">
+          <input type="checkbox" checked={sel.includes(val)} onChange={()=>onToggle(val)} className="accent-navy w-4 h-4"/>{lab}
+        </label>; })}
+    </div>}
+  </div>;
+}
+
+const DOW_KEYS=['sun','mon','tue','wed','thu','fri','sat'];
+
+function AnalysisFilterBar({filters,meta}: any){
+  const {t}=useApp();
+  const {f,set,toggle,count,reset}=filters;
+  return <Card className="p-3 mb-4">
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-1.5">
+        <Icon name="filter" className="w-4 h-4 text-slate-400"/>
+        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('analysis.filters')}</span>
+      </div>
+      <input type="date" value={f.from||''} onChange={e=>set('from',e.target.value)} aria-label={t('analysis.from')} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-navy"/>
+      <span className="text-slate-400 text-sm">→</span>
+      <input type="date" value={f.to||''} onChange={e=>set('to',e.target.value)} aria-label={t('analysis.to')} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-navy"/>
+      <MultiSelect className="w-36" label={t('dim.symbol')} options={meta?.options?.symbol} value={f.symbol} onToggle={v=>toggle('symbol',v)}/>
+      <MultiSelect className="w-32" label={t('dim.direction')} options={meta?.options?.direction} value={f.direction} onToggle={v=>toggle('direction',v)}/>
+      <MultiSelect className="w-32" label={t('dim.dow')} options={DOW_KEYS.map((k,i)=>({value:String(i),label:t('dow.'+k)}))} value={f.dow} onToggle={v=>toggle('dow',v)}/>
+      <MultiSelect className="w-32" label={t('dim.hour')} options={Array.from({length:24},(_,i)=>({value:String(i),label:String(i).padStart(2,'0')+'h'}))} value={f.hour} onToggle={v=>toggle('hour',v)}/>
+      {count>0&&<Btn variant="outline" size="sm" onClick={reset}><Icon name="x" className="w-3.5 h-3.5"/>{t('analysis.reset',{n:count})}</Btn>}
+    </div>
+  </Card>;
+}
+
+/* ============================================================
    PASSWORD POLICY (shared: Admin·Users + Profile)
    ============================================================ */
 // Labels are i18n keys (translated at each call site via t()), not display text.
@@ -1395,5 +1478,6 @@ const passwordOk=(pw: string)=>PW_RULES.every(([,fn])=>fn(pw||''));
 // Admin sets a new password for a password (non-Google) account.
 
 export {
-  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AvatarPickerModal, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, StatusStrip, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk
+  FUND_PALETTE, AVATAR_STYLES, PERMISSIONS, ALL_PERMS, ROLE_PERMS, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, fmtSeniority, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AvatarPickerModal, AreaChart, CandleChart, PositionDetailOverlay, Sparkline, Donut, App, useApp, hasPerm, fundOf, liqInfo, marginUsagePct, dormantInfo, DORMANT_HOURS, attrStats, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, StatusStrip, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, LangSwitcher, Sidebar, GlobalSearch, Header, MobileNav, PageHead, RefreshBar, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard, PW_RULES, passwordOk,
+  useAnalysisFilters, AnalysisFilterBar, MultiSelect, filtersToQuery, DOW_KEYS
 };

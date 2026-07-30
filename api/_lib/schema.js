@@ -146,6 +146,37 @@ export async function migrate() {
     PRIMARY KEY (exchange, symbol, trade_id)
   )`);
   await ddl(`CREATE INDEX IF NOT EXISTS fills_occurred_idx ON fills (occurred_at DESC)`);
+  // Round trips reconstructed from `fills` (see api/_lib/trades.js) — "one completed trade"
+  // as a human means it, which neither `fills` (individual executions) nor `bots` (current
+  // position state) records. Every analytics surface reads from here so a win rate can't
+  // differ between two pages. Derived data: safe to DELETE and rebuild at any time.
+  // open_trade_id (the trade_id of the round trip's first fill) makes the PK deterministic,
+  // so a rebuild upserts in place instead of duplicating.
+  await ddl(`CREATE TABLE IF NOT EXISTS trades (
+    exchange TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    open_trade_id BIGINT NOT NULL,
+    close_trade_id BIGINT,
+    direction TEXT NOT NULL,
+    qty DOUBLE PRECISION NOT NULL DEFAULT 0,
+    entry_price DOUBLE PRECISION,
+    exit_price DOUBLE PRECISION,
+    gross_pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
+    commission DOUBLE PRECISION NOT NULL DEFAULT 0,
+    funding DOUBLE PRECISION NOT NULL DEFAULT 0,
+    net_pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
+    opened_at TIMESTAMPTZ NOT NULL,
+    closed_at TIMESTAMPTZ,
+    duration_s INTEGER,
+    entry_hour SMALLINT,
+    entry_dow SMALLINT,
+    fill_count INT NOT NULL DEFAULT 0,
+    fund_id TEXT,
+    leverage DOUBLE PRECISION,
+    PRIMARY KEY (exchange, symbol, open_trade_id)
+  )`);
+  await ddl(`CREATE INDEX IF NOT EXISTS trades_closed_idx ON trades (closed_at DESC)`);
+  await ddl(`CREATE INDEX IF NOT EXISTS trades_symbol_idx ON trades (symbol)`);
   // Employee Fund: each employee's capital contribution, recorded as a number of "units"
   // (mutual-fund-style unitisation — see api/_lib/employeeFund.js) rather than a flat euro
   // amount, so joining after the fund has already gained/lost value is priced fairly.

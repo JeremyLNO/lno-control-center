@@ -22,6 +22,23 @@ import { notify, REPORT_AVAILABLE, getOpenWAConfig, getApiKey, sendTextMeBot } f
 import { dailyDigestText } from './_lib/notifyText.js';
 import { sendDailyReportEmail } from './_lib/mailer.js';
 import { permsForRole } from './_lib/rolePerms.js';
+import { DIMENSIONS, UNAVAILABLE, fetchTrades, groupBy } from './_lib/analytics.js';
+
+// Query-string -> filter object for the analysis engine. List filters arrive comma-separated
+// (?symbol=BTCUSDT,ETHUSDT); an absent or empty parameter means "no constraint", never "match
+// nothing" — so a half-filled filter bar widens results instead of blanking the page.
+function parseFilters(q = {}) {
+  const list = (k) => (q[k] ? String(q[k]).split(',').filter(Boolean) : undefined);
+  const num = (k) => (q[k] != null && q[k] !== '' ? Number(q[k]) : undefined);
+  return {
+    from: q.from || undefined, to: q.to || undefined,
+    symbol: list('symbol'), direction: list('direction'), exchange: list('exchange'), fund: list('fund'),
+    hour: list('hour'), dow: list('dow'),
+    minDuration: num('minDuration'), maxDuration: num('maxDuration'),
+    minLeverage: num('minLeverage'), maxLeverage: num('maxLeverage'),
+    includeOpen: q.includeOpen === '1',
+  };
+}
 
 // Which report kinds are ever shown/sent to shareholders — only these need the shareholder
 // "new report available" notice fired on verification. Daily/weekly are internal-only.
@@ -34,6 +51,46 @@ export default async function handler(req, res) {
       const a = requireAuth(req, res); if (!a) return;
       const isAdmin = a.role === 'admin';
       const canSeeKind = async (kind) => isAdmin || (await permsForRole(a.role)).includes('view_reports_' + kind);
+
+      // Cross-dimension analysis engine (Analysis page). Lives here rather than in a new
+      // api/*.js file because Vercel Hobby caps the project at 12 serverless functions and
+      // it is already exactly at that limit — snapshots.js is the analytics/reporting home.
+      //   GET ?analysis=1&group=<dim>[&compare=<dim>][&filters...] -> KPI block per bucket
+      //   GET ?analysis=meta -> available dimensions, filter option values, unavailable KPIs
+      if (req.query?.analysis) {
+        if (!isAdmin && !(await permsForRole(a.role)).includes('view_trades')) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        if (req.query.analysis === 'meta') {
+          const { rows: opts } = await query(
+            `SELECT DISTINCT symbol, exchange, direction, fund_id FROM trades`
+          );
+          const uniq = (k) => [...new Set(opts.map(r => r[k]).filter(Boolean))].sort();
+          const { rows: span } = await query('SELECT MIN(closed_at) AS a, MAX(closed_at) AS b, COUNT(*)::int AS n FROM trades WHERE closed_at IS NOT NULL');
+          return res.status(200).json({
+            dimensions: Object.entries(DIMENSIONS).map(([key, d]) => ({ key, label: d.label, order: d.order || null })),
+            unavailable: UNAVAILABLE,
+            options: { symbol: uniq('symbol'), exchange: uniq('exchange'), direction: uniq('direction'), fund: uniq('fund_id') },
+            span: { from: span[0]?.a || null, to: span[0]?.b || null, trades: span[0]?.n || 0 },
+          });
+        }
+        const f = parseFilters(req.query);
+        const trades = await fetchTrades(f);
+        const group = String(req.query.group || 'symbol');
+        if (!DIMENSIONS[group]) return res.status(400).json({ error: 'unknown dimension' });
+        const out = groupBy(trades, group);
+        // An optional second axis turns the flat breakdown into a matrix — "which weekday is
+        // this bot bad on" is a question neither axis answers alone.
+        if (req.query.compare && DIMENSIONS[req.query.compare]) {
+          const c = String(req.query.compare);
+          out.compare = c;
+          out.matrix = out.rows.map(r => ({
+            key: r.key,
+            cells: groupBy(trades.filter(t => String(DIMENSIONS[group].of(t) ?? 'unknown') === r.key), c).rows,
+          }));
+        }
+        return res.status(200).json(out);
+      }
 
       if (req.query?.reports === 'list') {
         const { rows } = await query('SELECT id,kind,period_label,equity,pnl,status,verified_by,verified_at,created_at FROM reports ORDER BY created_at DESC LIMIT 200');

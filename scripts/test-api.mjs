@@ -375,6 +375,99 @@ ok('sync records real account fills per open symbol', r.status === 200 && r.body
 r = await call(bots, { method: 'POST', headers: authH, body: { action: 'sync' } });
 r = await call(bots, { method: 'GET', headers: authH, query: { fills: '1' } });
 ok('re-syncing does not duplicate already-recorded fills', r.status === 200 && r.body.fills.filter(f => f.symbol === 'ADAUSDT' && f.side === 'BUY').length === 1, r.body.fills);
+// ---------------------------------------------------------------------------------------
+// Round-trip trade reconstruction (api/_lib/trades.js) — the dataset every analytics
+// surface reads. foldFills() is pure, so the tricky cases are asserted directly on it
+// rather than through a seeded exchange.
+// ---------------------------------------------------------------------------------------
+const { foldFills, rebuildTrades } = await import('../api/_lib/trades.js');
+const mkFill = (id, side, qty, price, pnl = 0, com = 0, at = '2026-07-01T10:00:00Z') =>
+  ({ exchange: 'binance', symbol: 'TSTUSDT', trade_id: id, side, qty, price, realized_pnl: pnl, commission: com, occurred_at: at });
+
+let trips = foldFills([mkFill(1, 'BUY', 1, 100, 0, 0.1), mkFill(2, 'BUY', 1, 102, 0, 0.1), mkFill(3, 'SELL', 2, 110, 16, 0.2)]);
+ok('scaling into a long then exiting is ONE round trip, entry = qty-weighted average',
+  trips.length === 1 && trips[0].direction === 'LONG' && trips[0].entry_notional / trips[0].entry_qty === 101 && trips[0].gross_pnl === 16, trips);
+ok('a round trip that returns to flat is marked closed', !!trips[0].closed_at && trips[0].peak_qty === 2, trips[0]);
+
+// A single fill that crosses zero closes one trade and opens the opposite one.
+trips = foldFills([mkFill(1, 'BUY', 1, 100), mkFill(2, 'SELL', 3, 110, 10, 0.3)]);
+ok('a fill that flips the position splits into two trades', trips.length === 2 && trips[0].direction === 'LONG' && trips[1].direction === 'SHORT', trips.map(t => t.direction));
+// Binance reports realizedPnl for the REDUCING part of a fill only — prorating it across the
+// flip would credit the freshly-opened trade with profit it has not made.
+ok('realized PnL on a flip goes entirely to the trade being closed',
+  trips[0].gross_pnl === 10 && trips[1].gross_pnl === 0, trips.map(t => t.gross_pnl));
+// Commission, unlike realized PnL, IS charged on the fill's whole quantity and is prorated.
+// The flipping fill carries 0.3 on 3 units: 1 unit closes the long (0.1), 2 open the short (0.2).
+ok('commission on a flip is prorated across both trades',
+  Math.abs(trips[0].commission - 0.1) < 1e-9 && Math.abs(trips[1].commission - 0.2) < 1e-9, trips.map(t => t.commission));
+ok('the trade left open after a flip stays open', !!trips[0].closed_at && !trips[1].closed_at, trips.map(t => !!t.closed_at));
+
+// Exchange-reported quantities are floats: a 3-leg exit leaves a ~1e-17 residual that must
+// still count as flat, or every round trip would be recorded as permanently open.
+trips = foldFills([mkFill(1, 'BUY', 0.3, 100), mkFill(2, 'SELL', 0.1, 101, 0.1), mkFill(3, 'SELL', 0.1, 102, 0.2), mkFill(4, 'SELL', 0.1, 103, 0.3)]);
+ok('a float-residual exit still closes the trade', trips.length === 1 && !!trips[0].closed_at, trips);
+
+// End-to-end against the seeded exchange: the sync above already ran the rebuild.
+const tradeRows = (await db.query('SELECT * FROM trades ORDER BY opened_at')).rows;
+ok('syncing materialises round trips into the trades table', Array.isArray(tradeRows), tradeRows.length);
+const rebuilt = await rebuildTrades();
+const afterRebuild = (await db.query('SELECT COUNT(*)::int AS n FROM trades')).rows[0].n;
+await rebuildTrades();
+ok('rebuilding trades is idempotent (no duplicate rows)', (await db.query('SELECT COUNT(*)::int AS n FROM trades')).rows[0].n === afterRebuild, { afterRebuild, rebuilt });
+
+// ---------------------------------------------------------------------------------------
+// Cross-dimension analysis engine (api/_lib/analytics.js + GET /api/snapshots?analysis).
+// Seeded with a hand-computed trade set so every KPI has a known expected value.
+// 3 wins (+100 +200 +300) and 2 losses (-50 -150): net +400, PF 600/200 = 3.
+// ---------------------------------------------------------------------------------------
+const seedTrade = (id, symbol, dir, net, day, hour) => db.query(
+  `INSERT INTO trades (exchange,symbol,open_trade_id,close_trade_id,direction,qty,entry_price,exit_price,
+     gross_pnl,commission,funding,net_pnl,opened_at,closed_at,duration_s,entry_hour,entry_dow,fill_count,leverage)
+   VALUES ('binance',$1,$2,$2,$3,1,100,110,$4,0,0,$4,$5::timestamptz,$5::timestamptz + interval '1 hour',3600,$6,
+     EXTRACT(DOW FROM $5::timestamptz)::int,2,5)
+   ON CONFLICT (exchange,symbol,open_trade_id) DO NOTHING`,
+  [symbol, id, dir, net, `2026-06-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:00:00Z`, hour]
+);
+await db.query("DELETE FROM trades WHERE symbol LIKE 'AN%USDT'");
+await seedTrade(9001, 'ANAUSDT', 'LONG', 100, 1, 9);
+await seedTrade(9002, 'ANAUSDT', 'LONG', 200, 2, 9);
+await seedTrade(9003, 'ANAUSDT', 'SHORT', -50, 3, 14);
+await seedTrade(9004, 'ANBUSDT', 'LONG', 300, 4, 9);
+await seedTrade(9005, 'ANBUSDT', 'SHORT', -150, 5, 14);
+
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'symbol', from: '2026-06-01', to: '2026-06-30' } });
+ok('analysis endpoint groups by dimension', r.status === 200 && r.body.dimension === 'symbol' && r.body.rows.length === 2, r.body);
+const tot = r.body.total;
+ok('analysis KPIs: net PnL, trades, win rate', tot.trades === 5 && tot.netPnl === 400 && tot.winRate === 60, tot);
+// PF = gross profit / gross loss = 600 / 200 = 3. Expectancy = mean net = 400/5 = 80.
+ok('analysis KPIs: profit factor + expectancy', tot.profitFactor === 3 && tot.expectancy === 80, tot);
+// Cumulative net curve is +100 +300 +250 +550 +400 -> peak 550, trough after it 400 -> -150.
+ok('analysis max drawdown is peak-to-trough of the cumulative net curve', tot.maxDrawdown === -150, tot.maxDrawdown);
+// Buckets must reconcile with the unsliced total, or a slice is silently dropping trades.
+ok('grouped buckets sum back to the total',
+  r.body.rows.reduce((s, x) => s + x.netPnl, 0) === tot.netPnl && r.body.rows.reduce((s, x) => s + x.trades, 0) === tot.trades, r.body.rows);
+
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'direction', from: '2026-06-01', to: '2026-06-30' } });
+const shortRow = r.body.rows.find(x => x.key === 'SHORT');
+ok('grouping by direction isolates LONG vs SHORT', shortRow && shortRow.trades === 2 && shortRow.netPnl === -200, r.body.rows);
+// A bucket with no losing trade has an UNDEFINED profit factor, not an infinite one.
+const longRow = r.body.rows.find(x => x.key === 'LONG');
+ok('profit factor is null (not Infinity) when a bucket has no losing trade', longRow && longRow.profitFactor === null, longRow);
+
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'symbol', compare: 'direction', from: '2026-06-01', to: '2026-06-30' } });
+ok('a second dimension produces a comparison matrix', r.status === 200 && Array.isArray(r.body.matrix) && r.body.matrix.length === 2 && r.body.matrix[0].cells.length >= 1, r.body.matrix);
+
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'symbol', symbol: 'ANAUSDT', from: '2026-06-01', to: '2026-06-30' } });
+ok('list filters narrow the set server-side', r.status === 200 && r.body.rows.length === 1 && r.body.total.trades === 3, r.body.total);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'symbol', hour: '14', from: '2026-06-01', to: '2026-06-30' } });
+ok('entry-hour filter narrows the set server-side', r.status === 200 && r.body.total.trades === 2 && r.body.total.netPnl === -200, r.body.total);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: '1', group: 'nonsense' } });
+ok('an unknown dimension is rejected -> 400', r.status === 400, r.status);
+r = await call(snapshots, { method: 'GET', headers: authH, query: { analysis: 'meta' } });
+ok('analysis meta exposes dimensions, filter options and the not-instrumented list',
+  r.status === 200 && r.body.dimensions.some(d => d.key === 'leverage') && Array.isArray(r.body.options.symbol) && !!r.body.unavailable.slippage, r.body);
+await db.query("DELETE FROM trades WHERE symbol LIKE 'AN%USDT'");
+
 r = await call(bots, { method: 'GET', headers: authH });
 const adaBot = r.body.bots.find(b => b.symbol === 'ADAUSDT');
 ok('a detected pair becomes an unassigned bot id "exchange:symbol"', !!adaBot && adaBot.id === 'binance:ADAUSDT' && adaBot.fundId === null && adaBot.side === 'LONG', adaBot);

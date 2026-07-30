@@ -57,6 +57,41 @@ await db.query(`INSERT INTO income_events (tran_id,exchange,symbol,income_type,i
     ('fx10','binance','ETHUSDT','FUNDING_FEE',4.3,now()-interval '3 days'),
     ('fx11','binance','ETHUSDT','COMMISSION',-3.4,now()-interval '3 days')
   ON CONFLICT (tran_id) DO NOTHING`);
+// dev-only fixture: a fill stream that forms real round trips, so the analytics surfaces
+// (cross-dimension analysis, calendar, playbook) have something to show locally. Deliberately
+// seeded as FILLS rather than as `trades` rows: rebuildTrades() below then reconstructs them
+// through the exact production code path, which is what we actually want to exercise.
+// Deterministic (no Math.random) so a screenshot taken today matches one taken tomorrow.
+{
+  const syms = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT'];
+  const px = { BTCUSDT: 60000, ETHUSDT: 3200, SOLUSDT: 145, ADAUSDT: 0.62 };
+  let id = 5000;
+  const vals = [];
+  for (let d = 1; d <= 75; d++) {
+    const n = 1 + Math.floor(Math.abs(Math.sin(d * 1.7)) * 3);
+    for (let k = 0; k < n; k++) {
+      const sym = syms[(d + k) % syms.length];
+      const long = (d + k) % 3 !== 0;
+      const hour = [2, 7, 9, 13, 16, 20][(d * 3 + k) % 6];
+      const durS = [600, 2400, 9000, 40000, 120000][(d + k) % 5];
+      const qty = sym === 'ADAUSDT' ? 5000 : sym === 'SOLUSDT' ? 40 : sym === 'ETHUSDT' ? 2 : 0.1;
+      const entry = px[sym];
+      // pnl varies in sign and size by symbol/day so the buckets actually differ
+      const pnl = Math.round((Math.sin(d * 0.9 + k * 2.1) * 180 + Math.cos(d * 0.3) * 60) * (long ? 1 : 0.6) * 100) / 100;
+      const exit = entry + (long ? pnl / qty : -pnl / qty);
+      const open = new Date(Date.UTC(2026, 4, 1, hour, 5) + (d - 1) * 86400000).toISOString();
+      const close = new Date(Date.parse(open) + durS * 1000).toISOString();
+      const fee = Math.abs(qty * entry) * 0.0004;
+      vals.push(`('binance','${sym}',${++id},'${long ? 'BUY' : 'SELL'}',${qty},${entry},0,${fee.toFixed(4)},'${open}')`);
+      vals.push(`('binance','${sym}',${++id},'${long ? 'SELL' : 'BUY'}',${qty},${exit},${pnl},${fee.toFixed(4)},'${close}')`);
+    }
+  }
+  await db.query(`INSERT INTO fills (exchange,symbol,trade_id,side,qty,price,realized_pnl,commission,occurred_at)
+    VALUES ${vals.join(',')} ON CONFLICT DO NOTHING`);
+  const { rebuildTrades } = await import('../api/_lib/trades.js');
+  const built = await rebuildTrades({ full: true });
+  console.log('[fixture] round trips reconstructed from fills:', JSON.stringify(built));
+}
 
 const MIME = { '.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.ico':'image/x-icon','.png':'image/png','.woff2':'font/woff2' };
 const DIST = new URL('../dist/', import.meta.url);

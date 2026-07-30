@@ -9,6 +9,7 @@ import { detectFundContributions } from './employeeFund.js';
 import { notify, getUsersByRole, rolesForType, getOpenWAConfig } from './notify.js';
 import { apiErrorText } from './notifyText.js';
 import { sendApiErrorEmail } from './mailer.js';
+import { rebuildTrades } from './trades.js';
 
 const INCOME_TYPES = new Set(['REALIZED_PNL', 'FUNDING_FEE', 'COMMISSION']);
 
@@ -128,6 +129,13 @@ export async function syncExchanges() {
       }));
     } catch (e) { /* best-effort — a failed fills fetch shouldn't break the position sync */ }
   }
+
+  // Fold the (possibly newly extended) fill stream into round-trip trades — the dataset every
+  // analytics surface reads. Runs after the fills loop above so a position that just closed is
+  // materialised as a completed trade in the same pass. Incremental and idempotent; best-effort
+  // because a reconstruction failure must not cost us the position sync itself.
+  try { await rebuildTrades(); }
+  catch (e) { /* best-effort — analytics can be rebuilt on the next sync */ }
 
   // any previously-open Binance bot no longer reported is now flat
   if (connected) {
