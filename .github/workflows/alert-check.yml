@@ -27,5 +27,5 @@ jobs:
           # they carry no secrets, only what each channel did.
           body=$(curl -sf -X POST "https://cc.lno.company/api/cron/daily?mode=alerts" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -w "\nstatus=%{http_code}")
+            -w "\nstatus=%{http_code} duration=%{time_total}s")
           echo "$body"
