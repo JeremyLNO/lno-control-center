@@ -8,7 +8,7 @@ import {
   FUND_PALETTE, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard
 } from './ui'
 import {
-  ActivityPage, RealtimePage, TradesPage, AdminUsers, RulesPage, AdminExchanges, AdminOpenWA,
+  ActivityPage, RealtimePage, TradesPage, AdminUsers, RulesPage, AdminExchanges, AdminOpenWA, AdminLights,
   AnalysisPage, PlaybookPage, AnomaliesPage, CalendarPage, PositionPage, GuidePage, FundsPage, BotsPage, ProfilePage, MyEquityPage, EmployeeFundPage, SupportPage, PricesPage, StatusPage, AdminReports, AuditPage
 } from './pages/index'
 
@@ -30,6 +30,18 @@ function mobileHandoff(token: string, explicitRedirect?: string|null){
   window.location.href = redirect+(redirect.includes('?')?'&':'?')+'token='+encodeURIComponent(token);
   return true;
 }
+// Philips Hue sends the admin back to a callback URL it appends ?code=&state= to. This app
+// routes on the HASH, so a callback registered as ".../#/admin/lights" would bury the code
+// after the '#' where nothing reads it. The callback is therefore the bare origin, and this
+// runs before routing: spot our own state value and hand the request to the lights page,
+// carrying the code across the hash boundary.
+function routeHueCallback(){
+  const p=new URLSearchParams(window.location.search);
+  if(p.get('state')!=='lno-hue'||!p.get('code')) return;
+  window.location.hash='#/admin/lights';
+}
+routeHueCallback();
+
 function useHashRoute(){
   const parse=()=>{ let h=window.location.hash.replace(/^#/,'')||'/activity'; const [path,query]=h.split('?'); const parts=path.split('/').filter(Boolean); const params=Object.fromEntries(new URLSearchParams(query||'')); return {parts,params}; };
   const [route,setRoute]=useState(parse);
@@ -224,6 +236,7 @@ function Shell(){
   else if(a==='admin'&&b==='rules') page=<RulesPage/>;
   else if(a==='admin'&&b==='exchanges') page=<AdminExchanges/>;
   else if(a==='admin'&&(b==='openwa'||b==='whatsapp')) page=<AdminOpenWA/>;
+  else if(a==='admin'&&b==='lights') page=<AdminLights/>;
   else if(a==='admin'&&b==='funds') page=<FundsPage/>;
   else if(a==='admin'&&b==='reports') page=<AdminReports/>;
   else if(a==='admin'&&b==='audit') page=<AuditPage/>;

@@ -239,6 +239,7 @@ const ICONS = {
   msg:[['path','M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z']],
   layers:[['path','M12 2 2 7l10 5 10-5-10-5z'],['path','M2 17l10 5 10-5'],['path','M2 12l10 5 10-5']],
   usercircle:[['circle',12,12,10],['path','M18 20a6 6 0 0 0-12 0'],['circle',12,10,3]],
+  bulb:[['path','M9 18h6'],['path','M10 22h4'],['path','M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z']],
   lifebuoy:[['circle',12,12,10],['circle',12,12,4],['path','M4.93 4.93l4.24 4.24'],['path','M14.83 14.83l4.24 4.24'],['path','M14.83 9.17l4.24-4.24'],['path','M9.17 14.83l-4.24 4.24']],
   search:[['circle',11,11,8],['path','M21 21l-4.35-4.35']],
   bell:[['path','M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9'],['path','M13.73 21a2 2 0 0 1-3.46 0']],
@@ -1079,6 +1080,7 @@ const ADMIN_NAV: Array<[string,string,string,string,string|string[]|null]>=[
   ['shield','nav.rules','/admin/rules','nav.rules',null],
   ['dollar','nav.employeeFund','/admin/employee-fund','nav.employeeFund',null],
   ['msg','nav.whatsapp','/admin/openwa','nav.whatsapp','manage_whatsapp'],
+  ['bulb','nav.lights','/admin/lights','nav.lights',null],
 ];
 // A null perm = admin only; anything else defers to hasPerm.
 const navVisible=(user,perm)=> perm===null||perm===undefined ? user.role==='admin' : hasPerm(user,perm);

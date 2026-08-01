@@ -106,6 +106,7 @@ let binancePositions = [
   { symbol: 'BTCUSDT', positionAmt: '0',     entryPrice: '0',    markPrice: '67000', unRealizedProfit: '0',  leverage: '10', notional: '0' },
 ];
 const oneSignalCalls = [];   // Live Activity pushes the cron made
+const goveeCalls = [];       // smart-light calls the cron/test made
 let binanceFail = false; // when true, Binance returns the classic -2015 (key/IP/permissions) error
 let walletBalance = '120000'; // mutable so tests can simulate a real capital addition between syncs
 globalThis.fetch = async (url, opts) => {
@@ -123,6 +124,14 @@ globalThis.fetch = async (url, opts) => {
       ]) };
     }
     return { ok: true, status: 200, json: async () => ({}) };
+  }
+  if (u.includes('openapi.api.govee.com')) {
+    goveeCalls.push({ url: u, body: opts?.body ? JSON.parse(opts.body) : null, key: opts?.headers?.['Govee-API-Key'] });
+    if (u.includes('/user/devices')) return { ok: true, status: 200, json: async () => ({ data: [
+      { device: 'AA:BB', sku: 'H6159', deviceName: 'Desk lamp', capabilities: [{ instance: 'colorRgb' }] },
+      { device: 'CC:DD', sku: 'H5081', deviceName: 'Plug', capabilities: [{ instance: 'powerSwitch' }] },
+    ] }) };
+    return { ok: true, status: 200, json: async () => ({ code: 200 }) };
   }
   if (u.includes('api.onesignal.com')) { oneSignalCalls.push(JSON.parse(opts.body)); return { ok: true, status: 200, text: async () => '{"id":"la_1"}' }; }
   if (u.includes('textmebot.com')) { const uu = new URL(u); sentMessages.push({ text: uu.searchParams.get('text') || '', to: uu.searchParams.get('recipient') || '' }); return { ok: true, status: 200, text: async () => 'Success! Message Sent.' }; }
@@ -928,6 +937,77 @@ ok('a real change IS pushed', (await pushLiveActivity(laMoved)).pushed === true 
 ok('an empty book is not pushed', (await pushLiveActivity(buildLiveActivityState([], []))).skipped === 'no open positions');
 delete process.env.ONESIGNAL_APP_ID; delete process.env.ONESIGNAL_REST_API_KEY;
 await db.query("DELETE FROM app_config WHERE key='liveActivitySig'");
+
+// ---------------------------------------------------------------------------------------
+// Smart lights (api/_lib/lights.js): the lamp shows the open book.
+// ---------------------------------------------------------------------------------------
+const lights = await import('../api/_lib/lights.js');
+const baseCfg = { deadband: 25, profit: '#10B981', loss: '#EF4444', flat: '#C9A24D' };
+ok('a book in profit is green', lights.colorForPnl(500, baseCfg) === '#10B981');
+ok('a book in loss is red', lights.colorForPnl(-500, baseCfg) === '#EF4444');
+// Without a deadband a book hovering around zero strobes red/green — that is noise, not
+// information, so the near-flat band gets its own colour.
+ok('a near-flat book is neither', lights.colorForPnl(10, baseCfg) === '#C9A24D' && lights.colorForPnl(-10, baseCfg) === '#C9A24D', {
+  up: lights.colorForPnl(10, baseCfg), down: lights.colorForPnl(-10, baseCfg) });
+ok('the deadband is exclusive at its edge', lights.colorForPnl(25, baseCfg) === '#C9A24D' && lights.colorForPnl(25.01, baseCfg) === '#10B981');
+
+// Hue speaks CIE xy. Red and green must land in clearly different places, and the gamma step
+// is what keeps green from reading as yellow.
+const xyRed = lights.rgbToXy({ r: 239, g: 68, b: 68 }), xyGreen = lights.rgbToXy({ r: 16, g: 185, b: 129 });
+ok('RGB converts to distinct Hue xy points', xyRed.x > 0.55 && xyGreen.x < 0.3 && xyGreen.y > xyRed.y, { xyRed, xyGreen });
+
+await db.query("DELETE FROM app_config WHERE key IN ('lights','lightsLastColor')");
+ok('lights are off until configured', (await lights.syncLights(500)).skipped === 'disabled');
+
+await lights.saveLightsConfig({ enabled: true, govee: { enabled: true, apiKey: 'govee-secret-key', device: 'AA:BB', model: 'H6159' } });
+const lightsRow = (await db.query("SELECT value FROM app_config WHERE key='lights'")).rows[0].value;
+ok('the Govee key is stored encrypted, never in the clear', lightsRow.govee.apiKey !== 'govee-secret-key' && !JSON.stringify(lightsRow).includes('govee-secret-key'), lightsRow.govee.apiKey);
+ok('the config sent to the browser masks the key and never returns it',
+  !JSON.stringify(lights.publicLightsConfig(await lights.getLightsConfig())).includes('govee-secret-key'));
+
+goveeCalls.length = 0;
+let lr = await lights.syncLights(1200);
+ok('a profitable book turns the lamp green', lr.color === '#10B981' && lr.govee === 'ok', lr);
+// Colour is sent as a single packed integer, and the lamp is powered on first — a colour sent
+// to a lamp that is off changes nothing visible.
+const colorCall = goveeCalls.find(c => c.body?.payload?.capability?.instance === 'colorRgb');
+ok('the colour is packed into one RGB integer', colorCall && colorCall.body.payload.capability.value === ((16 << 16) + (185 << 8) + 129), colorCall?.body?.payload?.capability);
+ok('the lamp is switched on before the colour is sent',
+  goveeCalls.findIndex(c => c.body?.payload?.capability?.instance === 'powerSwitch') < goveeCalls.indexOf(colorCall));
+
+// These are rate-limited consumer APIs and the cron runs every five minutes: re-sending
+// "still green" all day is how an account gets throttled.
+goveeCalls.length = 0;
+ok('the same colour is not re-sent', (await lights.syncLights(1500)).skipped === 'unchanged' && goveeCalls.length === 0, goveeCalls.length);
+ok('a colour CHANGE is sent', (await lights.syncLights(-1500)).color === '#EF4444' && goveeCalls.length > 0);
+
+// A patch must not blank the secrets it doesn't mention.
+await lights.saveLightsConfig({ brightness: 30 });
+ok('saving an unrelated field keeps the stored key', (await lights.getLightsConfig()).govee.apiKey === lightsRow.govee.apiKey);
+
+// Only colour-capable devices are worth offering.
+const devs = await lights.goveeDevices('k');
+ok('the device list flags what can actually take a colour',
+  devs.find(d => d.device === 'AA:BB').colorCapable === true && devs.find(d => d.device === 'CC:DD').colorCapable === false, devs);
+
+// Endpoint: admin only, and it lives on openwa.js purely because of the function cap.
+// A throwaway operator token, minted here because the shared one is created much later in
+// this file — the point of these four assertions is the GATE, not the account.
+const { signToken: signTok } = await import('../api/_lib/auth.js');
+const lightsOpH = { authorization: 'Bearer ' + signTok({ id: 'u2', username: 'sophie.ops', role: 'operator' }) };
+r = await call(openwa, { method: 'GET', headers: authH, query: { lights: '1' } });
+ok('an admin reads the lights config', r.status === 200 && r.body.lights && r.body.lights.govee.hasApiKey === true, r.status);
+r = await call(openwa, { method: 'GET', headers: lightsOpH, query: { lights: '1' } });
+ok('a non-admin cannot read the lights config -> 403', r.status === 403, r.status);
+r = await call(openwa, { method: 'PUT', headers: lightsOpH, body: { lights: { enabled: false } } });
+ok('a non-admin cannot change the lights -> 403', r.status === 403, r.status);
+// manage_whatsapp opens the WhatsApp config on this same endpoint but must NOT open the lights.
+await db.query("UPDATE app_config SET value=$1::jsonb WHERE key='rolePerms'",
+  [JSON.stringify({ ...(await db.query("SELECT value FROM app_config WHERE key='rolePerms'")).rows[0]?.value, operator: ['manage_whatsapp'] })]);
+r = await call(openwa, { method: 'GET', headers: lightsOpH, query: { lights: '1' } });
+ok('manage_whatsapp does not unlock the lights either', r.status === 403, r.status);
+
+await db.query("DELETE FROM app_config WHERE key IN ('lights','lightsLastColor')");
 
 // ---------------------------------------------------------------------------------------
 // Discussion layer: comments, @mentions, incident review (api/_lib/comments.js).

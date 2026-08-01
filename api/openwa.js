@@ -14,6 +14,8 @@ import { welcomeText } from './_lib/notifyText.js';
 import { DEFAULT_MATRIX, WA_ROLES, WA_MSG_TYPES } from './_lib/constants.js';
 import { permsForRole } from './_lib/rolePerms.js';
 import { audit } from './_lib/audit.js';
+import { getLightsConfig, publicLightsConfig, saveLightsConfig, goveeDevices, hueLights, hueExchangeCode, syncLights, colorForPnl } from './_lib/lights.js';
+import { buildPortfolio } from './_lib/portfolio.js';
 
 async function getCfg() {
   const { rows } = await query(`SELECT value FROM app_config WHERE key='openwa'`);
@@ -46,6 +48,16 @@ function pub(cfg) {
 
 export default async function handler(req, res) {
   const a = requireAuth(req, res); if (!a) return;
+
+  // Smart-lights config shares this function purely because of the 12-serverless-function
+  // cap — it is a separate feature with a STRICTER gate (admin only, never manage_whatsapp),
+  // so it is handled before that permission check rather than inside it.
+  if (req.query?.lights || req.body?.lights || String(req.body?.action || '').startsWith('lights') || String(req.body?.action || '').startsWith('govee') || String(req.body?.action || '').startsWith('hue')) {
+    if (a.role !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    try { return await handleLights(req, res, a); }
+    catch (e) { return res.status(500).json({ error: String(e.message || e) }); }
+  }
+
   if (a.role !== 'admin' && !(await permsForRole(a.role)).includes('manage_whatsapp')) return res.status(403).json({ error: 'forbidden' });
   try {
     if (req.method === 'GET') {
@@ -118,4 +130,48 @@ export default async function handler(req, res) {
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }
+}
+
+
+/// Smart lights (Govee / Philips Hue) — admin only. See api/_lib/lights.js for why Hue goes
+/// through Philips' remote API rather than the bridge on the desk's own network.
+async function handleLights(req, res, a) {
+  if (req.method === 'GET') {
+    return res.status(200).json({ lights: publicLightsConfig(await getLightsConfig()) });
+  }
+  if (req.method === 'PUT') {
+    const next = await saveLightsConfig(req.body.lights || {});
+    await audit(req, a, 'lights.config', null, { enabled: next.enabled, govee: next.govee.enabled, hue: next.hue.enabled });
+    return res.status(200).json({ lights: publicLightsConfig(next) });
+  }
+  if (req.method === 'POST') {
+    const action = req.body?.action;
+    if (action === 'goveeDevices') {
+      const cfg = await getLightsConfig();
+      // The key just typed into the form takes precedence over the stored one: this is how
+      // an admin checks a NEW key before saving it.
+      const key = (req.body.apiKey || '').trim() || (cfg.govee.apiKey ? decrypt(cfg.govee.apiKey) : '');
+      if (!key) return res.status(400).json({ error: 'Govee API key required' });
+      return res.status(200).json({ devices: await goveeDevices(key) });
+    }
+    if (action === 'hueLights') {
+      return res.status(200).json({ lights: await hueLights(await getLightsConfig()) });
+    }
+    if (action === 'hueExchange') {
+      if (!req.body.code) return res.status(400).json({ error: 'code required' });
+      await hueExchangeCode(String(req.body.code));
+      await audit(req, a, 'lights.hueLinked', null, {});
+      return res.status(200).json({ lights: publicLightsConfig(await getLightsConfig()) });
+    }
+    if (action === 'lightsTest') {
+      // Test against the REAL open P&L, not a made-up value: the point of the button is to
+      // answer "what will my lamp do right now", and a fake number cannot answer that.
+      const port = await buildPortfolio();
+      const cfg = await getLightsConfig();
+      const out = await syncLights(port.openPnl, { force: true });
+      return res.status(200).json({ ...out, openPnl: port.openPnl, expected: colorForPnl(port.openPnl, cfg) });
+    }
+    return res.status(400).json({ error: 'unknown action' });
+  }
+  return res.status(405).json({ error: 'method not allowed' });
 }

@@ -51,6 +51,7 @@ const GROUPS: Group[] = [
     { icon: 'dollar', key: 'equity', path: '/equity', perm: null, allow: (u) => u.role !== 'shareholder' },
     { icon: 'users', key: 'users', path: '/admin/users', perm: undefined },
     { icon: 'shield', key: 'rules', path: '/admin/rules', perm: undefined },
+    { icon: 'bulb', key: 'lights', path: '/admin/lights', perm: undefined },
     { icon: 'filetext', key: 'audit', path: '/admin/audit', perm: 'view_audit' },
   ]},
 ];

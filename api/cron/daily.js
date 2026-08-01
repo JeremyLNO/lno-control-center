@@ -18,6 +18,7 @@ import { syncExchanges } from '../_lib/sync.js';
 import { recordDailyFundSnapshot } from '../_lib/employeeFund.js';
 import { buildMonthlyPdf, buildWeeklyPdf, buildDailyPdf } from '../_lib/report.js';
 import { buildLiveActivityState, pushLiveActivity } from '../_lib/liveActivity.js';
+import { syncLights } from '../_lib/lights.js';
 import { sendDailyReportEmail, sendWeeklyReportEmail, sendVerifyReminderEmail, dailyReportHtml, weeklyReportHtml, monthlyReportHtml } from '../_lib/mailer.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
@@ -149,6 +150,12 @@ export default async function handler(req, res) {
     // itself when nothing material changed, so the rate limit is spent on real movement.
     try { sent.push({ type: 'live-activity', ...(await pushLiveActivity(buildLiveActivityState(port.bots, series.map(s => s.equity)))) }); }
     catch (e) { sent.push({ type: 'live-activity', error: String(e.message || e) }); }
+
+    // 3d) Smart lights — same cadence and same reasoning as the Live Activity: the lamp is an
+    // ambient display of the open book, so it has to follow it, not the report schedule.
+    // syncLights() no-ops unless the COLOUR changed (consumer APIs are rate-limited).
+    try { sent.push({ type: 'lights', ...(await syncLights(port.openPnl)) }); }
+    catch (e) { sent.push({ type: 'lights', error: String(e.message || e) }); }
 
     // 4) reports — global + per-fund, grouped by fund. Skipped entirely in ?mode=alerts so a
     // frequent trigger can never re-send the daily/weekly/monthly reports — only the real
