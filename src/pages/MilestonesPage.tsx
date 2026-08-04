@@ -196,42 +196,29 @@ function EditModal({value,onChange,onSave,onClose,busy,t}: any){
 /* ============================================================
    DASHBOARD CARD
    ============================================================ */
-// What the dashboard shows: what was just reached, and what is closest to being reached.
-// Nothing else earns the space — a full scoreboard belongs on the Milestones page.
+// The last milestone reached, and nothing else. A progress bar towards the next one belongs
+// on the Milestones page: the dashboard is for what HAPPENED, not for what might.
 export function MilestonesCard(){
   const {user,navigate,t}=useApp();
   const [data,setData]=useState<any>(null);
   useEffect(()=>{ if(hasPerm(user,'view_milestones')) api('alerts?milestones=1').then(setData).catch(()=>{}); },[]);
   if(!hasPerm(user,'view_milestones')||!data) return null;
 
-  const done=data.milestones.filter((m: any)=>m.achievedAt)
-    .sort((a: any,b: any)=>new Date(b.achievedAt).getTime()-new Date(a.achievedAt).getTime());
-  const latest=done[0];
-  // "Closest" = highest completion ratio among the unreached, which is the one worth chasing.
-  const next=data.milestones.filter((m: any)=>!m.achievedAt&&m.active)
-    .map((m: any)=>({m,pct:m.threshold>0?((data.measured?.[m.scope]?.[m.metric]??0)/m.threshold)*100:0}))
-    .sort((a: any,b: any)=>b.pct-a.pct)[0];
-  if(!latest&&!next) return null;
+  const latest=data.milestones.filter((m: any)=>m.achievedAt)
+    .sort((a: any,b: any)=>new Date(b.achievedAt).getTime()-new Date(a.achievedAt).getTime())[0];
+  // Nothing reached yet is nothing to celebrate — no empty frame to explain.
+  if(!latest) return null;
 
   return <Card className="p-4">
     <SectionTitle right={<button onClick={()=>navigate('/milestones')} className="text-xs text-gold hover:underline">{t('ms.seeAll')} →</button>}>
       {t('ms.title')}
     </SectionTitle>
-    {latest&&<div className="flex items-center gap-3 p-3 rounded-xl bg-gold/[.07] border border-gold/25">
+    <div className="flex items-center gap-3 p-3 rounded-xl bg-gold/[.07] border border-gold/25">
       <span className="text-2xl leading-none">🏆</span>
       <div className="min-w-0">
         <div className="text-sm font-semibold text-navy truncate">{label(latest,t)}</div>
         <div className="text-xs text-slate-500">{t('ms.reachedOnShort',{date:fmtDT(latest.achievedAt)})}</div>
       </div>
-    </div>}
-    {next&&<div className={latest?'mt-3':''}>
-      <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-        <span>{t('ms.next')}</span><span className="tabular-nums">{Math.round(next.pct)}%</span>
-      </div>
-      <div className="text-sm text-navy mb-1.5">{label(next.m,t)}</div>
-      <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
-        <div className="h-full rounded-full bg-gold" style={{width:Math.min(100,next.pct)+'%'}}/>
-      </div>
-    </div>}
+    </div>
   </Card>;
 }
