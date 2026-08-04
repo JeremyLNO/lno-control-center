@@ -63,6 +63,7 @@ export default function AdminLights(){
   async function loadDevices(){
     try{ const r=await api('openwa',{method:'POST',body:{action:'goveeDevices',apiKey:goveeKey.trim()||undefined}}); setDevices(r.devices||[]);
       if(!r.devices?.length) toast.error(t('lights.noDevices'));
+      else toast.success(t('lights.devicesFound',{n:r.devices.length}));
     }catch(e: any){ toast.error(e.message); }
   }
   async function loadHueLights(){
@@ -134,7 +135,10 @@ export default function AdminLights(){
               setGovee({device:e.target.value,model:d?d.model:cfg.govee.model});
             }} options={[
               {value:cfg.govee.device||'',label:cfg.govee.device?cfg.govee.device:t('lights.pickDevice')},
-              ...devices.filter(d=>d.colorCapable).map(d=>({value:d.device,label:d.name+' · '+d.model})),
+              // Every device the account owns, colour-capable or not: Govee's capability
+              // naming varies by product line, and silently hiding the ones this app doesn't
+              // recognise is how a lamp that would have worked becomes unselectable.
+              ...devices.map(d=>({value:d.device,label:d.name+' · '+d.model+(d.colorCapable?'':' '+t('lights.noColor'))})),
             ]}/>
           </Field>
         </div>

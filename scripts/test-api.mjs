@@ -108,6 +108,7 @@ let binancePositions = [
 ];
 const oneSignalCalls = [];   // Live Activity pushes the cron made
 const goveeCalls = [];       // smart-light calls the cron/test made
+let goveeRejectKey = false;  // simulate Govee's 200-with-error-code answer
 let binanceFail = false; // when true, Binance returns the classic -2015 (key/IP/permissions) error
 let walletBalance = '120000'; // mutable so tests can simulate a real capital addition between syncs
 globalThis.fetch = async (url, opts) => {
@@ -128,7 +129,9 @@ globalThis.fetch = async (url, opts) => {
   }
   if (u.includes('openapi.api.govee.com')) {
     goveeCalls.push({ url: u, body: opts?.body ? JSON.parse(opts.body) : null, key: opts?.headers?.['Govee-API-Key'] });
-    if (u.includes('/user/devices')) return { ok: true, status: 200, json: async () => ({ data: [
+    // Govee answers 200 with the real status in the body — a rejected key is 200 + code 401.
+    if (goveeRejectKey && u.includes('/user/devices')) return { ok: true, status: 200, json: async () => ({ code: 401, message: 'Invalid API key' }) };
+    if (u.includes('/user/devices')) return { ok: true, status: 200, json: async () => ({ code: 200, data: [
       { device: 'AA:BB', sku: 'H6159', deviceName: 'Desk lamp', capabilities: [{ instance: 'colorRgb' }] },
       { device: 'CC:DD', sku: 'H5081', deviceName: 'Plug', capabilities: [{ instance: 'powerSwitch' }] },
     ] }) };
@@ -1125,10 +1128,20 @@ ok('a colour CHANGE is sent', (await lights.syncLights(-1500)).color === '#EF444
 await lights.saveLightsConfig({ brightness: 30 });
 ok('saving an unrelated field keeps the stored key', (await lights.getLightsConfig()).govee.apiKey === lightsRow.govee.apiKey);
 
-// Only colour-capable devices are worth offering.
+// Colour capability is REPORTED, not filtered on: Govee's capability naming varies by
+// product line, and hiding what this app doesn't recognise makes a working lamp
+// unselectable. Both devices come back; only the flag differs.
 const devs = await lights.goveeDevices('k');
-ok('the device list flags what can actually take a colour',
+ok('every device is returned, with a colour flag', devs.length === 2, devs.map(d => d.device));
+ok('the flag says which can take a colour',
   devs.find(d => d.device === 'AA:BB').colorCapable === true && devs.find(d => d.device === 'CC:DD').colorCapable === false, devs);
+// A rejected key comes back as HTTP 200 with code 401 in the body. Trusting res.ok turned
+// that into an empty list and a misleading "no colour-capable device".
+goveeRejectKey = true;
+let keyErr = null;
+try { await lights.goveeDevices('bad'); } catch (e) { keyErr = String(e.message); }
+ok('a key Govee rejects surfaces as an error, not an empty list', /401/.test(keyErr || ''), keyErr);
+goveeRejectKey = false;
 
 // The self-test must be unmistakable AND must not leave the lamp lying: syncLights only
 // pushes on a CHANGE, so a lamp left yellow would stay yellow until the book crossed a

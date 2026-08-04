@@ -109,14 +109,28 @@ export async function saveLightsConfig(patch) {
 const GOVEE = 'https://openapi.api.govee.com/router/api/v1';
 
 export async function goveeDevices(apiKey, { fetchImpl = fetch } = {}) {
-  const res = await fetchImpl(`${GOVEE}/user/devices`, { headers: { 'Govee-API-Key': apiKey } });
-  if (!res.ok) throw new Error(`Govee ${res.status}`);
-  const body = await res.json();
-  return (body.data || []).map(d => ({
-    device: d.device, model: d.sku || d.model, name: d.deviceName || d.device,
-    // Only a device that can actually take a colour is worth offering.
-    colorCapable: (d.capabilities || []).some(c => String(c.instance) === 'colorRgb'),
-  }));
+  const res = await fetchImpl(`${GOVEE}/user/devices`, {
+    headers: { 'Govee-API-Key': apiKey, 'Content-Type': 'application/json' },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Govee ${res.status}${body.message ? ' — ' + body.message : ''}`);
+  // Govee answers HTTP 200 with the REAL status in the body: a rejected key comes back as
+  // 200 + {code:401}. Trusting res.ok alone turned that into an empty device list and a
+  // misleading "no colour-capable device" — the failure has to surface as a failure.
+  if (body.code != null && Number(body.code) !== 200) {
+    throw new Error(`Govee ${body.code}${body.message ? ' — ' + body.message : ''}`);
+  }
+  return (body.data || []).map(d => {
+    const caps = d.capabilities || [];
+    return {
+      device: d.device, model: d.sku || d.model, name: d.deviceName || d.device,
+      // Reported, NOT filtered on. Govee's capability naming varies by product line, so
+      // hiding everything this check doesn't recognise is how a lamp that would have worked
+      // becomes unselectable — the page lists them all and flags this instead.
+      colorCapable: caps.some(c => String(c.instance) === 'colorRgb'
+        || String(c.type) === 'devices.capabilities.color_setting'),
+    };
+  });
 }
 
 async function goveeSet(cfg, rgb, { fetchImpl = fetch } = {}) {
