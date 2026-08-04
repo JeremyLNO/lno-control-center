@@ -8,11 +8,12 @@ export const PERMISSIONS = [
   'view_activity','view_realtime','view_trades',
   'view_reports_daily','view_reports_weekly','view_reports_monthly','view_exchanges','export_data',
   'view_audit','manage_exchanges','manage_whatsapp','manage_funds','manage_strategies','manage_comments',
+  'view_milestones',
 ];
 export const ROLE_PERMS = {
   admin: PERMISSIONS.slice(),
-  operator: ['view_activity','view_realtime','view_trades','export_data'],
-  viewer: ['view_activity','view_realtime','view_trades'],
+  operator: ['view_activity','view_realtime','view_trades','export_data','view_milestones'],
+  viewer: ['view_activity','view_realtime','view_trades','view_milestones'],
   // shareholder default: Exchanges (view_exchanges — wallets only, no keys), Funds
   // (view_trades — read-only), Live (view_realtime), System Status + dashboard (view_activity),
   // plus monthly reports only — the only kind ever sent to shareholders (SHAREHOLDER_KINDS
@@ -39,7 +40,7 @@ export const DEFAULT_USERS = [
 // drawdownPct / pnlDayThreshold drive automated alerts; dailyReport toggles the daily summary.
 // WhatsApp notification routing: which roles receive each message type.
 export const WA_ROLES = ['admin','operator','viewer','shareholder'];
-export const WA_MSG_TYPES = ['login','breach','stale','daily','weekly','monthly','new_report','api_error','new_signup','verify_reminder'];
+export const WA_MSG_TYPES = ['login','breach','stale','daily','weekly','monthly','new_report','api_error','new_signup','verify_reminder','milestone'];
 // Report-content message types: WHO receives these is decided solely by the matching
 // view_reports_* permission on the Rules page (see REPORT_TYPE_PERM in _lib/notify.js), not
 // by the matrix below — one source of truth instead of two systems that could disagree
@@ -58,5 +59,8 @@ export const DEFAULT_MATRIX = {
   api_error:  ['admin','operator'],
   new_signup: ['admin'],
   verify_reminder: ['admin'],
+  // Listed for completeness only: like report CONTENT, a milestone's audience is decided by
+  // a Rules permission (view_milestones), not by this matrix — see CONTENT_TYPE_PERM.
+  milestone:  ['admin','operator','viewer'],
 };
 export const DEFAULT_OPENWA = { enabled:false, drawdownPct:10, pnlDayThreshold:-5000, dailyReport:true, notifMatrix: DEFAULT_MATRIX };

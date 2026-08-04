@@ -5,6 +5,7 @@ import {
   hasPerm, fundOf, sliceByPeriod, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, MarketTicker, StatusStrip, PageHead, Denied, KpiCard, TrendBadge, EmptyState,
   SideTag, FundTag, OnboardingCard
 } from '../ui'
+import { MilestonesCard } from './MilestonesPage'
 
 function ActivityPage(){
   // period/custom now live in AppContext (rendered once, globally, in Header) rather than
@@ -43,6 +44,9 @@ function ActivityPage(){
       refresh={{ms:refreshMs,tick:refreshTick}}/>
 
     <OnboardingCard/>
+    {/* The scoreboard, right under onboarding: what the desk just achieved is the one
+        thing on this page that isn't a number to interpret. */}
+    <MilestonesCard/>
     <MarketTicker/>
 
     {empty? <EmptyState icon="dollar" title={t('activity.emptyTitle')}

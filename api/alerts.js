@@ -15,11 +15,16 @@ import { listAnomalies, ackAnomaly, runDetection, getAnomalyConfig, saveAnomalyC
 import { listComments, createComment, updateComment, deleteComment, listMentions, markMentionsRead,
          listReviews, upsertReview, entityLink, ENTITY_TYPES } from './_lib/comments.js';
 import { sendMentionEmail } from './_lib/mailer.js';
+import { listMilestones, achievementHistory, evaluateMilestones, announceMilestones, measure, METRICS, SCOPES } from './_lib/milestones.js';
 
 // Writing anywhere in the discussion layer needs 'manage_comments'; reading follows the same
 // gate as the trade data it hangs off. Kept as one helper so the two can never drift.
 const canRead = async (a) => a.role === 'admin' || (await permsForRole(a.role)).includes('view_trades');
 const canWrite = async (a) => a.role === 'admin' || (await permsForRole(a.role)).includes('manage_comments');
+// Seeing the scoreboard is its own permission — it is also, deliberately, the exact audience
+// of every milestone notification (see CONTENT_TYPE_PERM in _lib/notify.js). Administering it
+// stays admin-only, and is checked separately.
+const canSeeMilestones = async (a) => a.role === 'admin' || (await permsForRole(a.role)).includes('view_milestones');
 
 // Fire-and-forget mention notifications. A failing mailer must never cost the comment that
 // was just written, so this is awaited only far enough to swallow its own errors.
@@ -40,6 +45,17 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const a = requireAuth(req, res); if (!a) return;
+
+      // Milestones — the scoreboard. Folded in here for the same reason anomalies are: the
+      // 12-function cap. Reading needs 'view_milestones'; writing is admin-only and lives in
+      // the POST branch below.
+      //   GET ?milestones=1 -> every milestone + its state for the CURRENT period, plus the
+      //   live measurements so the page can show progress, and the achievement history.
+      if (req.query?.milestones) {
+        if (!(await canSeeMilestones(a))) return res.status(403).json({ error: 'forbidden' });
+        const [items, history, measured] = await Promise.all([listMilestones(), achievementHistory(), measure()]);
+        return res.status(200).json({ milestones: items, history, measured, canManage: a.role === 'admin' });
+      }
 
       // Detected behavioural anomalies (see api/_lib/anomalies.js). Folded into this endpoint
       // rather than a new api/*.js file — Vercel Hobby's 12-function cap is already reached,
@@ -113,6 +129,55 @@ export default async function handler(req, res) {
       })) });
     }
     if (req.method === 'POST') {
+      // Milestone administration — admin only, never delegated by a permission. Editing the
+      // scoreboard changes what the whole desk gets told about, so it stays with the role that
+      // already owns the Rules page.
+      if (String(req.body?.action || '').startsWith('milestone')) {
+        const adm = requireAdmin(req, res); if (!adm) return;
+        const b = req.body;
+        const clean = () => {
+          const scope = SCOPES.includes(b.scope) ? b.scope : 'monthly';
+          const metric = METRICS.includes(b.metric) ? b.metric : 'equity_gain';
+          const threshold = Number(b.threshold);
+          if (!Number.isFinite(threshold) || threshold <= 0) return null;
+          return { scope, metric, threshold };
+        };
+        if (b.action === 'milestoneCreate') {
+          const v = clean(); if (!v) return res.status(400).json({ error: 'threshold must be a positive number' });
+          const { rows } = await query(
+            `INSERT INTO milestones (scope,metric,threshold,sort)
+             VALUES ($1,$2,$3,COALESCE((SELECT max(sort)+1 FROM milestones),0)) RETURNING id`,
+            [v.scope, v.metric, v.threshold]);
+          await audit(req, adm, 'milestone.create', String(rows[0].id), v);
+          return res.status(200).json({ milestones: await listMilestones() });
+        }
+        if (b.action === 'milestoneUpdate') {
+          const v = clean(); if (!v || !b.id) return res.status(400).json({ error: 'id and a positive threshold are required' });
+          await query('UPDATE milestones SET scope=$2, metric=$3, threshold=$4, active=COALESCE($5,active) WHERE id=$1',
+            [b.id, v.scope, v.metric, v.threshold, typeof b.active === 'boolean' ? b.active : null]);
+          await audit(req, adm, 'milestone.update', String(b.id), v);
+          return res.status(200).json({ milestones: await listMilestones() });
+        }
+        if (b.action === 'milestoneDelete') {
+          if (!b.id) return res.status(400).json({ error: 'id required' });
+          // The achievements go with it (ON DELETE CASCADE): a dated record of a milestone
+          // that no longer exists is a row nothing can render.
+          await query('DELETE FROM milestones WHERE id=$1', [b.id]);
+          await audit(req, adm, 'milestone.delete', String(b.id), {});
+          return res.status(200).json({ milestones: await listMilestones() });
+        }
+        if (b.action === 'milestoneEvaluate') {
+          const { fresh } = await evaluateMilestones();
+          // Announce here too, not only from the cron. Recording an achievement without
+          // telling anyone would let this button quietly CONSUME a milestone: the row is
+          // taken for the period, so the cron would find nothing fresh and no one would ever
+          // hear about it.
+          if (fresh.length) await announceMilestones(fresh);
+          return res.status(200).json({ fresh: fresh.length, milestones: await listMilestones() });
+        }
+        return res.status(400).json({ error: 'unknown action' });
+      }
+
       const COMMENT_ACTIONS = new Set(['addComment', 'updateComment', 'deleteComment', 'saveReview', 'readMentions']);
       if (COMMENT_ACTIONS.has(req.body?.action)) {
         const auth = requireAuth(req, res); if (!auth) return;

@@ -939,6 +939,124 @@ delete process.env.ONESIGNAL_APP_ID; delete process.env.ONESIGNAL_REST_API_KEY;
 await db.query("DELETE FROM app_config WHERE key='liveActivitySig'");
 
 // ---------------------------------------------------------------------------------------
+// Milestones (api/_lib/milestones.js) — the desk's scoreboard.
+// ---------------------------------------------------------------------------------------
+const MS = await import('../api/_lib/milestones.js');
+await db.query('DELETE FROM milestone_achievements'); await db.query('DELETE FROM milestones');
+
+ok('the seed only runs on an empty table', (await MS.seedMilestones()).seeded === MS.SEED_MILESTONES.length);
+ok('seeding twice does not duplicate', (await MS.seedMilestones()).seeded === 0);
+const seeded = await MS.listMilestones();
+ok('both scopes are seeded', seeded.some(m => m.scope === 'monthly') && seeded.some(m => m.scope === 'global'), seeded.length);
+// The dictated list had "+50%" twice under monthly; a duplicate would fire two identical
+// notifications for one event.
+const dupes = seeded.filter(m => m.scope === 'monthly' && m.metric === 'equity_pct' && m.threshold === 50);
+ok('the duplicated monthly +50% is seeded once', dupes.length === 1, dupes.length);
+
+// A controlled history: 100k at the start of last month, 100k at this month's open, 130k now.
+// The real fixtures are put back at the end of this block — later tests read them, and a
+// scoreboard test has no business rewriting the desk's equity history.
+const savedSnaps = (await db.query('SELECT day, equity, pnl_day, metrics FROM equity_snapshots')).rows;
+await db.query('DELETE FROM equity_snapshots');
+const dayIn = (d) => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
+const monthStart = new Date().toISOString().slice(0, 7) + '-01';
+const prevMonthDay = new Date(new Date(monthStart + 'T00:00:00Z').getTime() - 5 * 86400000).toISOString().slice(0, 10);
+const addSnap = (day, eq) => db.query('INSERT INTO equity_snapshots (day,equity,pnl_day) VALUES ($1,$2,0) ON CONFLICT (day) DO UPDATE SET equity=$2', [day, eq]);
+await addSnap(prevMonthDay, 100000);
+await addSnap(monthStart, 100000);
+await addSnap(dayIn(0), 130000);
+
+const measured = await MS.measure();
+ok('the monthly baseline is the last snapshot BEFORE the month, not its first row',
+  Math.round(measured.monthly.equity_gain) === 30000 && Math.round(measured.monthly.equity_pct) === 30, measured.monthly);
+ok('the global baseline is the oldest snapshot ever', Math.round(measured.global.equity_gain) === 30000, measured.global);
+ok('equity_level is the equity itself, not a gain', measured.global.equity_level === 130000, measured.global.equity_level);
+
+// Only what is actually met gets awarded.
+await db.query('DELETE FROM milestones');
+const mk = async (scope, metric, threshold) =>
+  Number((await db.query('INSERT INTO milestones (scope,metric,threshold) VALUES ($1,$2,$3) RETURNING id', [scope, metric, threshold])).rows[0].id);
+const mMonthly = await mk('monthly', 'equity_gain', 10000);
+const mFar = await mk('monthly', 'equity_gain', 10_000_000);
+const mGlobal = await mk('global', 'equity_pct', 20);
+
+let ev = await MS.evaluateMilestones();
+ok('a met threshold is awarded', ev.fresh.some(f => Number(f.id) === mMonthly) && ev.fresh.some(f => Number(f.id) === mGlobal), ev.fresh.map(f => f.id));
+ok('an unmet threshold is not', !ev.fresh.some(f => Number(f.id) === mFar), ev.fresh.map(f => f.id));
+// Re-running must not re-award: the cron calls this every five minutes.
+ok('a second pass awards nothing new', (await MS.evaluateMilestones()).fresh.length === 0);
+
+const listed = await MS.listMilestones();
+ok('an achievement records its date', !!listed.find(m => m.id === mMonthly)?.achievedAt, listed.find(m => m.id === mMonthly));
+
+// THE distinction: a monthly milestone comes back next month, a global one never does.
+const nextMonth = new Date(new Date(monthStart + 'T00:00:00Z').getTime() + 40 * 86400000);
+// Next month has to actually GAIN something, otherwise "reachable again" would be untested:
+// with a flat book the monthly gain is zero and nothing should fire.
+await addSnap(nextMonth.toISOString().slice(0, 10), 175000);
+ev = await MS.evaluateMilestones({ now: nextMonth });
+ok('a monthly milestone can be reached again next month', ev.fresh.some(f => Number(f.id) === mMonthly), ev.fresh.map(f => f.id));
+ok('a global milestone is reached once, ever', !ev.fresh.some(f => Number(f.id) === mGlobal), ev.fresh.map(f => f.id));
+// And the month it was reached in is kept, so March's achievement survives April.
+const hist = await MS.achievementHistory();
+ok('each achievement keeps its own period', new Set(hist.filter(h => h.scope === 'monthly').map(h => h.period)).size >= 2, hist.map(h => h.period));
+
+// Announcing: one audience, defined by the Rules permission — not by the WhatsApp matrix.
+const { rolesForType } = await import('../api/_lib/notify.js');
+// The stored rolePerms row predates this permission on any existing desk, which is what the
+// one-time backfill in schema.js is for — assert the outcome, not the mechanism.
+await db.query("DELETE FROM app_config WHERE key='milestonePermBackfill'");
+await (await import('../api/_lib/schema.js')).migrate();
+const msRoles = await rolesForType({}, 'milestone');
+ok('the milestone audience is exactly the roles holding view_milestones',
+  msRoles.includes('admin') && msRoles.includes('operator') && msRoles.includes('viewer') && !msRoles.includes('shareholder'), msRoles);
+
+sentEmails.length = 0;
+await db.query("DELETE FROM alerts WHERE type='milestone'");
+const announced = await MS.announceMilestones([{ id: mMonthly, scope: 'monthly', metric: 'equity_gain', threshold: 10000, period: '2026-08', value: 30000 }]);
+ok('an in-app alert is recorded so the bell and the iOS app see it',
+  (await db.query("SELECT count(*)::int AS n FROM alerts WHERE type='milestone'")).rows[0].n === 1, announced);
+ok('the milestone is emailed to that audience', sentEmails.some(e => /Milestone reached/i.test(e.subject)), sentEmails.map(e => e.subject).slice(-3));
+
+// Endpoint: reading needs the permission, administering needs admin.
+r = await call(alerts, { method: 'GET', headers: authH, query: { milestones: '1' } });
+ok('an admin reads the scoreboard', r.status === 200 && Array.isArray(r.body.milestones) && r.body.canManage === true, r.status);
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'milestoneCreate', scope: 'global', metric: 'equity_level', threshold: 42 } });
+ok('an admin can add one', r.status === 200 && r.body.milestones.some(m => m.threshold === 42), r.status);
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'milestoneCreate', scope: 'global', metric: 'equity_level', threshold: -5 } });
+ok('a negative threshold is refused', r.status === 400, r.status);
+// "Check now" must announce, not just record: taking the achievement row without telling
+// anyone would consume the milestone silently, and the cron would then find nothing fresh.
+await db.query('DELETE FROM milestone_achievements');
+await db.query("DELETE FROM alerts WHERE type='milestone'");
+await db.query("INSERT INTO milestones (scope,metric,threshold) VALUES ('global','equity_gain',1000)");
+r = await call(alerts, { method: 'POST', headers: authH, body: { action: 'milestoneEvaluate' } });
+ok('checking manually announces what it awards',
+  r.body.fresh > 0 && (await db.query("SELECT count(*)::int AS n FROM alerts WHERE type='milestone'")).rows[0].n > 0, r.body.fresh);
+const { signToken: signMsTok } = await import('../api/_lib/auth.js');
+const opHeaders = { authorization: 'Bearer ' + signMsTok({ id: 'u2', username: 'sophie.ops', role: 'operator' }) };
+await db.query("UPDATE app_config SET value=$1::jsonb WHERE key='rolePerms'",
+  [JSON.stringify({ ...(await db.query("SELECT value FROM app_config WHERE key='rolePerms'")).rows[0]?.value, operator: ['view_milestones'] })]);
+(await import('../api/_lib/rolePerms.js')).invalidateRolePermsCache();
+r = await call(alerts, { method: 'GET', headers: opHeaders, query: { milestones: '1' } });
+ok('view_milestones is enough to READ the scoreboard', r.status === 200 && r.body.canManage === false, r.status);
+r = await call(alerts, { method: 'POST', headers: opHeaders, body: { action: 'milestoneCreate', scope: 'global', metric: 'equity_level', threshold: 99 } });
+ok('...but not to change it -> 403', r.status === 403, r.status);
+await db.query("UPDATE app_config SET value=$1::jsonb WHERE key='rolePerms'",
+  [JSON.stringify({ ...(await db.query("SELECT value FROM app_config WHERE key='rolePerms'")).rows[0]?.value, operator: [] })]);
+// A raw UPDATE bypasses setRolePerms(), which is what normally busts the 15s cache.
+(await import('../api/_lib/rolePerms.js')).invalidateRolePermsCache();
+r = await call(alerts, { method: 'GET', headers: opHeaders, query: { milestones: '1' } });
+ok('without the permission the scoreboard is closed -> 403', r.status === 403, r.status);
+
+await db.query('DELETE FROM milestone_achievements'); await db.query('DELETE FROM milestones');
+await db.query('DELETE FROM equity_snapshots');
+for (const sn of savedSnaps) {
+  await db.query('INSERT INTO equity_snapshots (day,equity,pnl_day,metrics) VALUES ($1,$2,$3,$4::jsonb)',
+    [sn.day, sn.equity, sn.pnl_day, JSON.stringify(sn.metrics || {})]);
+}
+
+// ---------------------------------------------------------------------------------------
 // Smart lights (api/_lib/lights.js): the lamp shows the open book.
 // ---------------------------------------------------------------------------------------
 const lights = await import('../api/_lib/lights.js');

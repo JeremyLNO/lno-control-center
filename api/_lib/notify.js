@@ -17,7 +17,10 @@ import { getRolePerms, permsForRole } from './rolePerms.js';
 // could be unchecked for "Daily Reports" in Rules yet still receive it because the matrix
 // (or, for email, a hardcoded admin/operator/viewer list) said so.
 // Report CONTENT — the audience is exactly the roles holding the permission, matrix ignored.
-const CONTENT_TYPE_PERM = { daily: 'view_reports_daily', weekly: 'view_reports_weekly', monthly: 'view_reports_monthly' };
+// A milestone joins the same club: whoever is allowed to SEE milestones is exactly who gets
+// told about one, on every channel. One switch on the Rules page, not a second matrix that
+// could quietly disagree with it.
+const CONTENT_TYPE_PERM = { daily: 'view_reports_daily', weekly: 'view_reports_weekly', monthly: 'view_reports_monthly', milestone: 'view_milestones' };
 // An availability PING ("a new report is available, go download it") is a different thing:
 // the matrix still decides who wants to be pinged (admins who just verified it themselves
 // usually don't), and the permission only narrows it — you can't be told about a report you

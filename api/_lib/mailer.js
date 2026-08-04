@@ -396,3 +396,18 @@ export function monthlyReportHtml(d) {
     </div>
   </div>`;
 }
+
+/// Milestone announcement. Short by design: the whole message is one fact worth celebrating,
+/// and a wall of numbers around it would bury the only line anyone reads.
+export async function sendMilestoneEmail(to, { label, scopeLabel, value, unit }) {
+  const from = process.env.RESEND_FROM || 'LNO Control Center <noreply@wearelno.com>';
+  const html = alertEmailHtml(
+    `🏆 ${escapeHtml(label)}`,
+    `<div style="color:#64748B;font-size:13px">${escapeHtml(scopeLabel)}</div>
+     <div style="margin-top:14px;padding:18px;background:#F8F7F4;border-radius:10px;text-align:center">
+       <div style="font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:.04em">Reached at</div>
+       <div style="font-size:26px;font-weight:800;color:${GOLD};font-family:monospace;margin-top:2px">${escapeHtml(String(value))}${escapeHtml(unit || '')}</div>
+     </div>`
+  );
+  await client().emails.send({ from, to, subject: `🏆 Milestone reached — ${label}`, html });
+}

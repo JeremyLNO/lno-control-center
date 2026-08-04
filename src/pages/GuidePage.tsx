@@ -38,6 +38,7 @@ const GROUPS: Group[] = [
   ]},
   { key: 'watch', features: [
     { icon: 'triangle', key: 'anomalies', path: '/anomalies', perm: 'view_trades' },
+    { icon: 'trophy', key: 'milestones', path: '/milestones', perm: 'view_milestones' },
     { icon: 'msg', key: 'comments', path: undefined, perm: 'manage_comments' },
     { icon: 'bell', key: 'alerts', path: undefined, perm: null },
     { icon: 'filetext', key: 'reports', path: '/admin/reports', perm: ['view_reports_daily', 'view_reports_weekly', 'view_reports_monthly'] },
@@ -74,6 +75,7 @@ const PERM_UNLOCKS: Record<string, string> = {
   manage_funds: 'guide.unlock.manage_funds',
   manage_strategies: 'guide.unlock.manage_strategies',
   manage_comments: 'guide.unlock.manage_comments',
+  view_milestones: 'guide.unlock.view_milestones',
 };
 
 export default function GuidePage(){

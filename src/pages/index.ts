@@ -7,6 +7,7 @@ export { RulesPage } from './RulesPage';
 export { AdminExchanges } from './AdminExchanges';
 export { AdminOpenWA } from './AdminOpenWA';
 export { default as AdminLights } from './AdminLights';
+export { default as MilestonesPage, MilestonesCard } from './MilestonesPage';
 export { FundsPage } from './FundsPage';
 export { BotsPage } from './BotsPage';
 export { ProfilePage } from './ProfilePage';

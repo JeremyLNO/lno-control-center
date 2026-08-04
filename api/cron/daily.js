@@ -19,6 +19,7 @@ import { recordDailyFundSnapshot } from '../_lib/employeeFund.js';
 import { buildMonthlyPdf, buildWeeklyPdf, buildDailyPdf } from '../_lib/report.js';
 import { buildLiveActivityState, pushLiveActivity } from '../_lib/liveActivity.js';
 import { syncLights } from '../_lib/lights.js';
+import { evaluateMilestones, announceMilestones, seedMilestones } from '../_lib/milestones.js';
 import { sendDailyReportEmail, sendWeeklyReportEmail, sendVerifyReminderEmail, dailyReportHtml, weeklyReportHtml, monthlyReportHtml } from '../_lib/mailer.js';
 import { getAuth } from '../_lib/auth.js';
 import { query } from '../_lib/db.js';
@@ -150,6 +151,19 @@ export default async function handler(req, res) {
     // itself when nothing material changed, so the rate limit is spent on real movement.
     try { sent.push({ type: 'live-activity', ...(await pushLiveActivity(buildLiveActivityState(port.bots, series.map(s => s.equity)))) }); }
     catch (e) { sent.push({ type: 'live-activity', error: String(e.message || e) }); }
+
+    // 3c-bis) Milestones — evaluated on every run, alerts-only included: reaching one is news,
+    // and news that waits for the daily report is not news. evaluateMilestones() records only
+    // what is newly earned, so announcing is driven by that list rather than by a re-check.
+    try {
+      // Seeded here rather than in migrate(): milestones.js pulls in the mailer and notify
+      // layers, and importing that from schema.js would close an import cycle. Idempotent —
+      // it only writes when the table is empty, so a deleted milestone stays deleted.
+      await seedMilestones();
+      const { fresh } = await evaluateMilestones();
+      if (fresh.length) sent.push({ type: 'milestones', reached: fresh.map(f => f.id), channels: await announceMilestones(fresh) });
+      else sent.push({ type: 'milestones', reached: 0 });
+    } catch (e) { sent.push({ type: 'milestones', error: String(e.message || e) }); }
 
     // 3d) Smart lights — same cadence and same reasoning as the Live Activity: the lamp is an
     // ambient display of the open book, so it has to follow it, not the report schedule.

@@ -386,6 +386,29 @@ export async function migrate() {
     acked_at TIMESTAMPTZ,
     acked_by TEXT
   )`);
+  // Milestones — the desk's scoreboard. See api/_lib/milestones.js for the two scopes.
+  await ddl(`CREATE TABLE IF NOT EXISTS milestones (
+    id BIGSERIAL PRIMARY KEY,
+    scope TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    threshold NUMERIC NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT true,
+    sort INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`);
+  // An achievement is (milestone, period): 'global' for the once-ever kind, 'YYYY-MM' for the
+  // monthly kind. The UNIQUE constraint is what makes a monthly milestone reachable again
+  // next month while staying un-reachable twice in the same one — and what makes two racing
+  // crons unable to award it twice.
+  await ddl(`CREATE TABLE IF NOT EXISTS milestone_achievements (
+    id BIGSERIAL PRIMARY KEY,
+    milestone_id BIGINT NOT NULL REFERENCES milestones(id) ON DELETE CASCADE,
+    period TEXT NOT NULL,
+    value NUMERIC,
+    achieved_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+  await ddl(`CREATE UNIQUE INDEX IF NOT EXISTS milestone_achievements_once ON milestone_achievements (milestone_id, period)`);
+
   // type: 'breach' | 'api_error' (System Status's alert-history table, filterable by type).
   // exchange_id: which exchange an 'api_error' alert is about, so a later successful sync
   // can auto-close it (acked_by='system') without a human ACK — that's how its "end" /
@@ -457,6 +480,30 @@ export async function migrate() {
   // (auth_provider='password'); they now sign in with an emailed code instead. Re-point
   // any account still on the old provider — idempotent, becomes a no-op after the first run.
   await ddl(`UPDATE users SET auth_provider='otp' WHERE role='shareholder' AND auth_provider='password'`);
+  // One-time backfill: 'view_milestones' is new, and a desk that already saved its role
+  // permissions on the Rules page has a stored row that predates it — so operators and
+  // viewers would silently NOT get the milestones the defaults grant them. Granted once,
+  // guarded by a marker, so an admin who later unchecks it doesn't get it back on the next
+  // deploy: a deliberate removal must outlive the migration that introduced it.
+  try {
+    const done = (await query(`SELECT value FROM app_config WHERE key='milestonePermBackfill'`)).rows[0];
+    if (!done) {
+      const { rows } = await query(`SELECT value FROM app_config WHERE key='rolePerms'`);
+      const stored = rows[0]?.value;
+      if (stored && typeof stored === 'object') {
+        const next = { ...stored };
+        for (const role of ['operator', 'viewer']) {
+          if (Array.isArray(next[role]) && !next[role].includes('view_milestones')) next[role] = [...next[role], 'view_milestones'];
+        }
+        await query(`INSERT INTO app_config (key,value) VALUES ('rolePerms',$1::jsonb)
+           ON CONFLICT (key) DO UPDATE SET value=$1::jsonb`, [JSON.stringify(next)]);
+        invalidateRolePermsCache();
+      }
+      await query(`INSERT INTO app_config (key,value) VALUES ('milestonePermBackfill','true'::jsonb)
+         ON CONFLICT (key) DO UPDATE SET value='true'::jsonb`);
+    }
+  } catch (e) { /* best-effort — never block startup on a permission backfill */ }
+
   // One-time backfill: the single 'view_reports' permission was split into
   // view_reports_daily/weekly/monthly (Reports page rights are now per-periodicity). Any role
   // whose ADMIN-EDITED rolePerms (Rules page) still carries the old key gets the equivalent

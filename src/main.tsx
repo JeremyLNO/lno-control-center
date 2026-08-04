@@ -8,7 +8,7 @@ import {
   FUND_PALETTE, ROLE_OPTIONS, WA_MSG_TYPES, WA_ROLE_COLS, fmtUSD, fmtSigned, fmtNum, fmtPct, fmtPctPlain, clsPnl, fmtPrice, fmtDate, fmtAgo, fmtTime, fmtDT, fmtDur, fmtSeconds, initialsOf, DAY, NOW, baseOf, TOKEN_KEY, getToken, setToken, PREF, GOOGLE_CLIENT_ID, consumeGoogleRedirectCallback, downloadBlob, b64ToBlob, toCSV, exportRows, api, _toastSubs, toast, Toaster, ICONS, Icon, GOLD, LNO_PATH, Logo, Card, SectionTitle, Btn, Badge, darken, StatusPill, Toggle, Select, Field, Input, ExportMenu, Modal, Confirm, AreaChart, App, useApp, hasPerm, fundOf, sliceByPeriod, riskMetrics, ExposureBars, RiskPanel, Underwater, PnlCalendar, PositionsHeatmap, LiveBadge, MarketTicker, LoadingScreen, Loader, Login, MAIN_NAV, TOOLS_NAV, ADMIN_NAV, ACCT_NAV, NavItem, Sidebar, GlobalSearch, Header, MobileNav, PageHead, Denied, KpiCard, TrendBadge, SortHeader, sortRows, EmptyState, SideTag, FundTag, PeriodControls, OnboardingCard
 } from './ui'
 import {
-  ActivityPage, RealtimePage, TradesPage, AdminUsers, RulesPage, AdminExchanges, AdminOpenWA, AdminLights,
+  ActivityPage, RealtimePage, TradesPage, AdminUsers, RulesPage, AdminExchanges, AdminOpenWA, AdminLights, MilestonesPage,
   AnalysisPage, PlaybookPage, AnomaliesPage, CalendarPage, PositionPage, GuidePage, FundsPage, BotsPage, ProfilePage, MyEquityPage, EmployeeFundPage, SupportPage, PricesPage, StatusPage, AdminReports, AuditPage
 } from './pages/index'
 
@@ -237,6 +237,7 @@ function Shell(){
   else if(a==='admin'&&b==='exchanges') page=<AdminExchanges/>;
   else if(a==='admin'&&(b==='openwa'||b==='whatsapp')) page=<AdminOpenWA/>;
   else if(a==='admin'&&b==='lights') page=<AdminLights/>;
+  else if(a==='milestones') page=<MilestonesPage/>;
   else if(a==='admin'&&b==='funds') page=<FundsPage/>;
   else if(a==='admin'&&b==='reports') page=<AdminReports/>;
   else if(a==='admin'&&b==='audit') page=<AuditPage/>;

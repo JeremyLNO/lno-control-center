@@ -239,6 +239,7 @@ const ICONS = {
   msg:[['path','M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z']],
   layers:[['path','M12 2 2 7l10 5 10-5-10-5z'],['path','M2 17l10 5 10-5'],['path','M2 12l10 5 10-5']],
   usercircle:[['circle',12,12,10],['path','M18 20a6 6 0 0 0-12 0'],['circle',12,10,3]],
+  trophy:[['path','M8 21h8'],['path','M12 17v4'],['path','M7 4h10v5a5 5 0 0 1-10 0V4z'],['path','M17 5h3a3 3 0 0 1-3 3'],['path','M7 5H4a3 3 0 0 0 3 3']],
   bulb:[['path','M9 18h6'],['path','M10 22h4'],['path','M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z']],
   lifebuoy:[['circle',12,12,10],['circle',12,12,4],['path','M4.93 4.93l4.24 4.24'],['path','M14.83 14.83l4.24 4.24'],['path','M14.83 9.17l4.24-4.24'],['path','M9.17 14.83l-4.24 4.24']],
   search:[['circle',11,11,8],['path','M21 21l-4.35-4.35']],
@@ -1064,6 +1065,7 @@ const TOOLS_NAV: Array<[string,string,string,string,string|string[]]>=[
   ['clock','nav.calendar','/calendar','nav.calendar','view_trades'],
   ['shield','nav.playbook','/playbook','nav.playbook','view_trades'],
   ['triangle','nav.anomalies','/anomalies','nav.anomalies','view_trades'],
+  ['trophy','nav.milestones','/milestones','nav.milestones','view_milestones'],
   ['database','nav.status','/status','nav.status.short','view_activity'],
   ['filetext','nav.audit','/admin/audit','nav.audit','view_audit'],
 ];
