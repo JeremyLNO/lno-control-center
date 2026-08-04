@@ -37,12 +37,13 @@ const PERMISSIONS = [
   ['manage_funds','Manage funds'],
   ['manage_strategies','Manage strategy playbook'],
   ['manage_comments','Comment & review incidents'],
+  ['view_milestones','See milestones'],
 ];
 const ALL_PERMS = PERMISSIONS.map(p=>p[0]);
 const ROLE_PERMS = {
   admin: ALL_PERMS.slice(),
-  operator: ['view_activity','view_realtime','view_trades','export_data'],
-  viewer: ['view_activity','view_realtime','view_trades'],
+  operator: ['view_activity','view_realtime','view_trades','export_data','view_milestones'],
+  viewer: ['view_activity','view_realtime','view_trades','view_milestones'],
   // shareholder default: Exchanges (wallets only, no keys), Funds (read-only), Live, System
   // Status + dashboard, and monthly reports only — the only kind ever sent to shareholders
   // (see SHAREHOLDER_KINDS in api/snapshots.js); daily/weekly are internal-only by default.

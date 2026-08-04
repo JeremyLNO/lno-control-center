@@ -1,6 +1,7 @@
 // Local end-to-end test of the API against an in-process Postgres (PGlite).
 // Proves: bcrypt-hashed passwords (no plaintext in DB), JWT login, encrypted secrets
 // (no plaintext in DB), masking, and auth gating. Run: node scripts/test-api.mjs
+import fs from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 
 process.env.JWT_SECRET = 'test-jwt-secret-please-change-1234567890';
@@ -937,6 +938,27 @@ ok('a real change IS pushed', (await pushLiveActivity(laMoved)).pushed === true 
 ok('an empty book is not pushed', (await pushLiveActivity(buildLiveActivityState([], []))).skipped === 'no open positions');
 delete process.env.ONESIGNAL_APP_ID; delete process.env.ONESIGNAL_REST_API_KEY;
 await db.query("DELETE FROM app_config WHERE key='liveActivitySig'");
+
+// The Rules page renders from a HAND-KEPT mirror of PERMISSIONS in src/ui.tsx. It has now
+// drifted twice: a permission the server enforces but the mirror omits is ungrantable, and
+// silently so. Compare the two lists rather than trusting them to be edited together.
+{
+  const uiSrc = fs.readFileSync(new URL('../src/ui.tsx', import.meta.url), 'utf8');
+  const block = uiSrc.slice(uiSrc.indexOf('const PERMISSIONS = ['), uiSrc.indexOf('const ALL_PERMS'));
+  const mirrored = [...block.matchAll(/\['([a-z_]+)'/g)].map(m => m[1]);
+  const { PERMISSIONS: server } = await import('../api/_lib/constants.js');
+  const missing = server.filter(p => !mirrored.includes(p));
+  ok('every server permission appears on the Rules page', missing.length === 0, missing);
+  // And the defaults must agree, or a fresh desk and an edited one start from different rights.
+  const roleBlock = uiSrc.slice(uiSrc.indexOf('const ROLE_PERMS = {'), uiSrc.indexOf('const ROLE_OPTIONS'));
+  const { ROLE_PERMS: serverRoles } = await import('../api/_lib/constants.js');
+  for (const role of ['operator', 'viewer']) {
+    const line = roleBlock.match(new RegExp(role + ": \\[([^\\]]*)\\]"));
+    const uiList = line ? [...line[1].matchAll(/'([a-z_]+)'/g)].map(m => m[1]) : [];
+    ok(`the ${role} defaults match on both sides`,
+      JSON.stringify(uiList.slice().sort()) === JSON.stringify(serverRoles[role].slice().sort()), { ui: uiList, server: serverRoles[role] });
+  }
+}
 
 // ---------------------------------------------------------------------------------------
 // Milestones (api/_lib/milestones.js) — the desk's scoreboard.

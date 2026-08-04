@@ -18,6 +18,7 @@ const DECLARED_GROUPS = [
   {key:'exchanges', perms:['view_exchanges','manage_exchanges']},
   {key:'funds', perms:['manage_funds']},
   {key:'notifications', perms:['manage_whatsapp']},
+  {key:'milestones', perms:['view_milestones']},
   {key:'audit', perms:['view_audit']},
 ];
 // Safety net: any permission that exists but was never assigned to a group above still gets

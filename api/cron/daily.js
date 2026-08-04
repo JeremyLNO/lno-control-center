@@ -159,10 +159,13 @@ export default async function handler(req, res) {
       // Seeded here rather than in migrate(): milestones.js pulls in the mailer and notify
       // layers, and importing that from schema.js would close an import cycle. Idempotent —
       // it only writes when the table is empty, so a deleted milestone stays deleted.
-      await seedMilestones();
+      const seed = await seedMilestones();
       const { fresh } = await evaluateMilestones();
-      if (fresh.length) sent.push({ type: 'milestones', reached: fresh.map(f => f.id), channels: await announceMilestones(fresh) });
-      else sent.push({ type: 'milestones', reached: 0 });
+      // `total` is in the log on purpose: without it, "reached: 0" is indistinguishable from
+      // an empty scoreboard that never got seeded.
+      const total = (await query('SELECT count(*)::int AS n FROM milestones')).rows[0]?.n || 0;
+      if (fresh.length) sent.push({ type: 'milestones', total, seeded: seed.seeded, reached: fresh.map(f => f.id), channels: await announceMilestones(fresh) });
+      else sent.push({ type: 'milestones', total, seeded: seed.seeded, reached: 0 });
     } catch (e) { sent.push({ type: 'milestones', error: String(e.message || e) }); }
 
     // 3d) Smart lights — same cadence and same reasoning as the Live Activity: the lamp is an
