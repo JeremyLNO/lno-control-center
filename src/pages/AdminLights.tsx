@@ -69,6 +69,11 @@ export default function AdminLights(){
     try{ const r=await api('openwa',{method:'POST',body:{action:'hueLights'}}); setHueList(r.lights||[]); }
     catch(e: any){ toast.error(e.message); }
   }
+  async function runGoveeTest(){
+    setTest({state:'running'});
+    try{ const r=await api('openwa',{method:'POST',body:{action:'goveeTest'}}); setTest({state:'selftest',...r}); }
+    catch(e: any){ setTest({state:'err',msg:e.message}); }
+  }
   async function runTest(){
     setTest({state:'running'});
     try{ const r=await api('openwa',{method:'POST',body:{action:'lightsTest'}}); setTest({state:'ok',...r}); }
@@ -135,6 +140,16 @@ export default function AdminLights(){
         </div>
         <Btn variant="outline" onClick={loadDevices}>{t('lights.loadDevices')}</Btn>
       </div>
+      {/* A test that cannot be mistaken for the book: blue then yellow, neither of which this
+          feature ever uses. Only offered once Govee is actually switched on and pointed at a
+          device — a button that can only fail is not a button. */}
+      <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
+        <Btn variant="outline" size="sm" onClick={runGoveeTest}
+          disabled={!cfg.govee.enabled||!cfg.govee.device||(!cfg.govee.hasApiKey&&!goveeKey.trim())}>
+          {t('lights.goveeSelfTest')}
+        </Btn>
+        <span className="text-xs text-slate-400">{t('lights.goveeSelfTestHint')}</span>
+      </div>
     </Card>
 
     {/* HUE */}
@@ -186,6 +201,13 @@ export default function AdminLights(){
     {test&&<Card className="p-4 mt-4">
       {test.state==='running'&&<Loader/>}
       {test.state==='err'&&<div className="text-sm text-danger">{test.msg}</div>}
+      {test.state==='selftest'&&<div className="text-sm space-y-1">
+        {(test.steps||[]).map((st: any,i: number)=><div key={i} className="flex items-center gap-2">
+          <span className="w-4 h-4 rounded-full border border-slate-200" style={{background:st.color}}/>
+          <span className={st.ok?'text-success':'text-danger'}>{st.ok?t('lights.stepOk',{step:st.step}):st.error}</span>
+        </div>)}
+        <div className="text-slate-500 pt-1">{t('lights.restored',{color:test.restored?.color||'—'})}</div>
+      </div>}
       {test.state==='ok'&&<div className="text-sm space-y-1">
         <div className="flex items-center gap-2">
           <span className="w-4 h-4 rounded-full border border-slate-200" style={{background:test.expected}}/>

@@ -208,6 +208,29 @@ async function hueSet(cfg, rgb, { fetchImpl = fetch } = {}) {
   return true;
 }
 
+/// A self-test that cannot be mistaken for the book: blue, then yellow. Neither is a colour
+/// this feature ever uses on its own — green, red and gold are taken — so whoever is watching
+/// the lamp knows immediately they are seeing a test and not a P&L swing.
+///
+/// It ALWAYS restores the real colour afterwards, and that is not politeness: syncLights()
+/// only pushes on a CHANGE, so a lamp left yellow would stay yellow until the book crossed a
+/// threshold — the desk would be reading a test as its position.
+export async function goveeSelfTest({ fetchImpl = fetch, pauseMs = 1500, pnl = 0 } = {}) {
+  const cfg = await getLightsConfig();
+  if (!cfg.govee.enabled || !cfg.govee.apiKey || !cfg.govee.device) return { error: 'Govee is not configured' };
+  const steps = [];
+  const show = async (name, hex) => {
+    try { await goveeSet(cfg, hex2rgb(hex), { fetchImpl }); steps.push({ step: name, color: hex, ok: true }); }
+    catch (e) { steps.push({ step: name, color: hex, error: String(e.message || e) }); }
+  };
+  await show('blue', '#2563EB');
+  await new Promise(r => setTimeout(r, pauseMs));
+  await show('yellow', '#FACC15');
+  await new Promise(r => setTimeout(r, pauseMs));
+  const restored = await syncLights(pnl, { fetchImpl, force: true });
+  return { steps, restored, ok: steps.every(s => s.ok) };
+}
+
 /* --------------------------------------------------------------- driver */
 
 /// Push the colour the book calls for. Returns per-brand outcomes rather than throwing: one

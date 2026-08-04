@@ -1108,6 +1108,23 @@ const devs = await lights.goveeDevices('k');
 ok('the device list flags what can actually take a colour',
   devs.find(d => d.device === 'AA:BB').colorCapable === true && devs.find(d => d.device === 'CC:DD').colorCapable === false, devs);
 
+// The self-test must be unmistakable AND must not leave the lamp lying: syncLights only
+// pushes on a CHANGE, so a lamp left yellow would stay yellow until the book crossed a
+// threshold — the desk would be reading a test as its position.
+await lights.saveLightsConfig({ enabled: true, govee: { enabled: true } });
+goveeCalls.length = 0;
+const selfTest = await lights.goveeSelfTest({ pauseMs: 0, pnl: 1200 });
+const sentColors = goveeCalls.filter(c => c.body?.payload?.capability?.instance === 'colorRgb')
+  .map(c => '#' + Number(c.body.payload.capability.value).toString(16).padStart(6, '0').toUpperCase());
+ok('the self-test shows blue then yellow', sentColors[0] === '#2563EB' && sentColors[1] === '#FACC15', sentColors);
+ok('neither test colour is one the book can produce',
+  !['#10B981', '#EF4444', '#C9A24D'].includes(sentColors[0]) && !['#10B981', '#EF4444', '#C9A24D'].includes(sentColors[1]), sentColors);
+ok('the book colour is restored when the test ends', sentColors[2] === '#10B981' && selfTest.restored.color === '#10B981', { sentColors, restored: selfTest.restored });
+// A lamp that isn't configured can only fail — the button says so instead of pretending.
+await lights.saveLightsConfig({ govee: { enabled: false } });
+ok('the self-test refuses to run on an unconfigured lamp', (await lights.goveeSelfTest({ pauseMs: 0 })).error === 'Govee is not configured');
+await lights.saveLightsConfig({ govee: { enabled: true } });
+
 // Endpoint: admin only, and it lives on openwa.js purely because of the function cap.
 // A throwaway operator token, minted here because the shared one is created much later in
 // this file — the point of these four assertions is the GATE, not the account.

@@ -14,7 +14,7 @@ import { welcomeText } from './_lib/notifyText.js';
 import { DEFAULT_MATRIX, WA_ROLES, WA_MSG_TYPES } from './_lib/constants.js';
 import { permsForRole } from './_lib/rolePerms.js';
 import { audit } from './_lib/audit.js';
-import { getLightsConfig, publicLightsConfig, saveLightsConfig, goveeDevices, hueLights, hueExchangeCode, syncLights, colorForPnl } from './_lib/lights.js';
+import { getLightsConfig, publicLightsConfig, saveLightsConfig, goveeDevices, goveeSelfTest, hueLights, hueExchangeCode, syncLights, colorForPnl } from './_lib/lights.js';
 import { buildPortfolio } from './_lib/portfolio.js';
 
 async function getCfg() {
@@ -162,6 +162,11 @@ async function handleLights(req, res, a) {
       await hueExchangeCode(String(req.body.code));
       await audit(req, a, 'lights.hueLinked', null, {});
       return res.status(200).json({ lights: publicLightsConfig(await getLightsConfig()) });
+    }
+    if (action === 'goveeTest') {
+      // Deliberately NOT the book's colour: see goveeSelfTest(). Restores it when done.
+      const port = await buildPortfolio();
+      return res.status(200).json(await goveeSelfTest({ pnl: port.openPnl }));
     }
     if (action === 'lightsTest') {
       // Test against the REAL open P&L, not a made-up value: the point of the button is to
