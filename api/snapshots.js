@@ -157,7 +157,12 @@ export default async function handler(req, res) {
       }
 
       const limit = Math.min(parseInt(req.query?.limit || '365', 10) || 365, 1000);
-      const { rows } = await query('SELECT day,equity,pnl_day,metrics FROM equity_snapshots ORDER BY day ASC LIMIT $1', [limit]);
+      // Take the most RECENT `limit` days, then flip back to chronological order for the
+      // clients (every consumer — equity curve, PnL calendar, drawdown, risk metrics —
+      // assumes oldest-first). `ORDER BY day ASC LIMIT n` would have returned the OLDEST n
+      // days instead, silently freezing every chart once history passed `limit` rows.
+      const { rows } = await query('SELECT day,equity,pnl_day,metrics FROM equity_snapshots ORDER BY day DESC LIMIT $1', [limit]);
+      rows.reverse();
       return res.status(200).json({ snapshots: rows.map(r => ({
         day: r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day).slice(0, 10),
         equity: Number(r.equity), pnlDay: Number(r.pnl_day), metrics: r.metrics || {},
