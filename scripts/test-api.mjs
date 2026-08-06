@@ -128,7 +128,7 @@ globalThis.fetch = async (url, opts) => {
     return { ok: true, status: 200, json: async () => ({}) };
   }
   if (u.includes('openapi.api.govee.com')) {
-    goveeCalls.push({ url: u, body: opts?.body ? JSON.parse(opts.body) : null, key: opts?.headers?.['Govee-API-Key'] });
+    goveeCalls.push({ url: u, body: opts?.body ? JSON.parse(opts.body) : null, key: opts?.headers?.['Govee-API-Key'], signal: opts?.signal });
     // Govee answers 200 with the real status in the body — a rejected key is 200 + code 401.
     if (goveeRejectKey && u.includes('/user/devices')) return { ok: true, status: 200, json: async () => ({ code: 401, message: 'Invalid API key' }) };
     if (u.includes('/user/devices')) return { ok: true, status: 200, json: async () => ({ code: 200, data: [
@@ -1142,6 +1142,11 @@ let keyErr = null;
 try { await lights.goveeDevices('bad'); } catch (e) { keyErr = String(e.message); }
 ok('a key Govee rejects surfaces as an error, not an empty list', /401/.test(keyErr || ''), keyErr);
 goveeRejectKey = false;
+// Every outbound call on a cron path must be bounded. Without a timeout an unresponsive
+// consumer API doesn't fail, it HANGS, holding the whole cron request open — that is exactly
+// how the alert cron went down in July on an untimed Binance call.
+ok('every Govee call carries a timeout', goveeCalls.length > 0 && goveeCalls.every(c => !!c.signal),
+  goveeCalls.filter(c => !c.signal).map(c => c.url));
 
 // The self-test must be unmistakable AND must not leave the lamp lying: syncLights only
 // pushes on a CHANGE, so a lamp left yellow would stay yellow until the book crossed a

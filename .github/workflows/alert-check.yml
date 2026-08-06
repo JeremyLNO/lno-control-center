@@ -19,13 +19,18 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Trigger alert check
         run: |
           # The body was discarded, which made every silent no-op invisible: a missing env
           # var read exactly like a healthy run. Print the per-channel outcomes instead —
           # they carry no secrets, only what each channel did.
-          body=$(curl -sf -X POST "https://cc.lno.company/api/cron/daily?mode=alerts" \
+          # --max-time, and a job timeout below: an endpoint that HANGS otherwise holds this
+          # runner until the next scheduled run cancels it — which is what "All jobs were
+          # cancelled" means. Failing in 90s says something useful; being cancelled says
+          # nothing at all.
+          body=$(curl -sf --max-time 90 -X POST "https://cc.lno.company/api/cron/daily?mode=alerts" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -w "\nstatus=%{http_code} duration=%{time_total}s")
           echo "$body"

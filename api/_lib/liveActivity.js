@@ -63,7 +63,10 @@ export async function pushLiveActivity(state, { fetchImpl = fetch } = {}) {
     return { skipped: 'no open positions' };
   }
 
+  // Bounded like every other outbound call on a cron path: no timeout means a hang, not a
+  // failure, and a hang holds the whole cron request open.
   const res = await fetchImpl(`https://api.onesignal.com/apps/${appId}/live_activities/${ACTIVITY_ID}/notifications`, {
+    signal: AbortSignal.timeout(8000),
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Key ${key}` },
     body: JSON.stringify({ event: 'update', event_updates: state, name: 'positions-update' }),

@@ -14,6 +14,14 @@
 import { query } from './db.js';
 import { encrypt, decrypt, mask } from './crypto.js';
 
+// Every outbound call here is bounded. The cron runs these on a schedule, and an
+// unresponsive consumer API with no timeout does not fail — it HANGS, holding the whole cron
+// request open until something else kills it. That exact failure took the alert cron down in
+// July via an untimed Binance call; the rule from that day is that any external call added to
+// a cron path gets a timeout by default. Govee and Philips are no different.
+const REQUEST_TIMEOUT_MS = 8000;
+const withTimeout = (opts = {}) => ({ ...opts, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+
 const CFG_KEY = 'lights';
 const LAST_KEY = 'lightsLastColor';
 
@@ -109,9 +117,9 @@ export async function saveLightsConfig(patch) {
 const GOVEE = 'https://openapi.api.govee.com/router/api/v1';
 
 export async function goveeDevices(apiKey, { fetchImpl = fetch } = {}) {
-  const res = await fetchImpl(`${GOVEE}/user/devices`, {
+  const res = await fetchImpl(`${GOVEE}/user/devices`, withTimeout({
     headers: { 'Govee-API-Key': apiKey, 'Content-Type': 'application/json' },
-  });
+  }));
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Govee ${res.status}${body.message ? ' — ' + body.message : ''}`);
   // Govee answers HTTP 200 with the REAL status in the body: a rejected key comes back as
@@ -137,11 +145,11 @@ async function goveeSet(cfg, rgb, { fetchImpl = fetch } = {}) {
   const apiKey = decrypt(cfg.govee.apiKey);
   const headers = { 'Govee-API-Key': apiKey, 'Content-Type': 'application/json' };
   const target = { sku: cfg.govee.model, device: cfg.govee.device };
-  const call = (capability) => fetchImpl(`${GOVEE}/device/control`, {
+  const call = (capability) => fetchImpl(`${GOVEE}/device/control`, withTimeout({
     method: 'POST', headers,
     // requestId is required by Govee; it only has to be unique per call.
     body: JSON.stringify({ requestId: `lno-${Date.now()}`, payload: { ...target, capability } }),
-  });
+  }));
   // Colour on a lamp that is off does nothing visible, so power it on first.
   const on = await call({ type: 'devices.capabilities.on_off', instance: 'powerSwitch', value: 1 });
   if (!on.ok) throw new Error(`Govee power ${on.status}`);
@@ -172,11 +180,11 @@ async function hueAccessToken(cfg, { fetchImpl = fetch } = {}) {
   if (cfg.hue.accessToken && Date.now() < Number(cfg.hue.expiresAt || 0) - 60_000) return cfg.hue.accessToken;
   if (!cfg.hue.refreshToken) throw new Error('Hue not linked');
   const basic = Buffer.from(`${cfg.hue.clientId}:${decrypt(cfg.hue.clientSecret)}`).toString('base64');
-  const res = await fetchImpl('https://api.meethue.com/v2/oauth2/token', {
+  const res = await fetchImpl('https://api.meethue.com/v2/oauth2/token', withTimeout({
     method: 'POST',
     headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: decrypt(cfg.hue.refreshToken) }).toString(),
-  });
+  }));
   if (!res.ok) throw new Error(`Hue token ${res.status}`);
   const t = await res.json();
   const next = { ...cfg, hue: { ...cfg.hue, accessToken: t.access_token, expiresAt: Date.now() + (Number(t.expires_in || 3600) * 1000) } };
@@ -189,11 +197,11 @@ async function hueAccessToken(cfg, { fetchImpl = fetch } = {}) {
 export async function hueExchangeCode(code, { fetchImpl = fetch } = {}) {
   const cfg = await getLightsConfig();
   const basic = Buffer.from(`${cfg.hue.clientId}:${decrypt(cfg.hue.clientSecret)}`).toString('base64');
-  const res = await fetchImpl('https://api.meethue.com/v2/oauth2/token', {
+  const res = await fetchImpl('https://api.meethue.com/v2/oauth2/token', withTimeout({
     method: 'POST',
     headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'authorization_code', code }).toString(),
-  });
+  }));
   if (!res.ok) throw new Error(`Hue token ${res.status}`);
   const t = await res.json();
   await save({ ...cfg, hue: { ...cfg.hue, refreshToken: encrypt(t.refresh_token), accessToken: t.access_token,
@@ -203,9 +211,9 @@ export async function hueExchangeCode(code, { fetchImpl = fetch } = {}) {
 
 export async function hueLights(cfg, { fetchImpl = fetch } = {}) {
   const token = await hueAccessToken(cfg, { fetchImpl });
-  const res = await fetchImpl('https://api.meethue.com/route/clip/v2/resource/light', {
+  const res = await fetchImpl('https://api.meethue.com/route/clip/v2/resource/light', withTimeout({
     headers: { Authorization: `Bearer ${token}` },
-  });
+  }));
   if (!res.ok) throw new Error(`Hue ${res.status}`);
   const body = await res.json();
   return (body.data || []).map(l => ({ id: l.id, name: l.metadata?.name || l.id }));
@@ -213,11 +221,11 @@ export async function hueLights(cfg, { fetchImpl = fetch } = {}) {
 
 async function hueSet(cfg, rgb, { fetchImpl = fetch } = {}) {
   const token = await hueAccessToken(cfg, { fetchImpl });
-  const res = await fetchImpl(`https://api.meethue.com/route/clip/v2/resource/light/${cfg.hue.lightId}`, {
+  const res = await fetchImpl(`https://api.meethue.com/route/clip/v2/resource/light/${cfg.hue.lightId}`, withTimeout({
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ on: { on: true }, dimming: { brightness: Number(cfg.brightness) || 60 }, color: { xy: rgbToXy(rgb) } }),
-  });
+  }));
   if (!res.ok) throw new Error(`Hue set ${res.status}`);
   return true;
 }
